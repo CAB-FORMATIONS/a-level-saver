@@ -134,6 +134,12 @@ INTENTIONS POSSIBLES (par ordre de spécificité - préfère les intentions spé
   Exemples avec date existante: "je voudrais juillet au lieu de mars", "dates à Montpellier" (si sa date actuelle est ailleurs), "je ne peux pas en mars"
   Exemples d'indisponibilité: "je serai en voyage le jour de l'examen", "je pars le 15 et l'examen est le 24", "je ne serai pas disponible à cette date"
   ⚠️ CAS PIÈGE: "je n'ai pas reçu ma convocation et je suis en voyage à partir du 15" → Le vrai problème est l'ABSENCE, pas la convocation. primary_intent = REPORT_DATE
+  ⚠️ CAS IMPLICITE: Si le candidat demande une formation/session à un MOIS ou une DATE qui est APRÈS sa date d'examen actuelle → c'est REPORT_DATE (pas DEMANDE_CHANGEMENT_SESSION).
+  Mettre implicit_date_repositioning: true dans intent_context.
+  Exemples (Date examen actuelle = "2026-03-31"):
+  - "formation en mai" → REPORT_DATE + implicit_date_repositioning: true + requested_month: 5
+  - "disponible en septembre" → REPORT_DATE + implicit_date_repositioning: true + requested_month: 9
+  - "je voudrais les cours du soir en juin" → REPORT_DATE + implicit_date_repositioning: true + requested_month: 6
 - DEMANDE_DATE_PLUS_TOT: Veut une date PLUS TÔT que sa date actuelle
   Exemples: "date plus tôt", "plus proche", "plus rapide", "au plus vite", "avancer mon examen", "passer avant", "février au lieu de mars"
   ⚠️ DIFFÉRENT de REPORT_DATE: le candidat demande un mois/date AVANT sa date actuelle (pas après)
@@ -167,6 +173,7 @@ INTENTIONS POSSIBLES (par ordre de spécificité - préfère les intentions spé
   ⚠️ DIFFÉRENT de CONFIRMATION_SESSION: le candidat a DÉJÀ une session et veut en CHANGER
   ⚠️ DIFFÉRENT de QUESTION_SESSION: le candidat ne pose pas de question, il veut MODIFIER
   ⚠️ Indicateurs: session déjà assignée + demande de modification/changement
+  ⚠️ Si la formation demandée est APRÈS la date d'examen actuelle → REPORT_DATE (pas DEMANDE_CHANGEMENT_SESSION) + implicit_date_repositioning: true
 
   ⚠️ IMPORTANT - Détecter si c'est une PLAINTE (erreur CAB) ou un changement volontaire:
   - is_complaint: true si le candidat signale une ERREUR d'inscription (on lui a assigné la mauvaise session)
@@ -518,7 +525,8 @@ Réponds UNIQUEMENT en JSON valide:
             "wrong_dates": "YYYY-MM-DD - YYYY-MM-DD" | null,
             "wrong_dates_raw": "texte original" | null
         } | null,
-        "probation_status": "completed" | "pending" | "question" | null
+        "probation_status": "completed" | "pending" | "question" | null,
+        "implicit_date_repositioning": true | false
     }
 }
 

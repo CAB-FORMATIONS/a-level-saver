@@ -851,6 +851,14 @@ class TemplateEngine:
             'is_force_majeure_childcare': context.get('is_force_majeure_childcare', False),
             'is_force_majeure_other': context.get('is_force_majeure_other', False),
 
+            # Repositionnement implicite de date d'examen
+            'implicit_date_repositioning': context.get('implicit_date_repositioning', False),
+            'engagement_level': context.get('engagement_level', {}).get('level', -1),
+            'engagement_can_reposition': context.get('engagement_level', {}).get('can_reposition', False),
+            'engagement_needs_cma_message': context.get('engagement_level', {}).get('needs_cma_message', False),
+            'repositioning_month_name': context.get('repositioning_month_name', ''),
+            'repositioning_target_date': self._format_date(context.get('repositioning_target_date', '')) if context.get('repositioning_target_date') else '',
+
             # Context flags pour templates hybrides
             # AUTO-MAPPING: Génère automatiquement les flags depuis primary_intent et secondary_intents
             # Priorité: context_flags de la matrice > auto-mapping depuis intentions
@@ -2052,10 +2060,17 @@ class TemplateEngine:
         report_possible = False
         report_force_majeure = False
 
+        # Repositionnement implicite: le candidat demande une formation après sa date d'examen
+        implicit_repositioning = context.get('implicit_date_repositioning', False)
+        engagement_can_reposition = context.get('engagement_level', {}).get('can_reposition', False)
+
         # Seulement si l'intention est REPORT_DATE ET PAS de deadline_passed_reschedule
         # (car deadline_passed_reschedule a son propre traitement)
         if primary_intent == 'REPORT_DATE' and not deadline_passed_auto_reschedule:
-            if can_modify:
+            if implicit_repositioning and engagement_can_reposition:
+                # Repositionnement implicite avec engagement faible → forcer report_possible
+                report_possible = True
+            elif can_modify:
                 report_possible = True
             elif mentions_force_majeure:
                 report_force_majeure = True

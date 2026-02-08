@@ -1020,6 +1020,81 @@ def analyze_exam_date_situation(
         return result
 
 
+def classify_engagement_level(
+    evalbox_status: str,
+    date_cloture: str = None,
+    examt3p_data: Dict[str, Any] = None
+) -> Dict[str, Any]:
+    """
+    Classifie le niveau d'engagement CMA du candidat pour déterminer si un
+    repositionnement de date d'examen est possible.
+
+    Niveaux:
+    - 0: Pas de compte ExamT3P → 100% libre
+    - 1: Compte créé, pas de paiement → repositionnement possible
+    - 2: Dossier Synchronisé + clôture future → repositionnement possible
+    - 3: Dossier Synchronisé + clôture passée → inscrit, ne peut plus bouger
+    - 4: VALIDE CMA / Convoc CMA reçue → force majeure uniquement
+
+    Args:
+        evalbox_status: Statut Evalbox du candidat
+        date_cloture: Date de clôture d'inscription (YYYY-MM-DD)
+        examt3p_data: Données ExamT3P du candidat
+
+    Returns:
+        {level, can_reposition, needs_cma_message, description}
+    """
+    from src.utils.examt3p_crm_sync import is_date_past
+
+    examt3p_data = examt3p_data or {}
+    compte_existe = examt3p_data.get('compte_existe', False)
+    evalbox = (evalbox_status or '').strip()
+
+    # Level 4: Validé par la CMA
+    if evalbox in ['VALIDE CMA', 'Convoc CMA reçue']:
+        return {
+            'level': 4,
+            'can_reposition': False,
+            'needs_cma_message': False,
+            'description': 'Dossier validé par la CMA — modification impossible sans force majeure'
+        }
+
+    # Level 3: Dossier Synchronisé + clôture passée → inscrit
+    if evalbox == 'Dossier Synchronisé' and date_cloture and is_date_past(date_cloture):
+        return {
+            'level': 3,
+            'can_reposition': False,
+            'needs_cma_message': False,
+            'description': 'Dossier synchronisé et clôture passée — candidat inscrit, modification impossible'
+        }
+
+    # Level 2: Dossier Synchronisé + clôture future
+    if evalbox == 'Dossier Synchronisé':
+        return {
+            'level': 2,
+            'can_reposition': True,
+            'needs_cma_message': True,
+            'description': 'Dossier synchronisé, clôture pas encore passée — repositionnement possible avec message CMA'
+        }
+
+    # Level 1: Compte ExamT3P existe + statuts pré-paiement
+    if compte_existe and evalbox in ['Dossier crée', 'Dossier créé', 'Pret a payer', 'Pret a payer par cheque']:
+        return {
+            'level': 1,
+            'can_reposition': True,
+            'needs_cma_message': True,
+            'description': 'Compte ExamT3P créé, pas de paiement — repositionnement possible avec message CMA'
+        }
+
+    # Level 0: Pas de compte ExamT3P ou statut très précoce
+    return {
+        'level': 0,
+        'can_reposition': True,
+        'needs_cma_message': False,
+        'description': 'Pas de compte ExamT3P — repositionnement libre'
+    }
+
+
 def extract_departement_from_cma(cma_depot: str) -> Optional[str]:
     """
     Extrait le numéro de département depuis le champ CMA_de_depot.

@@ -69,6 +69,35 @@ Merci de nous confirmer si vous souhaitez <b>conserver</b> la date du {{date_exa
 {{/if}}
 <br>
 {{else}}
+{{#if implicit_date_repositioning}}
+<!-- Mode repositionnement implicite: candidat demande formation apres sa date d'examen -->
+<b>Concernant votre demande de formation en {{repositioning_month_name}}</b><br>
+Votre examen est actuellement prevu le <b>{{date_examen}}</b>. La formation doit se terminer <b>avant</b> cette date.<br>
+<br>
+{{#if engagement_can_reposition}}
+Pas de souci ! Nous pouvons repositionner votre date d'examen pour qu'elle soit compatible avec une formation en {{repositioning_month_name}}.{{#if engagement_needs_cma_message}} Nous nous chargeons de contacter la CMA pour effectuer le changement.{{/if}}<br>
+<br>
+{{#if repositioning_target_date}}
+Nous vous proposons l'examen du <b>{{repositioning_target_date}}</b>.<br>
+{{/if}}
+{{#if has_sessions_proposees}}
+<br>
+<b>Voici les sessions de formation disponibles{{#if session_preference}} ({{session_preference}}){{/if}} :</b><br>
+{{#each sessions_proposees}}{{#if this.is_first_of_exam}}<b>Examen du {{this.date_examen_formatted}}</b> &mdash; {{this.departement}} (cloture : {{this.cloture}})<br>{{/if}}&nbsp;&nbsp;&rarr; {{this.nom}} : du {{this.debut}} au {{this.fin}}<br>
+{{/each}}<br>
+Merci de nous confirmer votre choix de session pour que nous puissions finaliser votre inscription.<br>
+{{else}}{{#if repositioning_target_date}}
+Merci de nous confirmer cette date pour que nous puissions vous proposer les sessions de formation disponibles.<br>
+{{else}}{{#if has_next_dates}}
+<b>Prochaines dates d'examen disponibles :</b><br>
+{{#each next_dates}}&nbsp;&nbsp;&rarr; <b>{{this.date_examen_formatted}}</b> &mdash; {{this.Departement}} (cloture : {{this.date_cloture_formatted}})<br>
+{{/each}}<br>
+Merci de nous confirmer la nouvelle date souhaitee.<br>
+{{/if}}{{/if}}{{/if}}
+{{else}}
+Malheureusement, votre dossier est deja engage aupres de la CMA et ne peut plus etre modifie pour cette date. Veuillez nous contacter pour etudier les options possibles.<br>
+{{/if}}
+{{else}}
 <!-- Mode request: comportement standard -->
 <b>Concernant votre demande de changement de date</b><br>
 {{#if date_examen}}Votre date d'examen actuelle est le <b>{{date_examen}}</b>.{{/if}}{{#if date_cloture}} La date de cloture des inscriptions etant le {{date_cloture}}, un changement est encore possible.{{/if}}<br>
@@ -111,5 +140,6 @@ Il n'y a pas d'autre date disponible dans votre departement (CMA {{departement}}
 {{/if}}{{/if}}<br>
 Merci de nous confirmer la nouvelle date souhaitee pour que nous puissions effectuer le changement.<br>
 <i>Note : Un changement de date entraine egalement un changement de session de formation. Nous vous proposerons les nouvelles sessions disponibles une fois votre choix confirme.</i><br>
+{{/if}}
 {{/if}}
 {{/if}}

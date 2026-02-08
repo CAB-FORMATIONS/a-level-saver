@@ -81,6 +81,11 @@ class IntentParser:
         return bool(self._intent_context.get('wants_earlier_date'))
 
     @property
+    def implicit_date_repositioning(self) -> bool:
+        """True si le candidat demande implicitement un repositionnement de date (formation après examen)."""
+        return bool(self._intent_context.get('implicit_date_repositioning'))
+
+    @property
     def confirmed_new_exam_date(self) -> Optional[str]:
         """
         Date d'examen confirmée par le candidat (format YYYY-MM-DD).

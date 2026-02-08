@@ -1271,6 +1271,35 @@ La date d'examen dans Zoho CRM est dans le passé. Le workflow a été stoppé p
                 result['exam_date_confirmed_update'] = True
                 result['confirmed_exam_date'] = confirmed_date
 
+            # IMPLICIT DATE REPOSITIONING: Repositionnement automatique de la date d'examen
+            if date_examen_vtc_result.get('implicit_date_repositioning'):
+                engagement = date_examen_vtc_result.get('engagement_level', {})
+                engagement_level = engagement.get('level', -1)
+                can_reposition = engagement.get('can_reposition', False)
+
+                if can_reposition:
+                    # Utiliser la date cible chargée pendant l'enrichissement
+                    new_date_id = date_examen_vtc_result.get('repositioning_target_date_id')
+                    new_date_str = date_examen_vtc_result.get('repositioning_target_date_str', '')
+
+                    if new_date_id:
+                        logger.info(f"  📅 REPOSITIONNEMENT IMPLICITE: Date → {new_date_str} (ID: {new_date_id})")
+                        ai_updates['Date_examen_VTC'] = new_date_id
+                        result['implicit_date_repositioned'] = True
+                        result['repositioned_exam_date'] = new_date_str
+                    else:
+                        logger.warning(f"  ⚠️ REPOSITIONNEMENT IMPLICITE: Pas de date cible trouvée")
+
+                    # Note interne sera créée APRÈS le draft (STEP 7)
+                    result['repositioning_note_pending'] = True
+                    result['repositioning_note_data'] = {
+                        'engagement_level': engagement_level,
+                        'month_name': date_examen_vtc_result.get('requested_month_name', ''),
+                        'current_date': date_examen_vtc_result.get('date_examen_info', {}).get('Date_Examen', ''),
+                        'new_date_str': new_date_str,
+                        'description': engagement.get('description', ''),
+                    }
+
             # CONFIRMATION_SESSION: Si le candidat a confirmé sa session avec des dates
             if analysis_result.get('session_confirmed') and analysis_result.get('matched_session_id'):
                 matched_session_id = analysis_result['matched_session_id']
@@ -1437,6 +1466,29 @@ La date d'examen dans Zoho CRM est dans le passé. Le workflow a été stoppé p
                     result['draft_created'] = False
 
                 # Note: la note CRM consolidée est créée au STEP 4
+
+                # Note interne repositionnement implicite (après le draft)
+                if result.get('repositioning_note_pending') and auto_update_crm:
+                    note_data = result.get('repositioning_note_data', {})
+                    try:
+                        if note_data.get('engagement_level') == 0:
+                            note = (
+                                f"⚠️ REPOSITIONNEMENT DATE EXAMEN (auto)\n\n"
+                                f"Candidat demande formation en {note_data['month_name']}, examen actuel le {note_data['current_date']}.\n"
+                                f"Engagement: niveau 0 — Pas de compte ExamT3P.\n\n"
+                                f"👉 Date d'examen repositionnée automatiquement vers {note_data['new_date_str']}."
+                            )
+                        else:
+                            note = (
+                                f"⚠️ REPOSITIONNEMENT DATE EXAMEN\n\n"
+                                f"Candidat demande formation en {note_data['month_name']}, examen actuel le {note_data['current_date']}.\n"
+                                f"Engagement: niveau {note_data['engagement_level']} — {note_data['description']}\n\n"
+                                f"👉 Action: Envoyer message CMA pour changement de date vers {note_data['month_name']} ({note_data['new_date_str']})"
+                            )
+                        self.desk_client.add_ticket_comment(ticket_id, note, is_public=False)
+                        logger.info("  📝 Note repositionnement ajoutée (après draft)")
+                    except Exception as e:
+                        logger.warning(f"Erreur ajout note repositionnement: {e}")
             else:
                 logger.info("✅ DRAFT CREATION → Préparé (pas d'auto-create)")
 
@@ -3122,9 +3174,60 @@ L'équipe CAB Formations"""
                     date_examen_vtc_result['requested_dept_code'] = requested_dept_code  # Code département
                     date_examen_vtc_result['same_month_other_depts'] = search_result['same_month_other_depts']
                     date_examen_vtc_result['same_dept_other_months'] = search_result['same_dept_other_months']
+                    date_examen_vtc_result['exact_match_dates'] = search_result.get('exact_match_dates', [])
 
                     if search_result['no_date_for_requested_month']:
                         logger.info(f"  ⚠️ Pas de date en {search_result['requested_month_name']} sur {requested_location or requested_dept_code}")
+
+            # ================================================================
+            # ENRICHISSEMENT: Implicit Date Repositioning
+            # ================================================================
+            # Si le candidat demande une formation APRÈS sa date d'examen → repositionnement implicite
+            intent_for_repositioning = IntentParser(triage_result)
+            if intent_for_repositioning.implicit_date_repositioning and intent_for_repositioning.detected_intent == 'REPORT_DATE':
+                from src.utils.date_examen_vtc_helper import classify_engagement_level
+
+                evalbox_for_engagement = date_examen_vtc_result.get('evalbox_status', '')
+                cloture_for_engagement = date_examen_vtc_result.get('date_cloture', '')
+                engagement = classify_engagement_level(evalbox_for_engagement, cloture_for_engagement, examt3p_data)
+
+                date_examen_vtc_result['engagement_level'] = engagement
+                date_examen_vtc_result['implicit_date_repositioning'] = True
+
+                logger.info(f"  🔄 REPOSITIONNEMENT IMPLICITE: niveau {engagement['level']} — {engagement['description']}")
+
+                if not engagement['can_reposition']:
+                    # Niveaux 3-4: laisser le flow report_bloqué existant gérer
+                    date_examen_vtc_result['report_bloque_engagement'] = True
+                    logger.info(f"  ❌ Report bloqué (engagement niveau {engagement['level']})")
+                else:
+                    # Niveaux 0-2: Charger la date cible du mois demandé pour le département
+                    requested_month = intent_for_repositioning.requested_month
+                    current_dept = date_examen_vtc_result.get('current_departement') or date_examen_vtc_result.get('date_examen_info', {}).get('Departement')
+                    if requested_month and current_dept:
+                        from src.utils.date_examen_vtc_helper import get_next_exam_dates
+                        dept_dates = get_next_exam_dates(self.crm_client, str(current_dept), limit=20)
+                        # Filtrer pour le mois demandé
+                        from datetime import datetime as dt_repo
+                        target_dates = []
+                        for d in dept_dates:
+                            try:
+                                d_date = dt_repo.strptime(str(d.get('Date_Examen', ''))[:10], '%Y-%m-%d')
+                                if d_date.month == requested_month:
+                                    target_dates.append(d)
+                            except Exception:
+                                continue
+                        if target_dates:
+                            # Stocker la date cible pour CRM update (STEP 5) et sessions
+                            target = target_dates[0]
+                            date_examen_vtc_result['repositioning_target_date'] = target
+                            date_examen_vtc_result['repositioning_target_date_id'] = target.get('id')
+                            date_examen_vtc_result['repositioning_target_date_str'] = target.get('Date_Examen', '')
+                            logger.info(f"  ✅ Date cible repositionnement: {target.get('Date_Examen')} (dept {current_dept}, ID: {target.get('id')})")
+                        else:
+                            logger.warning(f"  ⚠️ Aucune date trouvée en mois {requested_month} pour département {current_dept}")
+                    else:
+                        logger.warning(f"  ⚠️ Impossible de charger la date cible: month={requested_month}, dept={current_dept}")
 
             # ================================================================
             # ENRICHISSEMENT: Dates alternatives si candidat demande date plus tôt
@@ -3347,8 +3450,13 @@ L'équipe CAB Formations"""
             current_date = date_examen_info.get('Date_Examen') if date_examen_info else None
             current_dept = date_examen_vtc_result.get('current_departement') or date_examen_vtc_result.get('date_examen_info', {}).get('Departement')
 
+            # CAS 2-IMPLICITE: Repositionnement implicite → sessions pour la date cible UNIQUEMENT
+            if date_examen_vtc_result.get('implicit_date_repositioning') and date_examen_vtc_result.get('repositioning_target_date'):
+                target_date = date_examen_vtc_result['repositioning_target_date']
+                exam_dates_for_session = [target_date]
+                logger.info(f"  📚 REPOSITIONNEMENT IMPLICITE: sessions pour date cible {target_date.get('Date_Examen')} uniquement")
             # CAS 2a: Date confirmée par le candidat → charger sessions pour CETTE date
-            if confirmed_exam_date_valid and confirmed_exam_date_info:
+            elif confirmed_exam_date_valid and confirmed_exam_date_info:
                 exam_dates_for_session = [confirmed_exam_date_info]
                 logger.info(f"  📚 DATE CONFIRMÉE: {confirmed_exam_date_info.get('Date_Examen')} → sessions pour cette date")
             # CAS 2b: Date demandée non disponible → afficher alternatives
@@ -3512,7 +3620,7 @@ L'équipe CAB Formations"""
                     threads=threads_data,
                     crm_client=self.crm_client,
                     triage_session_preference=triage_session_pref,
-                    allow_change=(detected_intent in ['CONFIRMATION_SESSION', 'DEMANDE_CHANGEMENT_SESSION']),
+                    allow_change=(detected_intent in ['CONFIRMATION_SESSION', 'DEMANDE_CHANGEMENT_SESSION'] or date_examen_vtc_result.get('implicit_date_repositioning')),
                     enriched_lookups=enriched_lookups
                 )
 
@@ -4615,6 +4723,12 @@ L'équipe CAB Formations"""
             # Uber
             'is_uber_20_deal': uber_result.get('is_uber_20_deal', False),
             'uber_case': uber_result.get('case', ''),
+
+            # Repositionnement implicite de date d'examen
+            'implicit_date_repositioning': date_examen_vtc_result.get('implicit_date_repositioning', False),
+            'engagement_level': date_examen_vtc_result.get('engagement_level', {}),
+            'repositioning_month_name': date_examen_vtc_result.get('requested_month_name', ''),
+            'repositioning_target_date': date_examen_vtc_result.get('repositioning_target_date_str', ''),
 
             # Dates deja communiquees (anti-repetition)
             'dates_already_communicated': analysis_result.get('dates_already_communicated', False),
