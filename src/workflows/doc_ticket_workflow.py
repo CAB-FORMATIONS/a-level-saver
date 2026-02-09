@@ -1089,7 +1089,7 @@ Le candidat a un ancien dossier dont les frais CMA (241€) ont déjà été ré
             date_passee_cases = [2, 7]
 
             # Intentions qui savent gérer une date passée → ne pas bloquer
-            intents_ok_date_passee = ['RESULTAT_EXAMEN']
+            intents_ok_date_passee = ['RESULTAT_EXAMEN', 'REPORT_DATE', 'FORCE_MAJEURE_REPORT']
 
             if date_case in date_passee_cases and detected_intent not in intents_ok_date_passee:
                 logger.warning(f"🚨 DATE D'EXAMEN PASSÉE DÉTECTÉE (CAS {date_case}) → Traitement manuel requis")
