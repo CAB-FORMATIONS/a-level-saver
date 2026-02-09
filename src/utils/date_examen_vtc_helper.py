@@ -806,7 +806,8 @@ def analyze_exam_date_situation(
         # GARDE-FOU: Si Refusé CMA mais 0 pièce REFUSÉ → faux refus (incohérence ExamT3P)
         # Les anciennes pièces refusées n'ont pas été supprimées sur ExamT3P
         # → Traiter comme Dossier Synchronisé (CAS 5) au lieu de CAS 3
-        if not pieces_details:
+        # ⚠️ Seulement si on a pu vérifier le compte (sinon on ne sait pas)
+        if not pieces_details and compte_examt3p_existe:
             logger.info("  ⚠️ Refusé CMA mais 0 pièce REFUSÉ → faux refus (incohérence ExamT3P)")
             result['faux_refus_cma'] = True
             result['case'] = 5

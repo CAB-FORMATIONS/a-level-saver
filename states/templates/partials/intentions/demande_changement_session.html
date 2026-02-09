@@ -67,6 +67,26 @@ Pour modifier votre session, merci de nous préciser vos disponibilités et nous
 <!-- CAS STANDARD: Changement volontaire de session                   -->
 <!-- ================================================================ -->
 <b>Concernant votre demande de changement de session</b><br>
+{{#if no_session_alternatives}}
+<!-- Aucune session disponible avant l'examen (ni proposées, ni alternatives) -->
+{{#if evalbox_valide_cma}}
+Votre dossier est <b>validé par la CMA</b> et votre examen est prévu le <b>{{date_examen_formatted}}</b>. À ce stade, il n'est plus possible de modifier votre session de formation car aucune session ne se termine avant votre date d'examen.<br>
+<br>
+{{#if session_choisie}}
+Votre session actuelle reste : <b>{{session_choisie}}</b>{{#if session_date_debut}} (du {{session_date_debut}} au {{session_date_fin}}){{/if}}.<br>
+{{/if}}
+{{else}}
+{{#if evalbox_convoc_recue}}
+Votre <b>convocation a été reçue</b> pour l'examen du <b>{{date_examen_formatted}}</b>. À ce stade, il n'est plus possible de modifier votre session de formation car aucune session ne se termine avant votre date d'examen.<br>
+<br>
+{{#if session_choisie}}
+Votre session actuelle reste : <b>{{session_choisie}}</b>{{#if session_date_debut}} (du {{session_date_debut}} au {{session_date_fin}}){{/if}}.<br>
+{{/if}}
+{{else}}
+Malheureusement, aucune session de formation ne se termine avant votre date d'examen du <b>{{date_examen_formatted}}</b>. Nous vous invitons à nous contacter pour étudier les options possibles.<br>
+{{/if}}
+{{/if}}
+{{else}}
 {{#if has_date_range_request}}
 <!-- CAS 1: Dates spécifiques demandées - Matching intelligent -->
 {{#if is_exact_match}}
@@ -149,6 +169,7 @@ Pour choisir votre session, merci de nous indiquer :<br>
 <li>Vos dates de disponibilité</li>
 <li>Préférence pour les cours du <b>jour</b> ou du <b>soir</b></li>
 </ul>
+{{/if}}
 {{/if}}
 {{/if}}
 {{/if}}

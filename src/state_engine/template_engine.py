@@ -726,7 +726,8 @@ class TemplateEngine:
 
             # Session - utilise les lookups enrichis (v2.2) ou fallback sur legacy
             # Le legacy fournit la logique (quelles sessions proposer), le State Engine formate l'affichage
-            'session_choisie': enriched_lookups.get('session_name') or self._format_session(deal_data.get('Session')),
+            # Afficher un nom nettoyé (ex: "Cours du jour") plutôt que le nom CRM brut (ex: "cdj-montreuil- thu1 - ...")
+            'session_choisie': self._clean_session_display_name(enriched_lookups) or self._format_session(deal_data.get('Session')),
             'session_message': context.get('session_data', {}).get('message', ''),
             # session_preference: priorité à intent_context (détecté par triage) puis session_data (legacy)
             'session_preference': self._get_session_preference(context),
@@ -845,6 +846,16 @@ class TemplateEngine:
             'date_examen_vide': not date_examen,
             'session_vide': not deal_data.get('Session'),
             'has_sessions_proposees': bool(self._flatten_session_options_filtered(context)),
+            # Flag: aucune alternative session (ni proposées, ni closest before/after)
+            'no_session_alternatives': (
+                not bool(self._flatten_session_options_filtered(context))
+                and not context.get('closest_session_before')
+                and not context.get('closest_session_after')
+                and not context.get('closest_session_before_jour')
+                and not context.get('closest_session_after_jour')
+                and not context.get('closest_session_before_soir')
+                and not context.get('closest_session_after_soir')
+            ),
 
             # Force majeure (pour les templates empathiques)
             'mentions_force_majeure': context.get('mentions_force_majeure', False),
@@ -1529,6 +1540,11 @@ class TemplateEngine:
         is_uber_20 = context.get('is_uber_20_deal', False)
         uber_case = context.get('uber_case', '')
 
+        # Faux Refusé CMA: traiter comme Dossier Synchronisé pour les actions
+        if context.get('faux_refus_cma') and evalbox == 'Refusé CMA':
+            evalbox = 'Dossier Synchronisé'
+            logger.info("📋 Faux Refusé CMA → evalbox overridé à 'Dossier Synchronisé' pour actions")
+
         # EXAM_INCLUS = Oui → CAB gère (compte, docs, paiement)
         deal_data = context.get('deal_data', {})
         cab_paye_examen = deal_data.get('EXAM_INCLUS', '') == 'Oui'
@@ -1949,6 +1965,28 @@ class TemplateEngine:
             lines.append(line)
 
         return f"<ul>{''.join(lines)}</ul>"
+
+    def _clean_session_display_name(self, enriched_lookups: Dict[str, Any]) -> str:
+        """
+        Retourne un nom de session nettoyé pour affichage.
+        Ex: "Cours du jour" ou "Cours du soir" au lieu du nom CRM brut
+        qui contient des termes internes (CDJ, Montreuil, etc.).
+        """
+        session_name = enriched_lookups.get('session_name')
+        if not session_name:
+            return ''
+        session_type = enriched_lookups.get('session_type', '')
+        if session_type == 'jour':
+            return 'Cours du jour'
+        elif session_type == 'soir':
+            return 'Cours du soir'
+        # Fallback: essayer de déduire du nom brut
+        name_lower = session_name.lower()
+        if 'cdj' in name_lower or 'jour' in name_lower:
+            return 'Cours du jour'
+        elif 'cds' in name_lower or 'soir' in name_lower:
+            return 'Cours du soir'
+        return 'Session de formation'
 
     def _format_session(self, session: Any) -> str:
         """Formate les infos de session."""
