@@ -47,7 +47,7 @@ CONTEXTE MÉTIER:
 
 DÉPARTEMENTS DISPONIBLES:
 - DOC: Questions sur formation, examen, dates, sessions, identifiants ExamT3P (département par défaut pour candidats Uber 20€)
-- Refus CMA: Si la CMA a REFUSÉ un document OU si le candidat nous TRANSMET des documents (pièces jointes, justificatifs)
+- Refus CMA: UNIQUEMENT si le candidat nous TRANSMET des documents (pièces jointes, justificatifs) à uploader sur ExamT3P. ⚠️ Si le candidat POSE UNE QUESTION sur son dossier refusé → GO (rester dans DOC)
 - Contact: Demandes commerciales, autres formations (NON Uber 20€), RGPD
 - Comptabilité:
   * Candidat DEMANDE EXPLICITEMENT sa facture pour la formation/offre souscrite
@@ -67,13 +67,13 @@ RÈGLES DE TRIAGE:
      Ces prospects doivent être poussés à finaliser leur paiement des 20€
      On répond à leurs questions et on les encourage à convertir
 
-3. **ROUTE vers Refus CMA** si:
-   - Le candidat signale que la CMA a REFUSÉ son dossier
-   - OU deal_data.Evalbox == "Refusé CMA" ou "Documents manquants"
-   - OU le candidat nous ENVOIE des documents en pièce jointe (intention TRANSMET_DOCUMENTS)
+3. **ROUTE vers Refus CMA** UNIQUEMENT si le candidat ENVOIE des documents:
+   - Le candidat nous ENVOIE des documents en pièce jointe (intention TRANSMET_DOCUMENTS)
      → On doit uploader ces documents sur son compte ExamT3P manuellement
    ⚠️ EXCEPTION: Si Date_Dossier_reçu est VIDE → GO + TRANSMET_DOCUMENTS (pas de route)
      → C'est un envoi initial de documents, on traite dans DOC
+   ⚠️ Si Evalbox == "Refusé CMA" MAIS le candidat pose une QUESTION (statut dossier, processus, etc.)
+     → GO (rester dans DOC) - le workflow traitera la question normalement
 
 4. **ROUTE vers Contact** si:
    - Demande d'information sur une formation NON Uber (formation classique, CACES, etc.)
@@ -86,7 +86,8 @@ IMPORTANT - DISTINCTION DOCUMENTS:
 - "J'ai téléchargé mes documents SUR EXAMT3P" = GO (ENVOIE_DOCUMENTS - il l'a fait lui-même)
 - "Voici mon passeport en pièce jointe" = ROUTE Refus CMA (TRANSMET_DOCUMENTS - on doit uploader pour lui)
   ⚠️ SAUF si Date_Dossier_reçu est VIDE → GO (envoi initial, on gère dans DOC)
-- "Mon document a été refusé" = ROUTE Refus CMA (problème de refus CMA)
+- "Mon document a été refusé, que dois-je faire ?" = GO (STATUT_DOSSIER - question sur son dossier, on traite dans DOC)
+- "Mon document a été refusé, voici le nouveau en PJ" = ROUTE Refus CMA (TRANSMET_DOCUMENTS - envoi correction)
 - Comprends le CONTEXTE, pas juste les mots-clés
 - **PROSPECT UBER 20€ = TOUJOURS DOC** pour les pousser à payer et avancer
 - **Date_Dossier_reçu VIDE = TOUJOURS DOC** même pour TRANSMET_DOCUMENTS (envoi initial)
