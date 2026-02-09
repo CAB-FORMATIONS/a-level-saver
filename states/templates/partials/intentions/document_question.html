@@ -7,8 +7,38 @@
 Vous avez déjà transmis votre dossier et certaines pièces ont été refusées par la CMA. Pour voir les motifs de refus et corriger vos documents, connectez-vous sur <a href="https://www.exament3p.fr">exament3p.fr</a>.<br>
 {{/unless}}
 {{else}}
+{{#if evalbox_valide_cma}}
+<!-- Dossier validé CMA → documents déjà acceptés -->
+<b>Concernant vos documents</b><br>
+Vos documents ont été vérifiés et <b>validés par la CMA</b>. Votre dossier est complet, aucune action n'est requise de votre part.<br>
+{{else}}
+{{#if evalbox_convoc_recue}}
+<!-- Convocation reçue → documents forcément validés -->
+<b>Concernant vos documents</b><br>
+Vos documents ont été vérifiés et <b>validés par la CMA</b>. Votre dossier est complet, aucune action n'est requise de votre part.<br>
+{{else}}
+{{#if paiement_effectue}}
+<!-- Dossier Synchronisé → docs transmis, en cours de vérification -->
+<b>Concernant vos documents</b><br>
+Vos documents ont bien été transmis à la CMA et sont <b>en cours de vérification</b>. Aucune action n'est requise de votre part pour le moment.<br>
+{{else}}
+{{#if evalbox_pret_a_payer}}
+<!-- Prêt à payer → docs déjà uploadés -->
+<b>Concernant vos documents</b><br>
+Vos documents sont bien enregistrés sur votre compte ExamT3P. Ils seront transmis à la CMA après le paiement des frais d'inscription.<br>
+{{else}}
+{{#if cab_paye_examen}}
+<!-- CAB gère les documents (Uber CAS B) -->
+<b>Concernant vos documents</b><br>
+Nous avons bien reçu vos documents. Nous créons votre compte ExamT3P et téléchargeons vos pièces pour vous.<br>
+{{else}}
 <b>Concernant votre question sur les documents</b><br>
 Voici les documents acceptés pour votre inscription à l'examen VTC :<br>
 {{> partials/common/liste_documents_requis}}
 <i>Conseil : Vérifiez que vos scans sont lisibles et que les quatre coins du document sont visibles.</i><br>
+{{/if}}
+{{/if}}
+{{/if}}
+{{/if}}
+{{/if}}
 {{/if}}
