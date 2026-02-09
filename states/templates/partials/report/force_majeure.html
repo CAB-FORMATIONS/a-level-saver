@@ -1,4 +1,6 @@
 <!-- Partial: REPORT FORCE MAJEURE - Demande de justificatif -->
+{{#if date_examen_is_past}}
+<!-- Date PASSÉE → vrai absence, demande justificatif force majeure -->
 <b>Votre demande de report est bien prise en compte.</b><br>
 <br>
 Pour que votre demande soit étudiée, merci de nous transmettre par email à <b>doc@cab-formations.fr</b> un justificatif :<br>
@@ -14,3 +16,16 @@ Pour que votre demande soit étudiée, merci de nous transmettre par email à <b
 Dès réception, nous transmettrons votre demande à la CMA pour étude. <b>C'est la CMA qui statue sur l'acceptation ou le refus.</b><br>
 En cas de refus, des frais de réinscription de 241€ seront à prévoir.<br>
 <br>
+{{else}}
+<!-- Date FUTURE → le candidat se trompe, rassurer avec la vraie date -->
+<b>Concernant votre examen</b><br>
+Votre examen est prevu le <b>{{date_examen_formatted}}</b> et n'a pas encore eu lieu.<br>
+{{#if evalbox_valide_cma}}
+Votre dossier est <b>valide par la CMA</b>. Vous recevrez votre convocation officielle environ <b>10 jours avant l'examen</b>, directement par email de la CMA.<br>
+{{/if}}
+{{#if evalbox_dossier_synchronise}}
+Votre dossier est en cours de verification par la CMA. Vous recevrez votre convocation une fois le dossier valide, environ <b>10 jours avant l'examen</b>.<br>
+{{/if}}
+<br>
+<b>Pensez a verifier regulierement vos spams</b> car il arrive que les emails de la CMA s'y retrouvent.<br>
+{{/if}}

@@ -9,9 +9,10 @@ Votre dossier est <b>complet</b> et en attente de paiement. Lors du reglement de
 <b>Aucune action n'est requise de votre part.</b> Nous vous tiendrons informe de la suite du processus.<br>
 {{else}}
 {{#if report_bloque}}
-<!-- Clôture passée - options limitées -->
+{{#if date_examen_is_past}}
+<!-- GARDE-FOU: Date PASSÉE → vrai absence, options force majeure -->
 <b>Concernant votre demande de changement de date</b><br>
-Votre examen est prevu le <b>{{date_examen}}</b>. Malheureusement, la date limite de modification des inscriptions est passee.<br>
+Votre examen etait prevu le <b>{{date_examen}}</b>. La date limite de modification des inscriptions est passee.<br>
 <br>
 {{#if mentions_force_majeure}}
 <b>Demande de report pour force majeure</b><br>
@@ -23,18 +24,31 @@ Pour que votre demande soit etudiee par la CMA, merci de nous transmettre un jus
 <b>C'est la CMA qui statue sur l'acceptation ou le refus des demandes de report.</b> En cas de refus, des frais de reinscription de 241€ seront a prevoir.<br>
 {{else}}
 <b>Vos options :</b><br>
-<b>1. Vous presenter a l'examen</b><br>
-Si vous etes disponible le <b>{{date_examen}}</b>, nous vous encourageons a vous presenter. Vous recevrez votre convocation environ 10 jours avant l'examen.<br>
-<b>2. Demander un report (avec justificatif)</b><br>
-Si vous ne pouvez vraiment pas vous presenter, un report est possible uniquement avec un justificatif de force majeure (certificat medical, deces d'un proche, etc.). Envoyez votre justificatif a <b>doc@cab-formations.fr</b>.<br>
-<b>3. Ne pas se presenter (absence)</b><br>
-Si vous etes absent sans justificatif valide, votre inscription sera perdue et des frais de reinscription de 241€ seront necessaires pour une nouvelle date.<br>
+<b>1. Demander un report (avec justificatif)</b><br>
+Un report est possible uniquement avec un justificatif de force majeure (certificat medical, deces d'un proche, etc.). Envoyez votre justificatif a <b>doc@cab-formations.fr</b>.<br>
+<b>2. Se reinscrire</b><br>
+Sans justificatif valide, des frais de reinscription de 241€ seront necessaires pour une nouvelle date.<br>
 {{#if uber_20}}<b>Rappel :</b> Dans le cadre de l'offre Uber, les frais de votre premiere inscription ont ete pris en charge. Cette offre n'est valable qu'<b>une seule fois</b>.{{/if}}
 {{/if}}<br>
 {{#if has_next_dates}}
 <b>Prochaines dates d'examen disponibles (si report ou reinscription) :</b><br>
 {{#each next_dates}}&nbsp;&nbsp;→ <b>{{this.date_examen_formatted}}</b> (CMA {{this.Departement}}) - cloture le {{this.date_cloture_formatted}}<br>
 {{/each}}
+{{/if}}
+{{else}}
+<!-- GARDE-FOU: Date FUTURE → pas de force majeure, rassurer avec la vraie date -->
+<b>Concernant votre examen</b><br>
+Votre examen est prevu le <b>{{date_examen_formatted}}</b> et n'a pas encore eu lieu.<br>
+{{#if evalbox_valide_cma}}
+Votre dossier est <b>valide par la CMA</b>. Vous recevrez votre convocation officielle environ <b>10 jours avant l'examen</b>, directement par email de la CMA.<br>
+{{/if}}
+{{#if evalbox_dossier_synchronise}}
+Votre dossier est en cours de verification par la CMA. Vous recevrez votre convocation une fois le dossier valide, environ <b>10 jours avant l'examen</b>.<br>
+{{/if}}
+<br>
+<b>Pensez a verifier regulierement vos spams</b> car il arrive que les emails de la CMA s'y retrouvent.<br>
+<br>
+La date limite de modification des inscriptions etant passee, un changement de date n'est possible qu'avec un <b>justificatif de force majeure</b> (certificat medical, etc.). Si vous souhaitez neanmoins modifier votre date, envoyez votre justificatif a <b>doc@cab-formations.fr</b>.<br>
 {{/if}}
 {{else}}
 {{#if report_possible}}

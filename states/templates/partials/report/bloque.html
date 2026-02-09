@@ -1,4 +1,6 @@
 <!-- Partial: REPORT BLOQUE (VALIDE CMA + clôture passée) -->
+{{#if date_examen_is_past}}
+<!-- Date PASSÉE → vrai absence, options force majeure ou réinscription -->
 <b>Concernant votre demande de report</b><br>
 <br>
 Votre inscription à l'examen VTC a été validée par la CMA et les inscriptions sont maintenant clôturées.<br>
@@ -14,3 +16,16 @@ Pour demander un report, merci de nous transmettre votre justificatif par email 
 <br>
 Nous soumettrons ensuite votre demande à la CMA. Sans justificatif valide, des frais de réinscription de 241€ seront à prévoir.<br>
 <br>
+{{else}}
+<!-- Date FUTURE → le candidat se trompe, rassurer avec la vraie date -->
+<b>Concernant votre examen</b><br>
+Votre examen est prevu le <b>{{date_examen_formatted}}</b> et n'a pas encore eu lieu.<br>
+{{#if evalbox_valide_cma}}
+Votre dossier est <b>valide par la CMA</b>. Vous recevrez votre convocation officielle environ <b>10 jours avant l'examen</b>, directement par email de la CMA.<br>
+{{/if}}
+{{#if evalbox_dossier_synchronise}}
+Votre dossier est en cours de verification par la CMA. Vous recevrez votre convocation une fois le dossier valide, environ <b>10 jours avant l'examen</b>.<br>
+{{/if}}
+<br>
+<b>Pensez a verifier regulierement vos spams</b> car il arrive que les emails de la CMA s'y retrouvent.<br>
+{{/if}}
