@@ -210,7 +210,8 @@ Fusionne les sections, ajoute des transitions naturelles, garde toutes les infor
 Tu DOIS obligatoirement conserver ces dates exactes dans ta réponse : {dates_str}
 Ne reformule PAS les dates, garde-les au format DD/MM/YYYY.
 Tu DOIS conserver les horaires EXACTS de formation : 8h30-17h30 pour les cours du jour, 18h-22h pour les cours du soir.
-NE JAMAIS modifier ces horaires (pas de "8h30 à 16h", pas de "9h-17h", etc.)."""
+NE JAMAIS modifier ces horaires (pas de "8h30 à 16h", pas de "9h-17h", etc.).
+NE JAMAIS utiliser de dates provenant du MESSAGE DU CANDIDAT. Les SEULES dates autorisées sont : {dates_str}"""
                 logger.info(f"🔄 Retry humanization (attempt {attempt + 1}/{max_attempts}) - dates requises: {dates_str}")
 
             response = client.messages.create(
@@ -286,6 +287,11 @@ def _validate_humanized_response(original: str, humanized: str) -> Dict[str, Any
     missing_dates = original_dates - humanized_dates
     if missing_dates:
         issues.append(f"Dates manquantes: {missing_dates}")
+
+    # Vérifier les dates INVENTÉES (dans humanized mais pas dans original)
+    invented_dates = humanized_dates - original_dates
+    if invented_dates:
+        issues.append(f"Dates inventées (hallucination): {invented_dates}")
 
     # URLs et emails : on laisse l'humanizer décider de les garder ou non
     # car il peut juger que certains liens sont redondants en contexte
