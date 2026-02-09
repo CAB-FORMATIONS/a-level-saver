@@ -831,6 +831,11 @@ class TemplateEngine:
             'pieces_refusees_details': context.get('pieces_refusees_details', []),
             'has_pieces_refusees': context.get('has_pieces_refusees', False) or bool(context.get('pieces_refusees_details', [])),
 
+            # CAS 3 Refusé CMA: date passée + prochaine date (report automatique)
+            'date_examen_is_past': self._is_date_passed(date_examen) if date_examen else False,
+            'next_exam_date_cas3': self._get_next_exam_date_cas3(context),
+            'next_date_cloture_cas3': self._get_next_cloture_cas3(context),
+
             # Prospect (alias pour templates)
             'is_prospect': context.get('is_prospect', False) or context.get('is_uber_prospect', False),
             # Afficher rappel prospect seulement si PAS uber_prospect (évite doublon)
@@ -1903,6 +1908,26 @@ class TemplateEngine:
             return date_obj < datetime.now().date()
         except Exception:
             return False
+
+    def _get_next_exam_date_cas3(self, context: Dict) -> str:
+        """Retourne la prochaine date d'examen formatée pour CAS 3 (Refusé CMA)."""
+        if context.get('date_case') != 3:
+            return ''
+        next_dates = context.get('next_dates', [])
+        if next_dates and len(next_dates) > 0:
+            date_str = next_dates[0].get('Date_Examen', '')
+            return self._format_date(date_str)
+        return ''
+
+    def _get_next_cloture_cas3(self, context: Dict) -> str:
+        """Retourne la date de clôture de la prochaine session pour CAS 3 (Refusé CMA)."""
+        if context.get('date_case') != 3:
+            return ''
+        next_dates = context.get('next_dates', [])
+        if next_dates and len(next_dates) > 0:
+            cloture = next_dates[0].get('Date_Cloture_Inscription', '')
+            return self._format_date(cloture)
+        return ''
 
     def _format_dates_list(self, dates: List[Dict]) -> str:
         """Formate une liste de dates d'examen en HTML."""

@@ -1,6 +1,11 @@
 <!-- Partial: Statut REFUSÉ CMA -->
-<b style="color: #c0392b;">Attention :</b> Certaines pièces de votre dossier ont été <b>refusées</b> par la CMA.<br>
-Vous devez les corriger et les renvoyer avant la date de clôture pour maintenir votre inscription.<br>
+<b style="color: #c0392b;">Attention :</b> Certaines pièces de votre dossier ont été <b>refusées</b> par la CMA (Chambre des Métiers et de l'Artisanat).<br>
+{{#if date_examen_is_past}}
+C'est pour cette raison que vous n'avez pas reçu de convocation pour l'examen initialement prévu le <b>{{date_examen_formatted}}</b>.<br>
+{{#if next_exam_date_cas3}}
+Votre inscription a été <b>automatiquement reportée</b> sur la prochaine session d'examen du <b>{{next_exam_date_cas3}}</b>.<br>
+{{/if}}
+{{/if}}
 <br>
 {{#if has_pieces_refusees}}
 <b>Documents à corriger :</b><br>
@@ -10,4 +15,9 @@ Vous devez les corriger et les renvoyer avant la date de clôture pour maintenir
 &nbsp;&nbsp;→ Solution : {{this.solution}}<br>
 {{/each}}
 <br>
+{{/if}}
+{{#if next_date_cloture_cas3}}
+<b style="color: #c0392b;">Important :</b> Corrigez ces documents <b>avant le {{next_date_cloture_cas3}}</b> (date de clôture des inscriptions) pour maintenir votre inscription.<br>
+{{else}}
+Vous devez les corriger et les renvoyer <b>dans les plus brefs délais</b> pour maintenir votre inscription.<br>
 {{/if}}
