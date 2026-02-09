@@ -1070,7 +1070,10 @@ Le candidat a un ancien dossier dont les frais CMA (241€) ont déjà été ré
             # NOTE: CAS 8 = clôture passée mais examen FUTUR → on peut traiter automatiquement
             date_passee_cases = [2, 7]
 
-            if date_case in date_passee_cases:
+            # Intentions qui savent gérer une date passée → ne pas bloquer
+            intents_ok_date_passee = ['RESULTAT_EXAMEN']
+
+            if date_case in date_passee_cases and detected_intent not in intents_ok_date_passee:
                 logger.warning(f"🚨 DATE D'EXAMEN PASSÉE DÉTECTÉE (CAS {date_case}) → Traitement manuel requis")
 
                 # Récupérer les infos pour la note
@@ -4685,6 +4688,10 @@ L'équipe CAB Formations"""
             'new_exam_date_cloture': date_examen_vtc_result.get('new_exam_date_cloture'),
             'original_exam_date': date_examen_vtc_result.get('original_exam_date'),
             'original_date_cloture': date_examen_vtc_result.get('original_date_cloture'),
+
+            # Examen passé (CAS 7: date passée + dossier validé)
+            'examen_passe': date_examen_vtc_result.get('case') == 7,
+            'examen_pas_encore_passe': date_examen_vtc_result.get('case') not in [2, 7] if date_examen_vtc_result.get('case') else True,
 
             # Force majeure (examen manqué)
             'force_majeure_possible': date_examen_vtc_result.get('force_majeure_possible', True),  # Default True pour backward compat
