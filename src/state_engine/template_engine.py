@@ -1249,6 +1249,19 @@ class TemplateEngine:
                 result['preference_horaire_text'] = ''  # Effacer pour ne pas afficher "(cours du jour)" dans le header
                 logger.info(f"🔄 Session preference fallback: '{session_pref}' demandé, '{alt_type}' proposé comme alternative")
 
+        # ================================================================
+        # GARDE-FOU: Pièces refusées → toujours afficher statut + action corriger
+        # Même si la matrice désactive show_statut_section (ex: DEMANDE_DATE_PLUS_TOT)
+        # ================================================================
+        if result.get('has_pieces_refusees') and result.get('pieces_refusees_details'):
+            if not result.get('show_statut_section'):
+                result['show_statut_section'] = True
+                logger.info("📋 show_statut_section=True (FORCÉ: pièces refusées CMA)")
+            if not result.get('action_corriger_documents'):
+                result['action_corriger_documents'] = True
+                result['has_required_action'] = True
+                logger.info("📋 action_corriger_documents=True (FORCÉ: pièces refusées CMA)")
+
         return result
 
     # Mapping state → flag pour les états (utilisés par response_master.html)

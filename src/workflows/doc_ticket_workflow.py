@@ -18,6 +18,7 @@ Gates:
 - If data missing → escalate, end workflow
 """
 import logging
+import os
 import sys
 from pathlib import Path
 from typing import Dict, Optional, List, Any
@@ -315,7 +316,7 @@ class DOCTicketWorkflow:
             # STEP 0: VÉRIFIER SI UN BROUILLON EXISTE DÉJÀ
             # ================================================================
             logger.info("\n0️⃣  VÉRIFICATION BROUILLON EXISTANT...")
-            if self.desk_client.has_existing_draft(ticket_id):
+            if not os.environ.get('SKIP_DRAFT_CHECK') and self.desk_client.has_existing_draft(ticket_id):
                 logger.warning("⚠️  BROUILLON EXISTANT DÉTECTÉ → SKIP WORKFLOW")
                 result['workflow_stage'] = 'SKIPPED_DRAFT_EXISTS'
                 result['success'] = True
@@ -3230,6 +3231,31 @@ L'équipe CAB Formations"""
                         logger.warning(f"  ⚠️ Impossible de charger la date cible: month={requested_month}, dept={current_dept}")
 
             # ================================================================
+            # GARDE-FOU: REPORT_DATE → DEMANDE_DATE_PLUS_TOT si mois demandé < date actuelle
+            # ================================================================
+            # Le triage LLM confond parfois REPORT_DATE et DEMANDE_DATE_PLUS_TOT.
+            # Si le candidat demande un mois AVANT sa date d'examen actuelle,
+            # c'est une demande de date plus tôt, pas un report.
+            _triage_intent = triage_result.get('detected_intent', '')
+            if _triage_intent == 'REPORT_DATE':
+                _intent_ctx = triage_result.get('intent_context', {})
+                _requested_month = _intent_ctx.get('requested_month')
+                _current_date_str = date_examen_vtc_result.get('date_examen_info', {}).get('Date_Examen', '') if date_examen_vtc_result.get('date_examen_info') else ''
+                if _requested_month and _current_date_str:
+                    try:
+                        from datetime import datetime as _dt
+                        _current_date = _dt.strptime(str(_current_date_str)[:10], '%Y-%m-%d')
+                        _requested_month_int = int(_requested_month)
+                        if 1 <= _requested_month_int <= 12 and _requested_month_int < _current_date.month:
+                            logger.info(f"  🔄 GARDE-FOU: REPORT_DATE → DEMANDE_DATE_PLUS_TOT (mois demandé {_requested_month_int} < date actuelle {_current_date.month}/{_current_date.year})")
+                            triage_result['detected_intent'] = 'DEMANDE_DATE_PLUS_TOT'
+                            triage_result['primary_intent'] = 'DEMANDE_DATE_PLUS_TOT'
+                            _intent_ctx['wants_earlier_date'] = True
+                            triage_result['intent_context'] = _intent_ctx
+                    except (ValueError, TypeError) as e:
+                        logger.debug(f"  ⚠️ Garde-fou REPORT_DATE: erreur parsing date: {e}")
+
+            # ================================================================
             # ENRICHISSEMENT: Dates alternatives si candidat demande date plus tôt
             # ================================================================
             # Si le candidat demande explicitement une date plus proche
@@ -3239,7 +3265,7 @@ L'équipe CAB Formations"""
             wants_earlier_date = intent.wants_earlier_date
             is_early_date_intent = intent.is_early_date_intent
             can_choose_other_dept = date_examen_vtc_result.get('can_choose_other_department', False)
-            current_dept = date_examen_vtc_result.get('departement')
+            current_dept = date_examen_vtc_result.get('current_departement') or date_examen_vtc_result.get('departement')
 
             # Déclencher si intention explicite OU flag wants_earlier_date
             if (is_early_date_intent or wants_earlier_date) and current_dept:
@@ -4621,6 +4647,9 @@ L'équipe CAB Formations"""
             'can_choose_other_department': date_examen_vtc_result.get('can_choose_other_department', False),
             'alternative_department_dates': date_examen_vtc_result.get('alternative_department_dates', []),
             'cross_department_data': date_examen_vtc_result.get('cross_department_data', {}),
+            'has_earlier_options': date_examen_vtc_result.get('has_earlier_options', False),
+            'no_earlier_dates_available': date_examen_vtc_result.get('no_earlier_dates_available', False),
+            'suppress_next_dates': date_examen_vtc_result.get('suppress_next_dates', False),
             'deadline_passed_reschedule': date_examen_vtc_result.get('deadline_passed_reschedule', False),
             'new_exam_date': date_examen_vtc_result.get('new_exam_date'),
             'new_exam_date_cloture': date_examen_vtc_result.get('new_exam_date_cloture'),
