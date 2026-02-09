@@ -1,51 +1,63 @@
 <!-- Partial: Réponse à l'intention QUESTION_PROCESSUS -->
-<!-- Contextuel: n'affiche les 8 étapes que pour les candidats en début de parcours -->
-{{#if evalbox_pret_a_payer}}
-<!-- Candidat avancé: Prêt à payer - pas besoin des 8 étapes -->
-<b>Votre processus d'inscription</b><br>
-Votre dossier est complet et nous procédons au paiement des frais d'inscription{{#if is_uber_20_deal}} (241€ pris en charge dans le cadre du partenariat Uber){{/if}}.<br>
+<!-- Checklist contextuelle avec valeurs actuelles du dossier -->
+<b>Suivi de votre inscription</b><br>
 <br>
-<b>Prochaine étape :</b> Une fois le paiement validé, votre dossier sera transmis à la CMA pour vérification. Vous recevrez ensuite votre convocation environ 10 jours avant l'examen.<br>
+<!-- Étape 1: Date d'examen -->
+{{#if date_examen_formatted}}
+✅ <b>Date d'examen</b> : {{date_examen_formatted}}<br>
 {{else}}
-{{#if evalbox_dossier_synchronise}}
-<!-- Candidat avancé: Dossier Synchronisé - en attente validation CMA -->
-<b>Votre processus d'inscription</b><br>
-Votre dossier a été transmis à la CMA et est en cours de vérification.<br>
-<br>
-<b>Prochaine étape :</b> Une fois validé par la CMA, vous recevrez votre convocation environ 10 jours avant l'examen.<br>
+⏳ <b>Date d'examen</b> : à choisir<br>
+{{/if}}
+<!-- Étape 2: Session de formation -->
+{{#if session_assigned}}
+✅ <b>Session de formation</b> : {{session_type_display}} du {{session_date_debut}} au {{session_date_fin}}<br>
+{{else}}
+⏳ <b>Session de formation</b> : à choisir<br>
+{{/if}}
+<!-- Étape 3: Constitution du dossier -->
+{{#if dossier_constitue}}
+✅ <b>Constitution du dossier</b><br>
+{{else}}
+🔄 <b>Constitution du dossier</b> : en cours côté CAB Formations<br>
+{{/if}}
+<!-- Étape 4: Paiement des frais d'inscription -->
+{{#if paiement_effectue}}
+✅ <b>Paiement des frais d'inscription</b>{{#if is_uber_20_deal}} (pris en charge par CAB Formations){{/if}}<br>
+{{else}}
+{{#if evalbox_pret_a_payer}}
+🔄 <b>Paiement des frais d'inscription</b> : en cours{{#if is_uber_20_deal}} (pris en charge par CAB Formations){{/if}}<br>
+{{else}}
+⏳ <b>Paiement des frais d'inscription</b>{{#if is_uber_20_deal}} (sera pris en charge par CAB Formations){{/if}}<br>
+{{/if}}
+{{/if}}
+<!-- Étape 5: Validation CMA -->
+{{#if evalbox_convoc_recue}}
+✅ <b>Validation CMA</b> : dossier validé<br>
 {{else}}
 {{#if evalbox_valide_cma}}
-<!-- Candidat avancé: Validé CMA - en attente convocation -->
-<b>Votre processus d'inscription</b><br>
-Votre dossier a été validé par la CMA.<br>
-<br>
-<b>Prochaine étape :</b> Vous recevrez votre convocation environ 10 jours avant l'examen. En attendant, continuez votre préparation sur la plateforme e-learning.<br>
+✅ <b>Validation CMA</b> : dossier validé<br>
 {{else}}
+{{#if evalbox_refus_cma}}
+❌ <b>Validation CMA</b> : pièces à corriger (voir ci-dessous)<br>
+{{else}}
+{{#if evalbox_dossier_synchronise}}
+🔄 <b>Validation CMA</b> : dossier transmis, en cours de vérification<br>
+{{else}}
+⏳ <b>Validation CMA</b> : à venir<br>
+{{/if}}
+{{/if}}
+{{/if}}
+{{/if}}
+<!-- Étape 6: Convocation -->
 {{#if evalbox_convoc_recue}}
-<!-- Candidat avancé: Convocation reçue - prêt pour l'examen -->
-<b>Votre processus d'inscription</b><br>
-Votre inscription est finalisée et vous avez reçu votre convocation.<br>
-<br>
-<b>Prochaine étape :</b> Préparez-vous bien pour l'examen ! Utilisez la plateforme e-learning pour réviser.<br>
+✅ <b>Convocation</b> : reçue<br>
 {{else}}
-<!-- Candidat en début de parcours OU statut inconnu: afficher les étapes -->
-<b>Le processus d'inscription</b><br>
-Voici les grandes étapes :<br>
-<ol>
-<li><b>Choix de la date d'examen</b> - Vous choisissez parmi les dates disponibles</li>
-<li><b>Choix de la session de formation</b> - Cours du jour ou du soir selon vos disponibilités</li>
-<li><b>Constitution du dossier</b> - Nous préparons votre dossier pour la CMA</li>
-{{#if is_uber_20_deal}}
-<li><b>Paiement des frais d'examen</b> - 241€ <b>pris en charge par CAB Formations</b> dans le cadre du partenariat Uber</li>
+{{#if evalbox_valide_cma}}
+⏳ <b>Convocation</b> : environ 10 jours avant l'examen<br>
 {{else}}
-<li><b>Paiement des frais d'examen</b> - 241€ à régler directement à la CMA</li>
-{{/if}}
-<li><b>Validation CMA</b> - La CMA vérifie votre dossier</li>
-<li><b>Convocation</b> - Vous recevez votre convocation environ 10 jours avant l'examen</li>
-<li><b>Formation</b> - Suivez votre formation pour bien vous préparer</li>
-<li><b>Examen</b> - Passez l'examen théorique VTC</li>
-</ol>
+⏳ <b>Convocation</b><br>
 {{/if}}
 {{/if}}
-{{/if}}
-{{/if}}
+<!-- Étape 7-8: Formation + Examen -->
+⏳ <b>Formation préparatoire</b><br>
+⏳ <b>Examen VTC</b><br>

@@ -796,15 +796,34 @@ def analyze_exam_date_situation(
     # Statut "Incomplet" sur ExamT3P = certaines pièces refusées par la CMA
     # En cas de refus, le candidat est automatiquement repositionné sur la PROCHAINE date d'examen
     if evalbox_status == 'Refusé CMA':
+        # Récupérer les pièces refusées depuis ExamT3P (noms + détails)
+        pieces = []
+        pieces_details = []
+        if examt3p_data:
+            pieces = examt3p_data.get('documents_refuses', [])
+            pieces_details = examt3p_data.get('pieces_refusees_details', [])
+
+        # GARDE-FOU: Si Refusé CMA mais 0 pièce REFUSÉ → faux refus (incohérence ExamT3P)
+        # Les anciennes pièces refusées n'ont pas été supprimées sur ExamT3P
+        # → Traiter comme Dossier Synchronisé (CAS 5) au lieu de CAS 3
+        if not pieces_details:
+            logger.info("  ⚠️ Refusé CMA mais 0 pièce REFUSÉ → faux refus (incohérence ExamT3P)")
+            result['faux_refus_cma'] = True
+            result['case'] = 5
+            result['case_description'] = "Faux Refusé CMA (0 pièce refusée) - En attente validation CMA"
+            result['should_include_in_response'] = True
+            result['response_message'] = generate_dossier_synchronise_message(
+                date_examen_str, result.get('date_cloture', ''), result.get('next_dates', [])
+            )
+            logger.info(f"  ➡️ CAS 5 (faux refus): Traitement comme Dossier Synchronisé")
+            return result
+
+        # Vrai refus CMA : CAS 3 normal
         result['case'] = 3
         result['case_description'] = "Refusé CMA - Pièces refusées, repositionnement sur prochaine date"
         result['should_include_in_response'] = True
-
-        # Récupérer les pièces refusées depuis ExamT3P (noms + détails)
-        if examt3p_data:
-            result['pieces_refusees'] = examt3p_data.get('documents_refuses', [])
-            # Récupérer les détails complets (nom, motif, solution)
-            result['pieces_refusees_details'] = examt3p_data.get('pieces_refusees_details', [])
+        result['pieces_refusees'] = pieces
+        result['pieces_refusees_details'] = pieces_details
 
         # Récupérer UNE SEULE prochaine date (positionnement automatique)
         next_exam_date = None

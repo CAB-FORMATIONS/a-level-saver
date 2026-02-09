@@ -1250,6 +1250,35 @@ class TemplateEngine:
                 logger.info(f"🔄 Session preference fallback: '{session_pref}' demandé, '{alt_type}' proposé comme alternative")
 
         # ================================================================
+        # FAUX REFUSÉ CMA: Override evalbox flags si faux refus
+        # ================================================================
+        if context.get('faux_refus_cma'):
+            result['evalbox_refus_cma'] = False
+            result['evalbox_dossier_synchronise'] = True
+            logger.info("📋 Faux Refusé CMA → evalbox flags overridés vers Dossier Synchronisé")
+
+        # ================================================================
+        # Flags checklist progression (pour QUESTION_PROCESSUS)
+        # ================================================================
+        evalbox = result.get('evalbox_status', '')
+        # "dossier_constitue" = evalbox au moins à Dossier créé
+        result['dossier_constitue'] = evalbox in [
+            'Dossier crée', 'Pret a payer', 'Pret a payer par cheque',
+            'Dossier Synchronisé', 'VALIDE CMA', 'Convoc CMA reçue', 'Refusé CMA'
+        ]
+        # "paiement_effectue" = evalbox au moins à Dossier Synchronisé (CAB a payé les 241€)
+        result['paiement_effectue'] = evalbox in [
+            'Dossier Synchronisé', 'VALIDE CMA', 'Convoc CMA reçue', 'Refusé CMA'
+        ]
+        # "session_type_display" pour la checklist
+        if result.get('session_is_soir'):
+            result['session_type_display'] = 'Cours du soir'
+        elif result.get('session_is_jour'):
+            result['session_type_display'] = 'Cours du jour'
+        else:
+            result['session_type_display'] = ''
+
+        # ================================================================
         # GARDE-FOU: Pièces refusées → toujours afficher statut + action corriger
         # Même si la matrice désactive show_statut_section (ex: DEMANDE_DATE_PLUS_TOT)
         # ================================================================

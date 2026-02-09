@@ -594,6 +594,17 @@ L'équipe CAB Formations"""
                 result['workflow_stage'] = 'DUPLICATE_UBER_OFFER'
                 result['duplicate_deals'] = triage_result.get('duplicate_deals', [])
 
+                # Mettre à jour EXAM_INCLUS = Non sur le deal du ticket
+                if auto_update_crm:
+                    selected_deal = triage_result.get('selected_deal', {})
+                    deal_id_to_update = selected_deal.get('id') if selected_deal else None
+                    if deal_id_to_update:
+                        try:
+                            self.crm_client.update_deal(deal_id_to_update, {'EXAM_INCLUS': 'Non'})
+                            logger.info(f"  ✅ EXAM_INCLUS=Non sur deal {selected_deal.get('Deal_Name', deal_id_to_update)}")
+                        except Exception as e:
+                            logger.warning(f"  ⚠️ Erreur mise à jour EXAM_INCLUS: {e}")
+
                 # Générer une réponse spécifique pour ce cas
                 duplicate_response = self._generate_duplicate_uber_response(
                     ticket_id=ticket_id,
@@ -1490,6 +1501,25 @@ La date d'examen dans Zoho CRM est dans le passé. Le workflow a été stoppé p
                         logger.info("  📝 Note repositionnement ajoutée (après draft)")
                     except Exception as e:
                         logger.warning(f"Erreur ajout note repositionnement: {e}")
+
+                # Note interne faux Refusé CMA (après le draft)
+                if date_examen_vtc_result.get('faux_refus_cma'):
+                    identifiant = examt3p_data.get('identifiant', examt3p_data.get('email', ''))
+                    mdp = examt3p_data.get('mot_de_passe', '')
+                    faux_refus_note = (
+                        f"⚠️ INCOHÉRENCE ExamT3P - Faux Refusé CMA\n"
+                        f"Statut ExamT3P: Incomplet, mais 0 pièce avec statut REFUSÉ.\n"
+                        f"Les anciennes pièces refusées n'ont pas été supprimées.\n\n"
+                        f"ACTION REQUISE: Se connecter sur exament3p.fr\n"
+                        f"→ Identifiant: {identifiant}\n"
+                        f"→ Mot de passe: {mdp}\n"
+                        f"Supprimer les pièces qui étaient en refus pour ajuster le dossier."
+                    )
+                    try:
+                        self.desk_client.add_ticket_comment(ticket_id, faux_refus_note, is_public=False)
+                        logger.info("  📝 Note interne ajoutée: faux Refusé CMA (après draft)")
+                    except Exception as e:
+                        logger.warning(f"  ⚠️ Erreur ajout note faux refus: {e}")
             else:
                 logger.info("✅ DRAFT CREATION → Préparé (pas d'auto-create)")
 
@@ -4779,6 +4809,7 @@ L'équipe CAB Formations"""
             'documents_refuses': examt3p_data.get('documents_refuses', []),
             'statut_documents': examt3p_data.get('statut_documents', ''),
             'action_candidat_requise': examt3p_data.get('action_candidat_requise', False),
+            'faux_refus_cma': date_examen_vtc_result.get('faux_refus_cma', False),
 
             # Lookups CRM enrichis (v2.2) - données complètes depuis les modules Zoho
             # CRITIQUE: Contient session_date_debut, session_date_fin, session_type, etc.
