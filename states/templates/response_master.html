@@ -345,7 +345,13 @@
 
 {{#if show_sessions_section}}
 {{#if has_sessions_proposees}}
+{{#if session_preference_no_match}}
+<i>Malheureusement, aucune session de {{session_preference_requested_text}} n'est disponible pour votre date d'examen.</i><br>
+<br>
+<b>Alternative disponible :</b><br>
+{{else}}
 <b>Sessions de formation disponibles{{#if session_preference}} ({{preference_horaire_text}}){{/if}}</b><br>
+{{/if}}
 {{#each sessions_proposees}}
 {{#if this.is_first_of_exam}}
 Pour l'examen du {{this.date_examen_formatted}} :<br>
@@ -358,7 +364,11 @@ Pour l'examen du {{this.date_examen_formatted}} :<br>
 {{/if}}
 {{/each}}
 <br>
+{{#if session_preference_no_match}}
+<b>Merci de nous indiquer si cette alternative vous convient, ou si vous avez d'autres disponibilités.</b><br>
+{{else}}
 <b>Merci de nous confirmer votre choix de session.</b><br>
+{{/if}}
 <br>
 {{/if}}
 {{/if}}
@@ -370,7 +380,9 @@ Pour l'examen du {{this.date_examen_formatted}} :<br>
 {{#unless uber_prospect}}
 {{#unless examen_passe}}
 {{#unless intention_demande_elearning}}
+{{#unless suppress_elearning}}
 {{> acces_elearning_rappel}}
+{{/unless}}
 {{/unless}}
 {{/unless}}
 {{/unless}}

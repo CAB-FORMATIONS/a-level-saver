@@ -178,8 +178,16 @@ def get_sessions_for_exam_date(
 
         if session_type == SESSION_TYPE_JOUR or session_type == 'jour':
             result = sessions_jour[:limit]
+            if not result and sessions_soir:
+                # Aucune session jour disponible → proposer le soir comme alternative
+                result = sessions_soir[:limit]
+                logger.info(f"⚠️ Aucune session jour → fallback sur {len(result)} session(s) soir comme alternative")
         elif session_type == SESSION_TYPE_SOIR or session_type == 'soir':
             result = sessions_soir[:limit]
+            if not result and sessions_jour:
+                # Aucune session soir disponible → proposer le jour comme alternative
+                result = sessions_jour[:limit]
+                logger.info(f"⚠️ Aucune session soir → fallback sur {len(result)} session(s) jour comme alternative")
         else:
             # Retourner les deux types
             if sessions_jour:

@@ -1225,6 +1225,29 @@ class TemplateEngine:
             if thread_mem.get('suppress_sessions') and 'show_sessions_section' not in context and result.get('show_sessions_section'):
                 result['show_sessions_section'] = False
                 logger.info("📚 show_sessions_section=False (ThreadMemory: déjà communiqué, pas de changement)")
+            if thread_mem.get('suppress_statut') and 'show_statut_section' not in context and result.get('show_statut_section'):
+                result['show_statut_section'] = False
+                logger.info("📋 show_statut_section=False (ThreadMemory: déjà communiqué, pas de changement)")
+            if thread_mem.get('suppress_elearning'):
+                result['suppress_elearning'] = True
+                logger.info("📖 suppress_elearning=True (ThreadMemory: déjà communiqué)")
+
+        # ================================================================
+        # DÉTECTION FALLBACK SESSION: préférence jour/soir non disponible
+        # Si le candidat a demandé un type mais que seul l'autre type est proposé
+        # ================================================================
+        session_pref = self._get_session_preference(context)
+        sessions_proposees = result.get('sessions_proposees', [])
+        if session_pref and sessions_proposees:
+            pref_types = {s.get('type') for s in sessions_proposees if s.get('type')}
+            if session_pref not in pref_types:
+                # Fallback: les sessions proposées sont de l'autre type
+                result['session_preference_no_match'] = True
+                alt_type = 'soir' if session_pref == 'jour' else 'jour'
+                result['session_preference_alt_type'] = alt_type
+                result['session_preference_requested_text'] = 'cours du jour' if session_pref == 'jour' else 'cours du soir'
+                result['preference_horaire_text'] = ''  # Effacer pour ne pas afficher "(cours du jour)" dans le header
+                logger.info(f"🔄 Session preference fallback: '{session_pref}' demandé, '{alt_type}' proposé comme alternative")
 
         return result
 
