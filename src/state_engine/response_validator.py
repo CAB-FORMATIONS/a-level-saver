@@ -542,6 +542,13 @@ class ResponseValidator:
                 logger.info(f"⚡ Validation des blocs ignorée (intention {detected_intent}, template {template_used} != {default_template})")
                 return True
 
+        # Cas général: si la matrice a sélectionné un template différent du défaut de l'état,
+        # les blocs requis de l'état ne sont pas pertinents (le template matrice a ses propres blocs)
+        default_template = state.response_config.get('template', '')
+        if default_template and template_used and default_template != template_used:
+            logger.info(f"⚡ Validation des blocs ignorée (matrice → {template_used}, état par défaut → {default_template})")
+            return True
+
         return False
 
     def _find_location(self, text: str, search: str) -> str:

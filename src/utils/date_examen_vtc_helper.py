@@ -840,6 +840,17 @@ def analyze_exam_date_situation(
                 next_exam_date = next_dates[0]
                 # Utiliser la date de clôture de la PROCHAINE session (pas l'ancienne)
                 next_date_cloture = next_exam_date.get('Date_Cloture_Inscription')
+
+                # Repositionner automatiquement sur la prochaine date dans le CRM
+                # L'ancienne date est caduque (refus), le CRM doit refléter la prochaine cible
+                result['auto_assigned'] = True
+                result['auto_assigned_exam_date'] = next_exam_date.get('Date_Examen')
+                result['auto_assigned_exam_session_id'] = next_exam_date.get('id')
+                result['crm_updates'] = {
+                    'Date_examen_VTC': next_exam_date.get('id')
+                }
+                logger.info(f"  🔄 CAS 3: Repositionnement CRM sur {next_exam_date.get('Date_Examen')} (id={next_exam_date.get('id')})")
+
             result['next_dates'] = next_dates
 
         result['response_message'] = generate_refus_cma_message(
