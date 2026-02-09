@@ -325,6 +325,24 @@ class DOCTicketWorkflow:
             logger.info("  ✅ Pas de brouillon existant, continuation du workflow")
 
             # ================================================================
+            # STEP 0.1: SKIP INSTANT MESSAGES (SalesIQ chat widget)
+            # ================================================================
+            ticket_data = self.desk_client.get_ticket(ticket_id)
+            ticket_source = ticket_data.get('source', {})
+            if isinstance(ticket_source, dict) and ticket_source.get('type') == 'INSTANT_MESSAGE':
+                logger.warning(f"⚠️  INSTANT MESSAGE détecté (channel: {ticket_data.get('channel', 'N/A')}) → SKIP + CLOSE")
+                if auto_update_ticket:
+                    try:
+                        self.desk_client.update_ticket(ticket_id, {'status': 'Closed'})
+                        logger.info("  ✅ Ticket IM clôturé")
+                    except Exception as e:
+                        logger.warning(f"  ⚠️ Erreur clôture ticket IM: {e}")
+                result['workflow_stage'] = 'SKIPPED_INSTANT_MESSAGE'
+                result['success'] = True
+                result['skip_reason'] = 'Ticket Instant Message (SalesIQ) - clôturé automatiquement'
+                return result
+
+            # ================================================================
             # STEP 0.5: VÉRIFIER SI CLARIFICATION DOUBLON EN ATTENTE
             # (Si le candidat répond à une demande de clarification de doublon)
             # ================================================================
