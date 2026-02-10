@@ -1943,6 +1943,17 @@ La date d'examen dans Zoho CRM est dans le passé. Le workflow a été stoppé p
                 triage_result['target_department'] = 'Contact'
                 triage_result['reason'] = f"Doublon Uber mais demande hors-scope détectée (département recalculé: Contact)"
                 triage_result['method'] = 'duplicate_with_other_service'
+
+                if auto_transfer:
+                    try:
+                        logger.info(f"🔄 Transfert automatique vers Contact...")
+                        transfer_success = self.dispatcher._reassign_ticket(ticket_id, 'Contact')
+                        if transfer_success:
+                            logger.info(f"✅ Ticket transféré vers Contact")
+                            triage_result['transferred'] = True
+                    except Exception as e:
+                        logger.error(f"Erreur transfert: {e}")
+
                 return triage_result
             duplicate_deals = linking_result.get('duplicate_deals', [])
             logger.warning(f"⚠️ DOUBLON UBER 20€ DÉTECTÉ: {len(duplicate_deals)} opportunités 20€ GAGNÉ")
@@ -3908,6 +3919,16 @@ L'équipe CAB Formations"""
                         confirmed_dates = f"{start_dt.strftime('%d/%m/%Y')}-{end_dt.strftime('%d/%m/%Y')}"
                         logger.info(f"  📅 Dates extraites de requested_training_dates: {confirmed_dates}")
 
+            # Fallback 2: extraire les dates directement du message candidat via regex
+            # Ex: "du 13 Avril au 24" → "13/04/2026-24/04/2026"
+            if not confirmed_dates:
+                customer_msg = triage_result.get('customer_message', '')
+                if customer_msg:
+                    extracted = self._extract_dates_from_message(customer_msg)
+                    if extracted:
+                        confirmed_dates = extracted
+                        logger.info(f"  📅 Dates extraites du message candidat (regex): {confirmed_dates}")
+
             matched = None
 
             # 1. Essayer matching par dates si fournies
@@ -4100,6 +4121,90 @@ L'équipe CAB Formations"""
         except Exception as e:
             logger.error(f"Erreur lors du matching de session: {e}")
             return None
+
+    def _extract_dates_from_message(self, message: str) -> Optional[str]:
+        """
+        Extrait une plage de dates depuis le message du candidat.
+
+        Patterns supportés:
+        - "du 13 Avril au 24" → 13/04/YYYY-24/04/YYYY
+        - "du 13/04 au 24/04" → 13/04/YYYY-24/04/YYYY
+        - "du 13 avril au 24 avril" → 13/04/YYYY-24/04/YYYY
+        - "formation du 13 au 24 avril" → 13/04/YYYY-24/04/YYYY
+
+        Returns:
+            String "DD/MM/YYYY-DD/MM/YYYY" ou None
+        """
+        import re
+        from datetime import datetime
+
+        # Nettoyage HTML basique
+        clean = re.sub(r'<[^>]+>', ' ', message)
+        clean = clean.lower().strip()
+
+        MONTH_MAP = {
+            'janvier': 1, 'février': 2, 'fevrier': 2, 'mars': 3, 'avril': 4,
+            'mai': 5, 'juin': 6, 'juillet': 7, 'août': 8, 'aout': 8,
+            'septembre': 9, 'octobre': 10, 'novembre': 11, 'décembre': 12, 'decembre': 12
+        }
+        month_pattern = '|'.join(MONTH_MAP.keys())
+
+        now = datetime.now()
+
+        # Pattern 1: "du DD mois au DD" (mois seulement sur la date de début)
+        # Ex: "du 13 avril au 24"
+        m = re.search(
+            rf'du\s+(\d{{1,2}})\s+({month_pattern})\s+au\s+(\d{{1,2}})\b',
+            clean
+        )
+        if m:
+            day1, month_name, day2 = int(m.group(1)), m.group(2), int(m.group(3))
+            month = MONTH_MAP[month_name]
+            year = now.year if month >= now.month else now.year + 1
+            return f"{day1:02d}/{month:02d}/{year}-{day2:02d}/{month:02d}/{year}"
+
+        # Pattern 2: "du DD mois au DD mois" (mois sur les deux dates)
+        # Ex: "du 13 avril au 24 avril"
+        m = re.search(
+            rf'du\s+(\d{{1,2}})\s+({month_pattern})\s+au\s+(\d{{1,2}})\s+({month_pattern})',
+            clean
+        )
+        if m:
+            day1, month_name1, day2, month_name2 = int(m.group(1)), m.group(2), int(m.group(3)), m.group(4)
+            month1, month2 = MONTH_MAP[month_name1], MONTH_MAP[month_name2]
+            year1 = now.year if month1 >= now.month else now.year + 1
+            year2 = now.year if month2 >= now.month else now.year + 1
+            return f"{day1:02d}/{month1:02d}/{year1}-{day2:02d}/{month2:02d}/{year2}"
+
+        # Pattern 3: "du DD/MM au DD/MM" ou "du DD/MM/YYYY au DD/MM/YYYY"
+        m = re.search(
+            r'du\s+(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?\s+au\s+(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?',
+            clean
+        )
+        if m:
+            day1, month1 = int(m.group(1)), int(m.group(2))
+            year1 = int(m.group(3)) if m.group(3) else (now.year if month1 >= now.month else now.year + 1)
+            if year1 < 100:
+                year1 += 2000
+            day2, month2 = int(m.group(4)), int(m.group(5))
+            year2 = int(m.group(6)) if m.group(6) else (now.year if month2 >= now.month else now.year + 1)
+            if year2 < 100:
+                year2 += 2000
+            return f"{day1:02d}/{month1:02d}/{year1}-{day2:02d}/{month2:02d}/{year2}"
+
+        # Pattern 4: "du DD au DD mois" (mois seulement sur la fin)
+        # Ex: "du 13 au 24 avril"
+        m = re.search(
+            rf'du\s+(\d{{1,2}})\s+au\s+(\d{{1,2}})\s+({month_pattern})',
+            clean
+        )
+        if m:
+            day1, day2, month_name = int(m.group(1)), int(m.group(2)), m.group(3)
+            month = MONTH_MAP[month_name]
+            year = now.year if month >= now.month else now.year + 1
+            return f"{day1:02d}/{month:02d}/{year}-{day2:02d}/{month:02d}/{year}"
+
+        return None
 
     def _match_session_by_preference(
         self,
