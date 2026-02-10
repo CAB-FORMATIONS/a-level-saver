@@ -1467,67 +1467,64 @@ Emails alternatifs trouvés:"""
         if not deals_20_won_initial:
             logger.info(f"  📱 Aucun deal 20€ GAGNÉ trouvé par email - tentative fallback téléphone")
 
-            # Extraire le numéro de téléphone:
-            # 1. D'abord depuis le contact CRM trouvé (plus fiable)
-            # 2. Sinon depuis le ticket Desk
-            phone = None
-
-            # 1. Depuis le contact CRM
+            # Collecter TOUS les numéros de téléphone (Phone + Mobile) de tous les contacts
+            all_phones = []
+            seen_phones = set()
             for contact in contacts:
-                contact_phone = contact.get('Phone') or contact.get('Mobile')
-                if contact_phone:
-                    phone = self._normalize_phone(contact_phone)
-                    if phone:
-                        logger.info(f"  📱 Phone from CRM contact: {phone}")
-                        break
+                for field in ('Phone', 'Mobile'):
+                    raw = contact.get(field)
+                    if raw:
+                        normalized = self._normalize_phone(raw)
+                        if normalized and normalized not in seen_phones:
+                            all_phones.append(normalized)
+                            seen_phones.add(normalized)
 
-            # 2. Fallback: depuis le ticket Desk
-            if not phone:
-                phone = self._extract_phone_from_ticket(ticket, threads)
+            # Fallback: depuis le ticket Desk
+            if not all_phones:
+                ticket_phone = self._extract_phone_from_ticket(ticket, threads)
+                if ticket_phone:
+                    all_phones.append(ticket_phone)
 
-            if phone:
-                logger.info(f"  📱 Téléphone extrait: {phone} - recherche de contacts...")
+            if all_phones:
+                logger.info(f"  📱 {len(all_phones)} numéro(s) à essayer: {all_phones}")
 
-                # Chercher des contacts par téléphone
-                phone_contacts = self._search_contacts_by_phone(phone)
+                for phone in all_phones:
+                    logger.info(f"  📱 Tentative avec {phone}...")
+                    phone_contacts = self._search_contacts_by_phone(phone)
 
-                if phone_contacts:
-                    # Filtrer les contacts déjà trouvés par email
-                    new_contact_ids = [
-                        c.get("id") for c in phone_contacts
-                        if c.get("id") and c.get("id") not in contact_ids
-                    ]
+                    if phone_contacts:
+                        new_contact_ids = [
+                            c.get("id") for c in phone_contacts
+                            if c.get("id") and c.get("id") not in contact_ids
+                        ]
 
-                    if new_contact_ids:
-                        logger.info(f"  📱 {len(new_contact_ids)} nouveau(x) contact(s) trouvé(s) par téléphone")
+                        if new_contact_ids:
+                            logger.info(f"  📱 {len(new_contact_ids)} nouveau(x) contact(s) trouvé(s) par téléphone {phone}")
 
-                        # Récupérer les deals de ces nouveaux contacts
-                        phone_deals = self._get_deals_for_contacts(new_contact_ids)
+                            phone_deals = self._get_deals_for_contacts(new_contact_ids)
+                            phone_deals_20_won = [d for d in phone_deals if d.get("Amount") == 20 and d.get("Stage") == "GAGNÉ"]
 
-                        # Vérifier s'il y a des deals 20€ GAGNÉ parmi eux
-                        phone_deals_20_won = [d for d in phone_deals if d.get("Amount") == 20 and d.get("Stage") == "GAGNÉ"]
+                            if phone_deals_20_won:
+                                existing_ids = {d.get("id") for d in all_deals}
+                                for deal in phone_deals:
+                                    if deal.get("id") not in existing_ids:
+                                        all_deals.append(deal)
 
-                        if phone_deals_20_won:
-                            # Fusionner avec les deals existants (éviter doublons)
-                            existing_ids = {d.get("id") for d in all_deals}
-                            for deal in phone_deals:
-                                if deal.get("id") not in existing_ids:
-                                    all_deals.append(deal)
-
-                            phone_fallback_used = True
-                            result["phone_fallback_used"] = True
-                            result["phone_used"] = phone
-                            result["deals_found"] = len(all_deals)
-                            result["all_deals"] = all_deals
-                            logger.info(f"  ✅ PHONE FALLBACK SUCCESS: {len(phone_deals_20_won)} deal(s) 20€ GAGNÉ trouvé(s) par téléphone")
+                                phone_fallback_used = True
+                                result["phone_fallback_used"] = True
+                                result["phone_used"] = phone
+                                result["deals_found"] = len(all_deals)
+                                result["all_deals"] = all_deals
+                                logger.info(f"  ✅ PHONE FALLBACK SUCCESS: {len(phone_deals_20_won)} deal(s) 20€ GAGNÉ trouvé(s) via {phone}")
+                                break  # Trouvé, on arrête
+                            else:
+                                logger.info(f"  📱 Deals trouvés via {phone} mais aucun 20€ GAGNÉ")
                         else:
-                            logger.info(f"  📱 Deals trouvés par téléphone mais aucun 20€ GAGNÉ")
+                            logger.info(f"  📱 Contacts téléphone {phone} = mêmes que contacts email")
                     else:
-                        logger.info(f"  📱 Contacts téléphone = mêmes que contacts email")
-                else:
-                    logger.info(f"  📱 Aucun contact trouvé par téléphone")
+                        logger.info(f"  📱 Aucun contact trouvé par téléphone {phone}")
             else:
-                logger.info(f"  📱 Aucun téléphone extractible du ticket")
+                logger.info(f"  📱 Aucun téléphone extractible")
 
         # Si pas de deals trouvés → TOUJOURS demander clarification
         # Contact existe mais pas d'opportunité = situation anormale
