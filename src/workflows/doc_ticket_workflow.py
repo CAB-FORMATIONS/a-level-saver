@@ -1051,6 +1051,16 @@ Le candidat a un ancien dossier dont les frais CMA (241€) ont déjà été ré
                 result['success'] = True
                 return result
 
+            # Check for early exit: no GAGNÉ deal → manual investigation
+            if analysis_result.get('workflow_stage') == 'STOPPED_NO_DEAL':
+                logger.info("🛑 SORTIE ANTICIPÉE → Pas de deal GAGNÉ, note ajoutée")
+                result['workflow_stage'] = 'STOPPED_NO_DEAL'
+                result['reason'] = analysis_result.get('reason')
+                result['draft_created'] = False
+                result['crm_updated'] = False
+                result['success'] = True
+                return result
+
             # Check VÉRIFICATION #1: Identifiants ExamenT3P
             examt3p_data = analysis_result.get('examt3p_data', {})
             if examt3p_data.get('should_respond_to_candidate'):
@@ -2569,6 +2579,43 @@ RÉSUMÉ (2-3 phrases):"""
 
         if not deal_id:
             logger.warning("  ⚠️  No deal found for this ticket")
+
+            # ================================================================
+            # STOP WORKFLOW: Pas de deal GAGNÉ → investigation manuelle requise
+            # Le candidat peut être un prospect Uber (deals PERDU) ou un
+            # prospect non-Uber → ne pas générer de réponse automatique
+            # ================================================================
+            all_deals = linking_result.get('all_deals', [])
+            deals_summary = "; ".join([
+                f"{d.get('Deal_Name', '?')} ({d.get('Amount', '?')}€, {d.get('Stage', '?')})"
+                for d in all_deals[:5]
+            ]) if all_deals else "Aucun deal trouvé"
+
+            note = (
+                "⚠️ WORKFLOW STOPPÉ — PAS DE DEAL GAGNÉ\n\n"
+                "Potentiel prospect Uber sans deal Gagné 20 euros à investiguer.\n"
+                "Attention : si pas Uber, déplacer vers Contact.\n\n"
+                f"Deals trouvés ({len(all_deals)}) : {deals_summary}"
+            )
+
+            try:
+                self.desk_client.add_ticket_comment(ticket_id, note, is_public=False)
+                logger.info("  ✅ Note interne ajoutée sur le ticket")
+            except Exception as e:
+                logger.warning(f"  ⚠️ Impossible d'ajouter la note: {e}")
+
+            logger.warning("🛑 STOP WORKFLOW — Pas de deal GAGNÉ → investigation manuelle")
+            return {
+                'success': True,
+                'workflow_stage': 'STOPPED_NO_DEAL',
+                'reason': 'Pas de deal GAGNÉ - Potentiel prospect Uber à investiguer',
+                'ticket_id': ticket_id,
+                'deal_id': None,
+                'all_deals_count': len(all_deals),
+                'deals_summary': deals_summary,
+                'draft_created': False,
+                'crm_updated': False,
+            }
 
         # Source 2: ExamenT3P avec gestion complète des identifiants
         logger.info("  🌐 Source 2/6: ExamenT3P...")
