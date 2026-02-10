@@ -1,4 +1,18 @@
 <!-- Partial: REPORT POSSIBLE (cloture non passee) -->
+{{#if tm_candidate_confirmed_date}}
+<!-- V3: Candidat a déjà confirmé une date — ne pas re-demander -->
+<b>Concernant votre changement de date</b><br>
+Votre demande de changement vers le <b>{{tm_candidate_confirmed_date}}</b> a bien ete prise en compte.{{#if tm_report_in_progress}} Nous avons contacte la CMA pour effectuer le changement.{{/if}}<br>
+{{#if has_sessions_proposees}}<br>
+<b>Voici les sessions de formation disponibles pour cette date{{#if session_preference}} ({{session_preference}}){{/if}} :</b><br>
+{{#each sessions_proposees}}{{#if this.is_first_of_exam}}<b>Examen du {{this.date_examen_formatted}}</b> &mdash; {{this.departement}} (cloture : {{this.cloture}})<br>{{/if}}&nbsp;&nbsp;&rarr; {{this.nom}} : du {{this.debut}} au {{this.fin}}<br>
+{{/each}}<br>
+Merci de nous confirmer votre choix de session pour que nous puissions finaliser votre inscription.<br>
+{{else}}
+<br>
+Nous revenons vers vous des que le changement est effectif. Vous pouvez suivre l'avancement de votre dossier sur <a href="https://www.exament3p.fr">exament3p.fr</a>.<br>
+{{/if}}
+{{else}}
 {{#if is_clarification_mode}}
 <!-- Mode clarification: le candidat questionne une incoherence, pas demande de changement -->
 <b>Concernant votre question sur les dates</b><br>
@@ -140,6 +154,7 @@ Il n'y a pas d'autre date disponible dans votre departement (CMA {{departement}}
 {{/if}}{{/if}}<br>
 Merci de nous confirmer la nouvelle date souhaitee pour que nous puissions effectuer le changement.<br>
 <i>Note : Un changement de date entraine egalement un changement de session de formation. Nous vous proposerons les nouvelles sessions disponibles une fois votre choix confirme.</i><br>
+{{/if}}
 {{/if}}
 {{/if}}
 {{/if}}

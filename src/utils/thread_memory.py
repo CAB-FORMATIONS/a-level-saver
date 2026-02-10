@@ -95,6 +95,11 @@ class MetaRecord:
     session: str = ''
     sections: List[str] = field(default_factory=list)
     secondary_intents: List[str] = field(default_factory=list)
+    # V3 fields (backward-compatible)
+    target_date: str = ''
+    proposed_dates: List[str] = field(default_factory=list)
+    proposed_sessions: List[str] = field(default_factory=list)
+    response_mode: str = ''
 
 
 @dataclass
@@ -185,6 +190,16 @@ def parse_meta_line(line: str) -> Optional[MetaRecord]:
         intents_sec_str = pairs.get('intents_sec', '')
         if intents_sec_str:
             record.secondary_intents = [s.strip() for s in intents_sec_str.split(',') if s.strip()]
+
+        # V3 fields (backward-compatible: unknown keys are simply ignored)
+        record.target_date = pairs.get('target_date', '')
+        proposed_dates_str = pairs.get('proposed_dates', '')
+        if proposed_dates_str:
+            record.proposed_dates = [d.strip() for d in proposed_dates_str.split(',') if d.strip()]
+        proposed_sessions_str = pairs.get('proposed_sessions', '')
+        if proposed_sessions_str:
+            record.proposed_sessions = [s.strip() for s in proposed_sessions_str.split('|') if s.strip()]
+        record.response_mode = pairs.get('response_mode', '')
 
         return record
 

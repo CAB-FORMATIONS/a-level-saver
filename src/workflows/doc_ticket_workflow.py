@@ -2915,6 +2915,28 @@ Deux comptes ExamenT3P fonctionnels ont été détectés pour ce candidat, et le
             except Exception as e:
                 logger.warning(f"  ⚠️ ThreadMemory failed (graceful degradation): {e}")
 
+            # ================================================================
+            # CONVERSATION INTELLIGENCE V3
+            # ================================================================
+            conversation_state = None
+            if deal_id and threads_data:
+                try:
+                    from src.utils.conversation_analyzer import analyze_conversation
+                    conversation_state = analyze_conversation(
+                        threads=threads_data,
+                        current_deal_data=deal_data,
+                        enriched_lookups=enriched_lookups,
+                    )
+                    if conversation_state and conversation_state.conversation_mode != 'initial_contact':
+                        logger.info(f"  🧠 V3: mode={conversation_state.conversation_mode}, response={conversation_state.response_mode}, "
+                                    f"target_date={conversation_state.target_date}, human_handling={conversation_state.human_is_handling}, "
+                                    f"commitments={len(conversation_state.commitments)}, decisions={len(conversation_state.candidate_decisions)}, "
+                                    f"latency={conversation_state.analyzer_latency_ms}ms")
+                    elif conversation_state and conversation_state.analyzer_error:
+                        logger.warning(f"  ⚠️ V3 analyzer error: {conversation_state.analyzer_error}")
+                except Exception as e:
+                    logger.warning(f"  ⚠️ ConversationAnalyzer failed (graceful): {e}")
+
         # ================================================================
         # DETECTION MODE COMMUNICATION CANDIDAT
         # ================================================================
@@ -3655,6 +3677,26 @@ L'équipe CAB Formations"""
             else:
                 exam_dates_for_session = next_dates if next_dates else []
                 logger.info(f"  📚 CAS 2 (date passée non validée) → next_dates par défaut")
+        elif conversation_state and conversation_state.target_date and any(
+            d.type == 'date_choice' and d.confidence == 'explicit'
+            for d in conversation_state.candidate_decisions
+        ):
+            # CAS V3: Candidat a confirmé une date via V3 conversation analysis
+            v3_target = conversation_state.target_date
+            current_dept = date_examen_vtc_result.get('current_departement') or (date_examen_info.get('Departement') if date_examen_info else None)
+            v3_matched = False
+            if current_dept:
+                from src.utils.date_examen_vtc_helper import get_next_exam_dates
+                dept_dates = get_next_exam_dates(self.crm_client, str(current_dept), limit=20)
+                matching = [d for d in dept_dates if str(d.get('Date_Examen', ''))[:10] == v3_target]
+                if matching:
+                    exam_dates_for_session = matching
+                    v3_matched = True
+                    logger.info(f"  📚 V3: Session loading ciblé sur target_date={v3_target} (confirmed by candidate)")
+            if not v3_matched:
+                # Fall through to normal logic
+                exam_dates_for_session = next_dates if next_dates else []
+                logger.info(f"  📚 V3: target_date={v3_target} not matched in dept dates, using next_dates fallback")
         elif has_assigned_date and detected_intent == 'CONFIRMATION_SESSION':
             # Vérifier si la clôture de la date actuelle est passée (CAS 8)
             if date_case == 8 and date_examen_vtc_result.get('deadline_passed_reschedule'):
@@ -3843,13 +3885,19 @@ L'équipe CAB Formations"""
 
             else:
                 # Flux standard: analyze_session_situation
+                # V3: Si le candidat a confirmé un changement de date, il faut proposer
+                # une nouvelle session adaptée à la nouvelle date (même type que l'existante)
+                v3_date_change = bool(
+                    conversation_state and conversation_state.target_date
+                    and any(d.type == 'date_choice' and d.confidence == 'explicit' for d in conversation_state.candidate_decisions)
+                )
                 session_data = analyze_session_situation(
                     deal_data=deal_data,
                     exam_dates=exam_dates_for_session,
                     threads=threads_data,
                     crm_client=self.crm_client,
                     triage_session_preference=triage_session_pref,
-                    allow_change=(detected_intent in ['CONFIRMATION_SESSION', 'DEMANDE_CHANGEMENT_SESSION'] or is_session_change_request or date_examen_vtc_result.get('implicit_date_repositioning')),
+                    allow_change=(detected_intent in ['CONFIRMATION_SESSION', 'DEMANDE_CHANGEMENT_SESSION'] or is_session_change_request or date_examen_vtc_result.get('implicit_date_repositioning') or v3_date_change),
                     enriched_lookups=enriched_lookups
                 )
 
@@ -4104,6 +4152,8 @@ L'équipe CAB Formations"""
             'cab_proposals': cab_proposals,
             # ThreadMemory - mémoire persistante (suppression sections, progression, relance)
             'thread_memory': thread_memory_result,
+            # Conversation Intelligence V3
+            'conversation_state': conversation_state,
             # Mode de communication du candidat (request/clarification/verification/follow_up)
             'communication_mode': communication_mode,
             'references_previous_communication': references_previous,
@@ -5229,6 +5279,36 @@ L'équipe CAB Formations"""
                 'human_intervention_actor': thread_memory.human_intervention_actor,
             }
 
+        # ================================================================
+        # CONVERSATION INTELLIGENCE V3: Injecter dans le contexte du template
+        # ================================================================
+        conv_state = analysis_result.get('conversation_state')
+        if conv_state and hasattr(conv_state, 'to_dict'):
+            detected_state.context_data['conversation_state'] = conv_state.to_dict()
+
+            # Flatten key V3 flags for direct template access
+            if conv_state.target_date and any(
+                d.type == 'date_choice' for d in conv_state.candidate_decisions
+            ):
+                # Format YYYY-MM-DD → DD/MM/YYYY for display
+                raw_date = conv_state.target_date
+                try:
+                    parts = raw_date.split('-')
+                    formatted_v3_date = f"{parts[2]}/{parts[1]}/{parts[0]}" if len(parts) == 3 else raw_date
+                except Exception:
+                    formatted_v3_date = raw_date
+                detected_state.context_data['tm_candidate_confirmed_date'] = formatted_v3_date
+            if conv_state.target_session:
+                detected_state.context_data['tm_candidate_confirmed_session'] = conv_state.target_session
+            if any(c.type == 'report_date' for c in conv_state.commitments):
+                detected_state.context_data['tm_report_in_progress'] = True
+                report_commit = next((c for c in conv_state.commitments if c.type == 'report_date'), None)
+                if report_commit and report_commit.value:
+                    detected_state.context_data['tm_report_target_date'] = report_commit.value
+            if conv_state.human_is_handling:
+                detected_state.context_data['v3_human_handling'] = True
+                logger.info("  👤 V3: human_is_handling=True (advisory)")
+
         # RECALCULATE cloture_passed et can_modify_exam_date avec date_cloture enrichie
         # (le StateDetector n'a pas accès à date_cloture lors de la détection)
         date_cloture = date_examen_vtc_result.get('date_cloture')
@@ -5349,10 +5429,28 @@ L'équipe CAB Formations"""
             detected_state.context_data['next_dates'] = filtered_next_dates
             logger.info(f"  📅 Filtre final next_dates: {len(raw_next_dates)} → {len(filtered_next_dates)} (exclu {current_date_str}, limit={final_limit})")
 
+        # V3: Si le candidat a déjà confirmé une date, vider next_dates
+        # pour ne PAS re-proposer de dates — le template V3 gère la confirmation
+        v3_confirmed_date = detected_state.context_data.get('tm_candidate_confirmed_date', '')
+        if v3_confirmed_date:
+            # Convertir DD/MM/YYYY → YYYY-MM-DD pour comparaison
+            v3_iso = v3_confirmed_date
+            if '/' in v3_confirmed_date:
+                parts = v3_confirmed_date.split('/')
+                if len(parts) == 3:
+                    v3_iso = f"{parts[2]}-{parts[1]}-{parts[0]}"
+
+            current_next_dates = detected_state.context_data.get('next_dates', [])
+            # Vider next_dates: le candidat a déjà choisi, pas besoin de proposer des alternatives
+            detected_state.context_data['next_dates'] = []
+            detected_state.context_data['has_next_dates'] = False
+            logger.info(f"  🎯 V3: date confirmée {v3_confirmed_date} → next_dates vidé (pas de re-proposition)")
+
         # CROSS-DÉPARTEMENT: Si REPORT_DATE et aucune date alternative dans le département
         # → chercher TOUTES les dates dans d'autres départements (avant ET après)
+        # SAUF si V3 a vidé next_dates (candidat a déjà confirmé une date)
         filtered_next_dates = detected_state.context_data.get('next_dates', [])
-        if detected_intent == 'REPORT_DATE' and not filtered_next_dates and current_date_str:
+        if detected_intent == 'REPORT_DATE' and not filtered_next_dates and current_date_str and not v3_confirmed_date:
             departement = detected_state.context_data.get('departement')
             if departement and self.crm_client:
                 logger.info(f"  🔄 REPORT_DATE: Aucune date alternative dans dept {departement} → recherche cross-département (toutes dates)...")
@@ -5465,12 +5563,19 @@ L'équipe CAB Formations"""
         contact_data = analysis_result.get('contact_data', {})
         candidate_name = contact_data.get('First_Name', '')
 
+        # Determine response_mode from V3 conversation state
+        v3_response_mode = 'full'
+        conv_state_for_humanizer = analysis_result.get('conversation_state')
+        if conv_state_for_humanizer and hasattr(conv_state_for_humanizer, 'response_mode'):
+            v3_response_mode = conv_state_for_humanizer.response_mode or 'full'
+
         humanize_result = humanize_response(
             template_response=response_text,
             candidate_message=customer_message,
             candidate_name=candidate_name,
             previous_response=previous_response,
-            use_ai=True  # Activer l'humanisation IA
+            use_ai=True,  # Activer l'humanisation IA
+            response_mode=v3_response_mode
         )
 
         if humanize_result.get('was_humanized'):
@@ -6052,6 +6157,15 @@ Génère maintenant la personnalisation (1-3 phrases):"""
         sections = self._detect_sections_communicated(response_result)
         if sections:
             parts.append(f"sections={','.join(sections)}")
+
+        # V3 Conversation Intelligence fields
+        conv_state = analysis_result.get('conversation_state')
+        if conv_state and hasattr(conv_state, 'target_date') and conv_state.target_date:
+            parts.append(f"target_date={conv_state.target_date}")
+        if conv_state and hasattr(conv_state, 'proposed_dates') and conv_state.proposed_dates:
+            parts.append(f"proposed_dates={','.join(conv_state.proposed_dates)}")
+        if conv_state and hasattr(conv_state, 'response_mode') and conv_state.response_mode:
+            parts.append(f"response_mode={conv_state.response_mode}")
 
         return f"[META] {' | '.join(parts)}"
 

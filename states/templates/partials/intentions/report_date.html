@@ -52,6 +52,20 @@ La date limite de modification des inscriptions etant passee, un changement de d
 {{/if}}
 {{else}}
 {{#if report_possible}}
+{{#if tm_candidate_confirmed_date}}
+<!-- V3: Candidat a déjà confirmé une date — accusé de réception bref -->
+<b>Concernant votre changement de date</b><br>
+Votre demande de changement vers le <b>{{tm_candidate_confirmed_date}}</b> a bien ete prise en compte.{{#if tm_report_in_progress}} Nous avons contacte la CMA pour effectuer le changement.{{/if}}<br>
+{{#if has_sessions_proposees}}<br>
+<b>Voici les sessions de formation disponibles pour cette date{{#if session_preference}} ({{session_preference}}){{/if}} :</b><br>
+{{#each sessions_proposees}}{{#if this.is_first_of_exam}}<b>Examen du {{this.date_examen_formatted}}</b> &mdash; {{this.departement}} (cloture : {{this.cloture}})<br>{{/if}}&nbsp;&nbsp;&rarr; {{this.nom}} : du {{this.debut}} au {{this.fin}}<br>
+{{/each}}<br>
+Merci de nous confirmer votre choix de session pour que nous puissions finaliser votre inscription.<br>
+{{else}}
+<br>
+Nous revenons vers vous des que le changement est effectif. Vous pouvez suivre l'avancement de votre dossier sur <a href="https://www.exament3p.fr">exament3p.fr</a>.<br>
+{{/if}}
+{{else}}
 <!-- Modification possible (clôture pas encore passée) -->
 <b>Concernant votre demande de changement de date</b><br>
 Nous pouvons effectuer le changement de date pour vous.<br>
@@ -62,6 +76,7 @@ Nous pouvons effectuer le changement de date pour vous.<br>
 Merci de nous confirmer votre choix et nous procederons au changement.<br>
 {{else}}
 Merci de nous indiquer la nouvelle date souhaitee et nous verifierons sa disponibilite.<br>
+{{/if}}
 {{/if}}
 {{else}}
 <!-- Fallback générique -->

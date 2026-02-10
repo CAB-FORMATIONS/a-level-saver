@@ -142,12 +142,33 @@ EXEMPLES D'ERREURS À ÉVITER :
 FORMAT : Retourne UNIQUEMENT l'email reformulé en HTML."""
 
 
+# V3 Conversation Intelligence: mode-specific instructions
+MODE_INSTRUCTIONS = {
+    'brief_confirmation': (
+        "IMPORTANT: Réponse TRÈS COURTE (3-5 lignes max). "
+        "Accusé de réception bref, va droit au but. "
+        "Pas de sections détaillées, pas de listes de dates/sessions."
+    ),
+    'status_update': (
+        "IMPORTANT: Mise à jour de statut. "
+        "Factuel et concis. Pas de nouvelles propositions. "
+        "Résume l'état actuel du dossier en quelques lignes."
+    ),
+    'targeted': (
+        "IMPORTANT: Réponse CIBLÉE sur la question du candidat. "
+        "Ne développe pas les sections non pertinentes. Sois concis. "
+        "Réponds directement à ce qui est demandé."
+    ),
+}
+
+
 def humanize_response(
     template_response: str,
     candidate_message: str,
     candidate_name: str = "",
     previous_response: str = "",
-    use_ai: bool = True
+    use_ai: bool = True,
+    response_mode: str = "full"
 ) -> Dict[str, Any]:
     """
     Humanise une réponse générée par le template engine.
@@ -198,6 +219,10 @@ NOTRE PRÉCÉDENT MESSAGE AU CANDIDAT (éviter de répéter ces infos) :
             # Prompt de base — inclut TOUJOURS la liste des dates à préserver
             dates_instruction = f"\n\n⚠️ DATES À CONSERVER OBLIGATOIREMENT : {dates_str}\nChaque date ci-dessus DOIT apparaître dans ta réponse au format DD/MM/YYYY. N'en supprime AUCUNE." if critical_dates else ""
 
+            # V3: Mode-specific instructions
+            mode_instruction = MODE_INSTRUCTIONS.get(response_mode, '')
+            mode_line = f"\n\n{mode_instruction}" if mode_instruction else ""
+
             base_prompt = f"""Reformule cet email pour le rendre naturel et fluide.
 {previous_context}
 MESSAGE DU CANDIDAT (contexte) :
@@ -207,7 +232,7 @@ EMAIL À REFORMULER :
 {template_response}
 
 Fusionne les sections, ajoute des transitions naturelles, garde toutes les informations factuelles.
-{"IMPORTANT : Évite de répéter les informations déjà communiquées dans notre précédent message." if previous_response else ""}{dates_instruction}"""
+{"IMPORTANT : Évite de répéter les informations déjà communiquées dans notre précédent message." if previous_response else ""}{dates_instruction}{mode_line}"""
 
             # Prompt encore plus renforcé pour le retry
             if is_retry:

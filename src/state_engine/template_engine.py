@@ -1106,6 +1106,16 @@ class TemplateEngine:
         if report_possible or report_bloque or report_force_majeure:
             result['intention_report_date'] = False
 
+        # V3: Si date confirmée → le bloc report_possible V3 gère tout,
+        # désactiver les intentions liées aux dates pour éviter duplication
+        v3_confirmed = result.get('tm_candidate_confirmed_date', '')
+        if v3_confirmed:
+            result['intention_demande_date_plus_tot'] = False
+            result['intention_demande_date'] = False
+            result['intention_report_date'] = False
+            result['intention_question_processus'] = False
+            logger.info(f"📚 V3: intentions date supprimées (date confirmée {v3_confirmed})")
+
         # Calculer show_dates_section (CENTRALISÉ - Section 4)
         # Afficher les dates si:
         # - Pas de date d'examen assignée
@@ -1123,7 +1133,12 @@ class TemplateEngine:
         # RÈGLE 11 : Si la matrice définit explicitement un flag, le respecter
         # ================================================================
         date_case = context.get('date_case')
-        if 'show_dates_section' in context:
+        if v3_confirmed:
+            # V3: date confirmée → pas de Section 4 dates/sessions (report_possible gère tout)
+            result['show_dates_section'] = False
+            result['show_sessions_section'] = False
+            logger.info(f"📅 show_dates_section=False, show_sessions_section=False (V3 date confirmée {v3_confirmed})")
+        elif 'show_dates_section' in context:
             # La matrice a explicitement défini ce flag → PRIORITÉ ABSOLUE
             result['show_dates_section'] = context['show_dates_section']
             logger.info(f"📅 show_dates_section={context['show_dates_section']} (défini par matrice - priorité absolue)")
@@ -1245,6 +1260,33 @@ class TemplateEngine:
             if thread_mem.get('suppress_elearning'):
                 result['suppress_elearning'] = True
                 logger.info("📖 suppress_elearning=True (ThreadMemory: déjà communiqué)")
+
+        # ================================================================
+        # CONVERSATION INTELLIGENCE V3: Response mode → section visibility
+        # Respects Rule 11: matrix flags (context) always take priority
+        # ================================================================
+        v3_mode = context.get('conversation_state', {})
+        if isinstance(v3_mode, dict):
+            v3_response_mode = v3_mode.get('response_mode', '')
+        elif hasattr(v3_mode, 'response_mode'):
+            v3_response_mode = v3_mode.response_mode or ''
+        else:
+            v3_response_mode = ''
+
+        if v3_response_mode == 'brief_confirmation':
+            if 'show_dates_section' not in context:  # Rule 11
+                result['show_dates_section'] = False
+            if 'show_sessions_section' not in context:
+                result['show_sessions_section'] = False
+            logger.info(f"📝 V3 brief_confirmation: dates/sessions suppressed (unless matrix override)")
+        elif v3_response_mode == 'status_update':
+            if 'show_dates_section' not in context:
+                result['show_dates_section'] = False
+            if 'show_sessions_section' not in context:
+                result['show_sessions_section'] = False
+            if 'show_statut_section' not in context:
+                result['show_statut_section'] = True
+            logger.info(f"📝 V3 status_update: statut forced, dates/sessions suppressed (unless matrix override)")
 
         # ================================================================
         # DÉTECTION FALLBACK SESSION: préférence jour/soir non disponible
@@ -2252,9 +2294,16 @@ class TemplateEngine:
         implicit_repositioning = context.get('implicit_date_repositioning', False)
         engagement_can_reposition = context.get('engagement_level', {}).get('can_reposition', False)
 
+        # V3: Si le candidat a déjà confirmé une date, forcer report_possible
+        # indépendamment de l'intention détectée (triage non-déterministe)
+        v3_confirmed_date = context.get('tm_candidate_confirmed_date', '')
+        if v3_confirmed_date and not deadline_passed_auto_reschedule:
+            report_possible = True
+            logger.info(f"📚 V3: report_possible=True (date confirmée {v3_confirmed_date})")
+
         # Seulement si l'intention est REPORT_DATE ET PAS de deadline_passed_reschedule
         # (car deadline_passed_reschedule a son propre traitement)
-        if primary_intent == 'REPORT_DATE' and not deadline_passed_auto_reschedule:
+        elif primary_intent == 'REPORT_DATE' and not deadline_passed_auto_reschedule:
             if implicit_repositioning and engagement_can_reposition:
                 # Repositionnement implicite avec engagement faible → forcer report_possible
                 report_possible = True
@@ -2265,11 +2314,11 @@ class TemplateEngine:
             else:
                 report_bloque = True
 
-        # show_session_info: afficher les infos session (pas pour REPORT_DATE car sessions dans report template)
+        # show_session_info: afficher les infos session (pas pour REPORT_DATE/V3 car sessions dans report template)
         # Ni pour DEMANDE_DATE_PLUS_TOT si sessions déjà proposées récemment
         sessions_already_proposed = context.get('sessions_proposed_recently', False)
         is_early_date_with_sessions = primary_intent == 'DEMANDE_DATE_PLUS_TOT' and sessions_already_proposed
-        show_session_info = primary_intent != 'REPORT_DATE' and not is_early_date_with_sessions
+        show_session_info = primary_intent != 'REPORT_DATE' and not is_early_date_with_sessions and not v3_confirmed_date
 
         return {
             'report_bloque': report_bloque,
@@ -2312,23 +2361,44 @@ class TemplateEngine:
         These flags allow templates to:
         - Acknowledge relances (tm_is_relance)
         - Show progression info (tm_evalbox_changed, tm_date_exam_changed)
+        - V3: Conversation intelligence (response_mode, conversation_mode, etc.)
         - The suppression flags are applied separately in section visibility logic.
         """
         thread_mem = context.get('thread_memory', {})
-        if not thread_mem or not thread_mem.get('has_history'):
-            return {
-                'tm_has_history': False,
-                'tm_is_relance': False,
-                'tm_days_since_last': 0,
-                'tm_evalbox_changed': False,
-                'tm_evalbox_previous': '',
-                'tm_evalbox_current': '',
-                'tm_date_exam_changed': False,
-                'tm_date_exam_previous': '',
-                'tm_date_exam_current': '',
-            }
+        conv_state = context.get('conversation_state', {})
+        if isinstance(conv_state, dict):
+            conv_dict = conv_state
+        elif hasattr(conv_state, 'to_dict'):
+            conv_dict = conv_state.to_dict()
+        else:
+            conv_dict = {}
 
-        return {
+        base_flags = {
+            'tm_has_history': False,
+            'tm_is_relance': False,
+            'tm_days_since_last': 0,
+            'tm_evalbox_changed': False,
+            'tm_evalbox_previous': '',
+            'tm_evalbox_current': '',
+            'tm_date_exam_changed': False,
+            'tm_date_exam_previous': '',
+            'tm_date_exam_current': '',
+            # V3 flags
+            'tm_response_mode': conv_dict.get('response_mode', 'full'),
+            'tm_conversation_mode': conv_dict.get('conversation_mode', 'initial_contact'),
+            'tm_target_date': conv_dict.get('target_date', ''),
+            'tm_has_commitment': conv_dict.get('has_commitments', False),
+            'tm_human_is_handling': conv_dict.get('human_is_handling', False),
+            'tm_candidate_confirmed_date': context.get('tm_candidate_confirmed_date', ''),
+            'tm_candidate_confirmed_session': context.get('tm_candidate_confirmed_session', ''),
+            'tm_report_in_progress': context.get('tm_report_in_progress', False),
+            'tm_report_target_date': context.get('tm_report_target_date', ''),
+        }
+
+        if not thread_mem or not thread_mem.get('has_history'):
+            return base_flags
+
+        base_flags.update({
             'tm_has_history': True,
             'tm_is_relance': thread_mem.get('is_relance', False),
             'tm_days_since_last': thread_mem.get('days_since_last', 0),
@@ -2338,7 +2408,9 @@ class TemplateEngine:
             'tm_date_exam_changed': thread_mem.get('date_exam_changed', False),
             'tm_date_exam_previous': thread_mem.get('date_exam_previous', ''),
             'tm_date_exam_current': thread_mem.get('date_exam_current', ''),
-        }
+        })
+
+        return base_flags
 
     def _extract_cross_department_data(self, context: Dict[str, Any]) -> Dict[str, Any]:
         """
