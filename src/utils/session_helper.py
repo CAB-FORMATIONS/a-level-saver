@@ -1095,35 +1095,42 @@ def verify_session_complaint(
         logger.info("  ✅ Pas de différence détectée - session assignée semble correcte")
 
         # CAS SPÉCIAL: Le candidat veut changer de session (dates) mais pas de type mismatch
-        # → Proposer TOUTES les sessions pour qu'il puisse choisir d'autres dates
+        # → Proposer les sessions selon la préférence du candidat
         if exam_date:
-            logger.info(f"  🔍 Demande de changement de dates → recherche de TOUTES les sessions avant l'examen du {exam_date}...")
+            # Si le candidat a une préférence claire, ne montrer que ce type
+            preferred_type = claimed_type or None
+            if preferred_type:
+                logger.info(f"  🔍 Demande de changement de dates (préférence: {preferred_type}) → recherche sessions {preferred_type} avant l'examen du {exam_date}...")
+            else:
+                logger.info(f"  🔍 Demande de changement de dates → recherche de TOUTES les sessions avant l'examen du {exam_date}...")
 
             all_sessions = []
             sessions_jour = []
             sessions_soir = []
 
-            # Récupérer les sessions jour
-            sessions_jour = get_sessions_for_exam_date(
-                crm_client=crm_client,
-                exam_date=exam_date,
-                session_type='jour',
-                limit=3
-            )
-            if sessions_jour:
-                logger.info(f"  ✅ {len(sessions_jour)} session(s) JOUR trouvée(s)")
-                all_sessions.extend(sessions_jour)
+            # Si préférence jour ou pas de préférence → chercher les sessions jour
+            if not preferred_type or preferred_type == 'jour':
+                sessions_jour = get_sessions_for_exam_date(
+                    crm_client=crm_client,
+                    exam_date=exam_date,
+                    session_type='jour',
+                    limit=3
+                )
+                if sessions_jour:
+                    logger.info(f"  ✅ {len(sessions_jour)} session(s) JOUR trouvée(s)")
+                    all_sessions.extend(sessions_jour)
 
-            # Récupérer les sessions soir
-            sessions_soir = get_sessions_for_exam_date(
-                crm_client=crm_client,
-                exam_date=exam_date,
-                session_type='soir',
-                limit=3
-            )
-            if sessions_soir:
-                logger.info(f"  ✅ {len(sessions_soir)} session(s) SOIR trouvée(s)")
-                all_sessions.extend(sessions_soir)
+            # Si préférence soir ou pas de préférence → chercher les sessions soir
+            if not preferred_type or preferred_type == 'soir':
+                sessions_soir = get_sessions_for_exam_date(
+                    crm_client=crm_client,
+                    exam_date=exam_date,
+                    session_type='soir',
+                    limit=3
+                )
+                if sessions_soir:
+                    logger.info(f"  ✅ {len(sessions_soir)} session(s) SOIR trouvée(s)")
+                    all_sessions.extend(sessions_soir)
 
             if all_sessions:
                 result['alternatives'] = all_sessions
