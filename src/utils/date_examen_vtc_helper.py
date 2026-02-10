@@ -2001,8 +2001,14 @@ def search_dates_for_month_and_location(
                    'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre']
         result['requested_month_name'] = mois_fr[requested_month] if 1 <= requested_month <= 12 else ''
 
-    # Récupérer toutes les dates disponibles
-    all_dates = get_next_exam_dates_any_department(crm_client, limit=50)
+    # Récupérer les dates disponibles
+    # Si on connaît le département, chercher directement ses dates (plus précis)
+    # Sinon, charger toutes les dates tous départements
+    if requested_location:
+        all_dates = get_next_exam_dates(crm_client, str(requested_location), limit=10)
+        logger.info(f"  📅 Recherche ciblée département {requested_location}: {len(all_dates or [])} date(s)")
+    else:
+        all_dates = get_next_exam_dates_any_department(crm_client, limit=200)
 
     if not all_dates:
         return result

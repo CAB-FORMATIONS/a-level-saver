@@ -3347,7 +3347,15 @@ L'équipe CAB Formations"""
                     from src.utils.date_examen_vtc_helper import search_dates_for_month_and_location
 
                     # Utiliser le code département extrait par TriageAgent (prioritaire)
+                    # Fallback: département du candidat depuis son deal/date_examen
                     dept_for_search = requested_dept_code or requested_location
+                    if not dept_for_search:
+                        # Département du candidat depuis date_examen_info
+                        candidate_dept = date_examen_vtc_result.get('current_departement') or \
+                                         date_examen_vtc_result.get('date_examen_info', {}).get('Departement')
+                        if candidate_dept:
+                            dept_for_search = str(candidate_dept)
+                            logger.info(f"  📍 Département fallback depuis deal: {dept_for_search}")
                     if requested_dept_code:
                         logger.info(f"  📍 Département extrait par TriageAgent: {requested_dept_code} (location: {requested_location})")
 
