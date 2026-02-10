@@ -847,15 +847,8 @@ class TemplateEngine:
             'session_vide': not deal_data.get('Session'),
             'has_sessions_proposees': bool(self._flatten_session_options_filtered(context)),
             # Flag: aucune alternative session (ni proposées, ni closest before/after)
-            'no_session_alternatives': (
-                not bool(self._flatten_session_options_filtered(context))
-                and not context.get('closest_session_before')
-                and not context.get('closest_session_after')
-                and not context.get('closest_session_before_jour')
-                and not context.get('closest_session_after_jour')
-                and not context.get('closest_session_before_soir')
-                and not context.get('closest_session_after_soir')
-            ),
+            # Utilise _filter_closest_sessions_by_exam pour exclure les sessions après l'examen (Rule 16)
+            'no_session_alternatives': self._compute_no_session_alternatives(context),
 
             # Force majeure (pour les templates empathiques)
             'mentions_force_majeure': context.get('mentions_force_majeure', False),
@@ -1050,13 +1043,7 @@ class TemplateEngine:
             'is_exact_match': context.get('is_exact_match', False),
             'is_overlap_match': context.get('is_overlap_match', False),
             'is_no_match': context.get('is_no_match', False),
-            'closest_session_before': self._format_session_for_template(context.get('closest_session_before')),
-            'closest_session_after': self._format_session_for_template(context.get('closest_session_after')),
-            # Sessions par type (pour proposer jour ET soir quand pas de préférence)
-            'closest_session_before_jour': self._format_session_for_template(context.get('closest_session_before_jour')),
-            'closest_session_before_soir': self._format_session_for_template(context.get('closest_session_before_soir')),
-            'closest_session_after_jour': self._format_session_for_template(context.get('closest_session_after_jour')),
-            'closest_session_after_soir': self._format_session_for_template(context.get('closest_session_after_soir')),
+            **self._filter_closest_sessions_by_exam(context),
             # Dates de la session choisie (pour compatibilité)
             'session_date_debut': self._format_date(enriched_lookups.get('session_date_debut', '')),
             'session_date_fin': self._format_date(enriched_lookups.get('session_date_fin', '')),
@@ -2024,6 +2011,68 @@ class TemplateEngine:
             else:
                 return f"{day1} {month1} au {day2} {month2} {year}"
         return ''
+
+    def _compute_no_session_alternatives(self, context: Dict[str, Any]) -> bool:
+        """
+        Calcule no_session_alternatives en tenant compte du filtre par date d'examen.
+        True si aucune session proposée ET aucune closest session valide (avant examen).
+        """
+        if bool(self._flatten_session_options_filtered(context)):
+            return False
+
+        filtered = self._filter_closest_sessions_by_exam(context)
+        return all(not v for v in filtered.values())
+
+    def _session_ends_before_exam(self, session: Optional[Dict[str, Any]], exam_date) -> bool:
+        """Vérifie si une session se termine AVANT la date d'examen."""
+        if not session or not exam_date:
+            return True  # Pas de contrainte → garder
+        try:
+            end_str = session.get('Date_fin', '') or ''
+            if not end_str:
+                return True
+            session_end = datetime.strptime(str(end_str)[:10], '%Y-%m-%d').date()
+            return session_end < exam_date
+        except (ValueError, TypeError):
+            return True  # En cas d'erreur, garder par prudence
+
+    def _filter_closest_sessions_by_exam(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Filtre les closest_session_before/after par date d'examen (Rule 16).
+        Les sessions qui se terminent APRÈS l'examen sont nullifiées.
+        """
+        keys = [
+            'closest_session_before', 'closest_session_after',
+            'closest_session_before_jour', 'closest_session_before_soir',
+            'closest_session_after_jour', 'closest_session_after_soir',
+        ]
+
+        # Déterminer si le filtre s'applique
+        primary_intent = context.get('primary_intent') or context.get('detected_intent', '')
+        is_session_change = (
+            primary_intent == 'DEMANDE_CHANGEMENT_SESSION'
+            or 'DEMANDE_CHANGEMENT_SESSION' in context.get('secondary_intents', [])
+        )
+
+        enriched_lookups = context.get('enriched_lookups', {})
+        date_examen_raw = enriched_lookups.get('date_examen') or context.get('date_examen_raw', '')
+        exam_date = None
+        if is_session_change and date_examen_raw:
+            try:
+                exam_date = datetime.strptime(str(date_examen_raw)[:10], '%Y-%m-%d').date()
+            except (ValueError, TypeError):
+                pass
+
+        result = {}
+        for key in keys:
+            raw_session = context.get(key)
+            if exam_date and raw_session and not self._session_ends_before_exam(raw_session, exam_date):
+                logger.info(f"📅 {key} filtré: session se termine après examen {exam_date}")
+                result[key] = None
+            else:
+                result[key] = self._format_session_for_template(raw_session)
+
+        return result
 
     def _format_session_for_template(self, session: Optional[Dict[str, Any]]) -> Optional[Dict[str, str]]:
         """

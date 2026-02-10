@@ -459,6 +459,46 @@ class ZohoDeskClient(ZohoAPIClient):
         logger.debug(f"Draft payload: channel=EMAIL, contentType={content_type}, content_length={len(content)}")
         return self._make_request("POST", url, params=params, json=data)
 
+    def send_ticket_reply(
+        self,
+        ticket_id: str,
+        content: str,
+        content_type: str = "html",
+        from_email: str = None,
+        to_email: str = None
+    ) -> Dict[str, Any]:
+        """
+        Send a reply on a ticket (sends immediately, NOT a draft).
+
+        WARNING: This method sends the reply directly to the customer.
+        Do NOT use in the automated workflow — use create_ticket_reply_draft() instead.
+
+        Args:
+            ticket_id: The ticket ID
+            content: The reply content (HTML or plain text)
+            content_type: "html" or "plainText" (default: "html")
+            from_email: Sender email address (optional)
+            to_email: Recipient email address (optional)
+
+        Returns:
+            Dict containing the sent thread details
+        """
+        url = f"{settings.zoho_desk_api_url}/tickets/{ticket_id}/sendReply"
+        params = {"orgId": settings.zoho_desk_org_id}
+        data = {
+            "channel": "EMAIL",
+            "contentType": content_type,
+            "content": content,
+            "isForward": False
+        }
+        if from_email:
+            data["fromEmailAddress"] = from_email
+        if to_email:
+            data["to"] = to_email
+
+        logger.info(f"Sending reply for ticket {ticket_id}")
+        return self._make_request("POST", url, params=params, json=data)
+
     def has_existing_draft(self, ticket_id: str) -> bool:
         """
         Check if a ticket already has a draft reply.

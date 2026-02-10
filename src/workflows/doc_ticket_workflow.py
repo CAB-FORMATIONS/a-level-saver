@@ -1866,6 +1866,19 @@ La date d'examen dans Zoho CRM est dans le passé. Le workflow a été stoppé p
             triage_result['has_existing_uber_deal'] = True
             triage_result['selected_deal'] = selected_deal
 
+            # Note interne pour le conseiller Contact
+            deal_name = selected_deal.get('Deal_Name', 'N/A') if selected_deal else 'N/A'
+            internal_note = (
+                f"⚡ DEMANDE NON-UBER — Candidat avec dossier Uber 20€ existant ({deal_name}).\n"
+                f"Sa demande actuelle concerne un autre financement (CPF / France Travail / fi perso).\n"
+                f"Le dossier Uber 20€ n'est pas concerné → à traiter comme un nouveau prospect."
+            )
+            try:
+                self.desk_client.add_ticket_comment(ticket_id, internal_note, is_public=False)
+                logger.info("  📝 Note interne ajoutée (demande non-Uber)")
+            except Exception as e:
+                logger.warning(f"  ⚠️ Erreur ajout note interne: {e}")
+
             # Auto-transfer vers Contact
             if auto_transfer:
                 try:
@@ -1887,6 +1900,18 @@ La date d'examen dans Zoho CRM est dans le passé. Le workflow a été stoppé p
             triage_result['target_department'] = 'Contact'
             triage_result['reason'] = "Demande formation non-Uber (CPF/France Travail/autre) - prospect à traiter manuellement"
             triage_result['method'] = 'non_uber_prospect_routing'
+
+            # Note interne pour le conseiller Contact
+            internal_note = (
+                "⚡ PROSPECT NON-UBER — Pas de dossier Uber 20€ existant.\n"
+                "Demande de formation via autre financement (CPF / France Travail / fi perso).\n"
+                "À traiter comme un nouveau prospect."
+            )
+            try:
+                self.desk_client.add_ticket_comment(ticket_id, internal_note, is_public=False)
+                logger.info("  📝 Note interne ajoutée (prospect non-Uber)")
+            except Exception as e:
+                logger.warning(f"  ⚠️ Erreur ajout note interne: {e}")
 
             if auto_transfer:
                 try:
