@@ -3925,6 +3925,7 @@ L'équipe CAB Formations"""
         matched_session_type = None
         matched_session_start = None
         matched_session_end = None
+        matched_session_already_started = False
 
         if detected_intent == 'CONFIRMATION_SESSION':
             confirmed_dates = intent.confirmed_session_dates
@@ -3947,10 +3948,14 @@ L'équipe CAB Formations"""
 
             # Fallback 2: extraire les dates directement du message candidat via regex
             # Ex: "du 13 Avril au 24" → "13/04/2026-24/04/2026"
+            # IMPORTANT: nettoyer le contenu cité/forwardé pour éviter de matcher
+            # les dates de la réponse CAB précédente (ex: "du 16/03/2026 au 27/03/2026")
             if not confirmed_dates:
                 customer_msg = triage_result.get('customer_message', '')
                 if customer_msg:
-                    extracted = self._extract_dates_from_message(customer_msg)
+                    from business_rules import BusinessRules
+                    clean_msg = BusinessRules.strip_forwarded_content(customer_msg)
+                    extracted = self._extract_dates_from_message(clean_msg)
                     if extracted:
                         confirmed_dates = extracted
                         logger.info(f"  📅 Dates extraites du message candidat (regex): {confirmed_dates}")
@@ -4001,8 +4006,11 @@ L'équipe CAB Formations"""
                 matched_session_type = matched.get('session_type')
                 matched_session_start = matched.get('Date_d_but')
                 matched_session_end = matched.get('Date_fin')
+                matched_session_already_started = matched.get('already_started', False)
                 logger.info(f"  ✅ Session matchée: {matched_session_name} (ID: {matched_session_id})")
                 logger.info(f"     Du {matched_session_start} au {matched_session_end}")
+                if matched_session_already_started:
+                    logger.info(f"     ⚠️ Session déjà commencée (Date_debut < aujourd'hui)")
             elif session_preference:
                 # Le candidat a exprimé une préférence mais on n'a pas pu matcher
                 logger.warning(f"  ⚠️ Préférence '{session_preference}' exprimée mais aucune session disponible")
@@ -4060,6 +4068,7 @@ L'équipe CAB Formations"""
             'matched_session_type': matched_session_type,
             'matched_session_start': matched_session_start,
             'matched_session_end': matched_session_end,
+            'session_already_started': matched_session_already_started,
             # Correction erreur CAB (DEMANDE_CHANGEMENT_SESSION avec plainte)
             'cab_error_corrected': session_data.get('cab_error_corrected', False) if session_data else False,
             'cab_error_corrected_session_id': session_data.get('cab_error_corrected_session_id') if session_data else None,
@@ -4092,8 +4101,12 @@ L'équipe CAB Formations"""
         """
         Matche une session confirmée par le candidat avec les sessions proposées.
 
+        Supporte deux formats:
+        - "DD/MM/YYYY-DD/MM/YYYY" (range début-fin)
+        - "DD/MM/YYYY" (date unique → matching par start_date seulement)
+
         Args:
-            confirmed_dates: Dates au format "DD/MM/YYYY-DD/MM/YYYY" (début-fin)
+            confirmed_dates: Dates au format "DD/MM/YYYY-DD/MM/YYYY" ou "DD/MM/YYYY"
             proposed_options: Liste des options de session proposées
 
         Returns:
@@ -4102,8 +4115,42 @@ L'équipe CAB Formations"""
         from src.utils.date_utils import parse_date_flexible
 
         try:
-            # Parser les dates confirmées
+            # Déterminer si c'est une date unique ou un range
             parts = confirmed_dates.split('-')
+            single_date_mode = len(parts) == 1
+
+            if single_date_mode:
+                # Date unique → matching par start_date seulement
+                confirmed_start = parse_date_flexible(parts[0].strip())
+                if not confirmed_start:
+                    logger.warning(f"Impossible de parser la date unique: {confirmed_dates}")
+                    return None
+
+                logger.info(f"  📅 Mode date unique: matching par start_date = {confirmed_start.strftime('%d/%m/%Y')}")
+
+                for option in proposed_options:
+                    sessions = option.get('sessions', [])
+                    for session in sessions:
+                        session_start = parse_date_flexible(session.get('Date_d_but', ''))
+                        if not session_start:
+                            continue
+
+                        if abs((session_start - confirmed_start).days) <= 1:
+                            session_type = session.get('session_type', '')
+                            session_name = 'Cours du jour' if session_type == 'jour' else 'Cours du soir' if session_type == 'soir' else session.get('Name', '')
+
+                            return {
+                                'id': session.get('id'),
+                                'name': session_name,
+                                'session_type': session_type,
+                                'Date_d_but': session.get('Date_d_but'),
+                                'Date_fin': session.get('Date_fin'),
+                                'already_started': session.get('already_started', False),
+                            }
+
+                return None
+
+            # Range mode: "DD/MM/YYYY-DD/MM/YYYY"
             if len(parts) != 2:
                 logger.warning(f"Format dates confirmées invalide: {confirmed_dates}")
                 return None
@@ -4140,6 +4187,7 @@ L'équipe CAB Formations"""
                             'session_type': session_type,
                             'Date_d_but': session.get('Date_d_but'),
                             'Date_fin': session.get('Date_fin'),
+                            'already_started': session.get('already_started', False),
                         }
 
             return None
@@ -4150,16 +4198,18 @@ L'équipe CAB Formations"""
 
     def _extract_dates_from_message(self, message: str) -> Optional[str]:
         """
-        Extrait une plage de dates depuis le message du candidat.
+        Extrait une plage de dates ou une date unique depuis le message du candidat.
 
         Patterns supportés:
         - "du 13 Avril au 24" → 13/04/YYYY-24/04/YYYY
         - "du 13/04 au 24/04" → 13/04/YYYY-24/04/YYYY
         - "du 13 avril au 24 avril" → 13/04/YYYY-24/04/YYYY
         - "formation du 13 au 24 avril" → 13/04/YYYY-24/04/YYYY
+        - "le 09/02" → 09/02/YYYY (date unique)
+        - "le 9 février" → 09/02/YYYY (date unique)
 
         Returns:
-            String "DD/MM/YYYY-DD/MM/YYYY" ou None
+            String "DD/MM/YYYY-DD/MM/YYYY" (range) ou "DD/MM/YYYY" (date unique) ou None
         """
         import re
         from datetime import datetime
@@ -4230,6 +4280,32 @@ L'équipe CAB Formations"""
             year = now.year if month >= now.month else now.year + 1
             return f"{day1:02d}/{month:02d}/{year}-{day2:02d}/{month:02d}/{year}"
 
+        # Pattern 5: "le DD/MM" ou "le DD/MM/YYYY" (date unique, souvent confirmation d'une session proposée)
+        # Ex: "le 09/02" → "09/02/2026" (date unique, pas de range)
+        # Negative lookahead: ne pas matcher si suivi de " au" (c'est un range, géré par Pattern 3)
+        m = re.search(
+            r'(?:le|du)\s+(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?(?!\s*au)',
+            clean
+        )
+        if m:
+            day1, month1 = int(m.group(1)), int(m.group(2))
+            year1 = int(m.group(3)) if m.group(3) else (now.year if month1 >= now.month else now.year + 1)
+            if year1 < 100:
+                year1 += 2000
+            return f"{day1:02d}/{month1:02d}/{year1}"
+
+        # Pattern 6: "le DD mois" (date unique avec nom de mois)
+        # Ex: "le 9 février" → "09/02/2026"
+        m = re.search(
+            rf'le\s+(\d{{1,2}})\s+({month_pattern})',
+            clean
+        )
+        if m:
+            day1 = int(m.group(1))
+            month1 = MONTH_MAP[m.group(2)]
+            year1 = now.year if month1 >= now.month else now.year + 1
+            return f"{day1:02d}/{month1:02d}/{year1}"
+
         return None
 
     def _match_session_by_preference(
@@ -4288,8 +4364,12 @@ L'équipe CAB Formations"""
         Utilisé pour matcher dans sessions_proposees (format flat) quand
         proposed_options (format imbriqué) est vide.
 
+        Supporte deux formats:
+        - "DD/MM/YYYY-DD/MM/YYYY" (range début-fin)
+        - "DD/MM/YYYY" (date unique → matching par start_date seulement)
+
         Args:
-            confirmed_dates: Dates au format "DD/MM/YYYY-DD/MM/YYYY"
+            confirmed_dates: Dates au format "DD/MM/YYYY-DD/MM/YYYY" ou "DD/MM/YYYY"
             sessions_list: Liste plate de sessions
 
         Returns:
@@ -4298,8 +4378,42 @@ L'équipe CAB Formations"""
         from src.utils.date_utils import parse_date_flexible
 
         try:
-            # Parser les dates confirmées
+            # Déterminer si c'est une date unique ou un range
             parts = confirmed_dates.split('-')
+            single_date_mode = len(parts) == 1
+
+            if single_date_mode:
+                confirmed_start = parse_date_flexible(parts[0].strip())
+                if not confirmed_start:
+                    logger.warning(f"Impossible de parser la date unique: {confirmed_dates}")
+                    return None
+
+                logger.info(f"  📅 Recherche session (date unique): {confirmed_start.strftime('%d/%m/%Y')}")
+
+                for session in sessions_list:
+                    session_start = parse_date_flexible(session.get('Date_d_but', '') or session.get('date_debut', ''))
+                    if not session_start:
+                        continue
+
+                    if abs((session_start - confirmed_start).days) <= 1:
+                        session_type = session.get('session_type', '')
+                        session_name = 'Cours du jour' if session_type == 'jour' else 'Cours du soir' if session_type == 'soir' else session.get('Name', '')
+
+                        logger.info(f"  ✅ Session matchée dans liste plate (date unique): {session_name}")
+                        logger.info(f"     Du {session.get('Date_d_but', '')} au {session.get('Date_fin', '')}")
+
+                        return {
+                            'id': session.get('id'),
+                            'name': session_name,
+                            'session_type': session_type,
+                            'Date_d_but': session.get('Date_d_but'),
+                            'Date_fin': session.get('Date_fin'),
+                            'already_started': session.get('already_started', False),
+                        }
+
+                return None
+
+            # Range mode
             if len(parts) != 2:
                 logger.warning(f"Format dates confirmées invalide: {confirmed_dates}")
                 return None
@@ -4339,6 +4453,7 @@ L'équipe CAB Formations"""
                         'session_type': session_type,
                         'Date_d_but': session.get('Date_d_but'),
                         'Date_fin': session.get('Date_fin'),
+                        'already_started': session.get('already_started', False),
                     }
 
             return None
@@ -4981,6 +5096,7 @@ L'équipe CAB Formations"""
             'matched_session_type': analysis_result.get('matched_session_type'),
             'matched_session_start': analysis_result.get('matched_session_start'),
             'matched_session_end': analysis_result.get('matched_session_end'),
+            'session_already_started': analysis_result.get('session_already_started', False),
 
             # Erreur de saisie session corrigée automatiquement (erreur d'année)
             'session_assignment_error': analysis_result.get('session_assignment_error', False),

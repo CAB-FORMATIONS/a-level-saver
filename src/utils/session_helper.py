@@ -58,8 +58,12 @@ def get_sessions_for_exam_date(
         min_end_date = exam_date_obj - timedelta(days=MAX_DAYS_BEFORE_EXAM)
         max_end_date = exam_date_obj - timedelta(days=MIN_DAYS_BEFORE_EXAM)
 
+        # Permettre les sessions commencées depuis moins de 3 jours (confirmation tardive)
+        three_days_ago = today - timedelta(days=3)
+        three_days_ago_str = three_days_ago.strftime('%Y-%m-%d')
+
         logger.info(f"  Recherche sessions se terminant entre {min_end_date.strftime('%Y-%m-%d')} et {max_end_date.strftime('%Y-%m-%d')}")
-        logger.info(f"  Filtrage: Date_debut >= {today_str} (sessions non commencées)")
+        logger.info(f"  Filtrage: Date_debut >= {three_days_ago_str} (sessions non commencées ou commencées < 3j)")
         logger.info(f"  Filtrage: Lieu_de_formation = VISIO Zoom VTC (sessions Uber uniquement)")
 
         # Rechercher les sessions planifiées
@@ -68,13 +72,13 @@ def get_sessions_for_exam_date(
         # Critère:
         # - Statut = PLANIFIÉ (ou null)
         # - Date_fin dans la plage (proche de l'examen)
-        # - Date_debut >= aujourd'hui (pas encore commencée)
+        # - Date_debut >= (aujourd'hui - 3 jours) pour inclure sessions récemment commencées
         # Note: Filtrage Lieu_de_formation = VISIO Zoom VTC fait en Python après récupération
         criteria = (
             f"(((Statut:equals:PLANIFIÉ)or(Statut:equals:null))"
             f"and(Date_fin:greater_equal:{min_end_date.strftime('%Y-%m-%d')})"
             f"and(Date_fin:less_equal:{max_end_date.strftime('%Y-%m-%d')})"
-            f"and(Date_d_but:greater_equal:{today_str}))"
+            f"and(Date_d_but:greater_equal:{three_days_ago_str}))"
         )
 
         # Pagination - augmentée pour couvrir tous les cas
@@ -158,6 +162,11 @@ def get_sessions_for_exam_date(
                 except ValueError as e:
                     logger.warning(f"Erreur parsing date_fin '{date_fin}': {e}")
                     session['days_before_exam'] = 999
+
+            # Marquer les sessions déjà commencées (Date_debut < aujourd'hui)
+            session_start = session.get('Date_d_but', '')
+            if session_start and session_start < today_str:
+                session['already_started'] = True
 
             # Catégoriser par type
             if session_name.startswith(SESSION_TYPE_JOUR):
@@ -798,13 +807,16 @@ def match_sessions_by_date_range(
     search_start = (start_date - timedelta(days=30)).strftime('%Y-%m-%d')
     search_end = (end_date + timedelta(days=30)).strftime('%Y-%m-%d')
 
+    # Permettre les sessions commencées depuis moins de 3 jours (confirmation tardive)
+    three_days_ago_str = (today - timedelta(days=3)).strftime('%Y-%m-%d')
+
     try:
         url = f"{settings.zoho_crm_api_url}/Sessions1/search"
 
         # Critères: sessions planifiées, dans la période de recherche
         criteria = (
             f"(((Statut:equals:PLANIFIÉ)or(Statut:equals:null))"
-            f"and(Date_d_but:greater_equal:{today_str})"
+            f"and(Date_d_but:greater_equal:{three_days_ago_str})"
             f"and(Date_d_but:less_equal:{search_end})"
             f"and(Date_fin:greater_equal:{search_start}))"
         )

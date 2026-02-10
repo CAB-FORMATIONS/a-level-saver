@@ -740,6 +740,7 @@ class TemplateEngine:
             # Session confirmée par le candidat (CONFIRMATION_SESSION)
             # Priorité: matched_session (nouveau matching) > enriched_lookups (session déjà assignée)
             'session_confirmed': context.get('session_confirmed', False) or bool(enriched_lookups.get('session_name')),
+            'session_deja_commencee': context.get('session_already_started', False),
             'matched_session_name': context.get('matched_session_name', '') or ('Cours du soir' if enriched_lookups.get('session_type') == 'soir' else 'Cours du jour' if enriched_lookups.get('session_type') == 'jour' else 'votre session de formation'),
             'matched_session_start': self._format_date(context.get('matched_session_start') or enriched_lookups.get('session_date_debut', '')),
             'matched_session_end': self._format_date(context.get('matched_session_end') or enriched_lookups.get('session_date_fin', '')),

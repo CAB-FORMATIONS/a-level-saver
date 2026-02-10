@@ -30,6 +30,9 @@ Notre équipe va procéder à cette vérification et vous recontactera rapidemen
 <b>Concernant votre session de formation</b><br>
 {{#if session_confirmed}}
 Nous avons bien enregistré votre choix{{#if matched_session_name}} : <b>{{matched_session_name}}</b>{{/if}}{{#if matched_session_start}} du <b>{{matched_session_start}}</b> au <b>{{matched_session_end}}</b>{{/if}}.<br>
+{{#if session_deja_commencee}}
+<b>Note :</b> Cette session a déjà débuté. Nous vous y inscrivons immédiatement afin que vous puissiez rejoindre le groupe en cours.<br>
+{{/if}}
 {{#if date_examen}}
 Votre examen est prévu le <b>{{date_examen}}</b>.<br>
 {{/if}}
