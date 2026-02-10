@@ -101,11 +101,11 @@ Si l'email contient à la fois une section "dates d'examen" et une section "sess
 Exemple de fusion correcte :
 <b>Dates d'examen et sessions disponibles</b><br>
 <b>Examen du 31/03/2026</b> (clôture : 27/02/2026)<br>
-&nbsp;&nbsp;→ Cours du jour : du 23/03 au 27/03<br>
-&nbsp;&nbsp;→ Cours du soir : du 16/03 au 27/03<br>
+&nbsp;&nbsp;→ Cours du jour : du 23/03/2026 au 27/03/2026<br>
+&nbsp;&nbsp;→ Cours du soir : du 16/03/2026 au 27/03/2026<br>
 <b>Examen du 28/04/2026</b> (clôture : 27/03/2026)<br>
-&nbsp;&nbsp;→ Cours du jour : du 20/04 au 24/04<br>
-&nbsp;&nbsp;→ Cours du soir : du 13/04 au 24/04<br>
+&nbsp;&nbsp;→ Cours du jour : du 20/04/2026 au 24/04/2026<br>
+&nbsp;&nbsp;→ Cours du soir : du 13/04/2026 au 24/04/2026<br>
 <br>
 <b>Merci de nous confirmer la date et le type de session souhaités.</b>
 
@@ -180,16 +180,19 @@ NOTRE PRÉCÉDENT MESSAGE AU CANDIDAT (éviter de répéter ces infos) :
 
 """
 
-        # Extraire les dates pour le prompt de retry
+        # Extraire les dates critiques à préserver
         date_pattern = r'\d{2}/\d{2}/\d{4}'
         critical_dates = set(re.findall(date_pattern, template_response))
+        dates_str = ', '.join(sorted(critical_dates))
 
         # Retry loop (max 2 tentatives)
         max_attempts = 2
         for attempt in range(max_attempts):
             is_retry = attempt > 0
 
-            # Prompt de base
+            # Prompt de base — inclut TOUJOURS la liste des dates à préserver
+            dates_instruction = f"\n\n⚠️ DATES À CONSERVER OBLIGATOIREMENT : {dates_str}\nChaque date ci-dessus DOIT apparaître dans ta réponse au format DD/MM/YYYY. N'en supprime AUCUNE." if critical_dates else ""
+
             base_prompt = f"""Reformule cet email pour le rendre naturel et fluide.
 {previous_context}
 MESSAGE DU CANDIDAT (contexte) :
@@ -199,15 +202,15 @@ EMAIL À REFORMULER :
 {template_response}
 
 Fusionne les sections, ajoute des transitions naturelles, garde toutes les informations factuelles.
-{"IMPORTANT : Évite de répéter les informations déjà communiquées dans notre précédent message." if previous_response else ""}"""
+{"IMPORTANT : Évite de répéter les informations déjà communiquées dans notre précédent message." if previous_response else ""}{dates_instruction}"""
 
-            # Prompt renforcé pour le retry
+            # Prompt encore plus renforcé pour le retry
             if is_retry:
-                dates_str = ', '.join(sorted(critical_dates))
                 base_prompt += f"""
 
 ⚠️ ATTENTION CRITIQUE - TENTATIVE 2/2 :
-Tu DOIS obligatoirement conserver ces dates exactes dans ta réponse : {dates_str}
+Ta première tentative a ÉCHOUÉ car des dates manquaient.
+Tu DOIS obligatoirement conserver TOUTES ces dates : {dates_str}
 Ne reformule PAS les dates, garde-les au format DD/MM/YYYY.
 Tu DOIS conserver les horaires EXACTS de formation : 8h30-17h30 pour les cours du jour, 18h-22h pour les cours du soir.
 NE JAMAIS modifier ces horaires (pas de "8h30 à 16h", pas de "9h-17h", etc.).
@@ -282,14 +285,34 @@ def _validate_humanized_response(original: str, humanized: str) -> Dict[str, Any
     # Extraire les dates du format DD/MM/YYYY
     date_pattern = r'\d{2}/\d{2}/\d{4}'
     original_dates = set(re.findall(date_pattern, original))
-    humanized_dates = set(re.findall(date_pattern, humanized))
+    humanized_dates_full = set(re.findall(date_pattern, humanized))
 
-    missing_dates = original_dates - humanized_dates
+    # Aussi extraire les dates raccourcies DD/MM (le humaniser raccourcit souvent)
+    short_date_pattern = r'(\d{2}/\d{2})(?!/\d)'  # DD/MM NOT followed by /YYYY
+    humanized_dates_short = set(re.findall(short_date_pattern, humanized))
+
+    # Pour chaque date originale DD/MM/YYYY, vérifier si elle est présente
+    # soit en format complet DD/MM/YYYY, soit en format court DD/MM
+    missing_dates = set()
+    for date_full in original_dates:
+        date_short = date_full[:5]  # "31/03/2026" → "31/03"
+        if date_full not in humanized_dates_full and date_short not in humanized_dates_short:
+            missing_dates.add(date_full)
+
     if missing_dates:
         issues.append(f"Dates manquantes: {missing_dates}")
 
     # Vérifier les dates INVENTÉES (dans humanized mais pas dans original)
-    invented_dates = humanized_dates - original_dates
+    # Extraire les DD/MM des dates originales pour comparaison
+    original_dates_short = {d[:5] for d in original_dates}  # {"31/03", "27/02", ...}
+    invented_dates = set()
+    for date_full in humanized_dates_full:
+        if date_full not in original_dates:
+            # Vérifier si c'est une date qui existe en format court dans l'original
+            # (le humaniser peut ajouter l'année à une date raccourcie du template)
+            if date_full[:5] not in original_dates_short:
+                invented_dates.add(date_full)
+
     if invented_dates:
         issues.append(f"Dates inventées (hallucination): {invented_dates}")
 

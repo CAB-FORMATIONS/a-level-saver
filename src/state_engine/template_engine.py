@@ -1232,18 +1232,28 @@ class TemplateEngine:
         # ================================================================
         # THREAD MEMORY: Suppression sections déjà communiquées
         # RÈGLE: Ne s'applique QUE si la matrice n'a PAS défini le flag (Rule 11)
+        # EXCEPTION: Si l'intention n'est PAS liée à la section, ThreadMemory
+        #   peut supprimer même si la matrice a forcé le flag (éviter répétition)
         # ================================================================
         thread_mem = context.get('thread_memory', {})
         if thread_mem.get('has_history'):
-            if thread_mem.get('suppress_dates') and 'show_dates_section' not in context and result.get('show_dates_section'):
-                result['show_dates_section'] = False
-                logger.info("📅 show_dates_section=False (ThreadMemory: déjà communiqué, pas de changement)")
+            primary_intent = context.get('primary_intent') or context.get('detected_intent', '')
+            # Intentions qui REQUIÈRENT la section statut (ne pas supprimer)
+            statut_intents = {'STATUT_DOSSIER', 'QUESTION_PROCESSUS', 'QUESTION_DOCUMENTS'}
+            # Intentions qui REQUIÈRENT la section dates (ne pas supprimer)
+            dates_intents = {'REPORT_DATE', 'DEMANDE_DATE_PLUS_TOT', 'CONFIRMATION_DATE'}
+
+            if thread_mem.get('suppress_dates') and result.get('show_dates_section'):
+                if 'show_dates_section' not in context or primary_intent not in dates_intents:
+                    result['show_dates_section'] = False
+                    logger.info("📅 show_dates_section=False (ThreadMemory: déjà communiqué, pas de changement)")
             if thread_mem.get('suppress_sessions') and 'show_sessions_section' not in context and result.get('show_sessions_section'):
                 result['show_sessions_section'] = False
                 logger.info("📚 show_sessions_section=False (ThreadMemory: déjà communiqué, pas de changement)")
-            if thread_mem.get('suppress_statut') and 'show_statut_section' not in context and result.get('show_statut_section'):
-                result['show_statut_section'] = False
-                logger.info("📋 show_statut_section=False (ThreadMemory: déjà communiqué, pas de changement)")
+            if thread_mem.get('suppress_statut') and result.get('show_statut_section'):
+                if 'show_statut_section' not in context or primary_intent not in statut_intents:
+                    result['show_statut_section'] = False
+                    logger.info("📋 show_statut_section=False (ThreadMemory: déjà communiqué, pas de changement)")
             if thread_mem.get('suppress_elearning'):
                 result['suppress_elearning'] = True
                 logger.info("📖 suppress_elearning=True (ThreadMemory: déjà communiqué)")
@@ -2335,7 +2345,8 @@ class TemplateEngine:
 
         # Pour DEMANDE_CHANGEMENT_SESSION ou session_assignment_error, filtrer par la date d'examen du candidat
         has_session_assignment_error = context.get('session_assignment_error', False)
-        if primary_intent == 'DEMANDE_CHANGEMENT_SESSION' or has_session_assignment_error:
+        is_session_change = primary_intent == 'DEMANDE_CHANGEMENT_SESSION' or 'DEMANDE_CHANGEMENT_SESSION' in context.get('secondary_intents', [])
+        if is_session_change or has_session_assignment_error:
             # Récupérer la date d'examen confirmée du candidat
             enriched_lookups = context.get('enriched_lookups', {})
             date_examen_raw = enriched_lookups.get('date_examen') or context.get('date_examen_raw', '')

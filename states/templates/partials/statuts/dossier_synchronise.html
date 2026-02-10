@@ -24,7 +24,8 @@ La CMA vérifie la conformité de vos documents. Ce processus prend généraleme
 <b>⚠️ Important :</b> Si la CMA demande des corrections sur certains documents, vous recevrez un email et devrez corriger{{#if date_cloture}} <b>avant le {{date_cloture}}</b> (date limite d'inscription){{/if}}.<br>
 {{/if}}
 <br>
-<!-- Encourager à vérifier le dossier sur ExamT3P -->
+<!-- Encourager à vérifier le dossier sur ExamT3P (sauf si identifiants déjà affichés par intention) -->
+{{#unless intention_demande_identifiants}}
 {{#if compte_existe}}
 <b>Vérifiez votre dossier :</b> Vous pouvez suivre l'état de vos documents sur <a href="https://www.exament3p.fr">exament3p.fr</a> :<br>
 → Identifiant : {{identifiant_examt3p}}<br>
@@ -37,3 +38,4 @@ La CMA vérifie la conformité de vos documents. Ce processus prend généraleme
 <i>⚠️ <b>Important :</b> Ne modifiez pas votre identifiant ni votre mot de passe, sinon nous ne pourrons plus assurer le suivi de votre dossier{{#if evalbox_non_paye}} ni effectuer le paiement des frais d'inscription pour vous{{/if}}.</i><br>
 <i>Vous pouvez ajouter des pièces complémentaires si nécessaire, mais vous ne pouvez pas supprimer celles déjà envoyées.</i><br>
 {{/if}}
+{{/unless}}

@@ -3642,9 +3642,10 @@ L'équipe CAB Formations"""
             # CAS 6: Formation manquée + examen futur → proposer sessions de rafraîchissement
             exam_dates_for_session = [date_examen_info]
             logger.info(f"  📚 FORMATION MANQUÉE + examen futur → recherche sessions de rafraîchissement pour {date_examen_info.get('Date_Examen')}")
-        elif detected_intent == 'DEMANDE_CHANGEMENT_SESSION' and has_assigned_date:
+        elif (detected_intent == 'DEMANDE_CHANGEMENT_SESSION' or 'DEMANDE_CHANGEMENT_SESSION' in triage_result.get('secondary_intents', [])) and has_assigned_date:
             # CAS 7: Demande de changement de session avec date d'examen assignée
             # → proposer sessions alternatives avant cette date d'examen
+            # NOTE: Vérifie aussi les intentions secondaires (ex: principale=ENVOIE_IDENTIFIANTS + secondaire=DEMANDE_CHANGEMENT_SESSION)
             exam_dates_for_session = [date_examen_info]
             logger.info(f"  📚 DEMANDE_CHANGEMENT_SESSION + date assignée → recherche sessions avant {date_examen_info.get('Date_Examen')}")
         else:
@@ -3670,7 +3671,7 @@ L'équipe CAB Formations"""
 
         # Pour REPORT_DATE, toujours chercher les sessions des dates alternatives
         is_report_date = detected_intent == 'REPORT_DATE'
-        is_session_change_request = detected_intent == 'DEMANDE_CHANGEMENT_SESSION'
+        is_session_change_request = detected_intent == 'DEMANDE_CHANGEMENT_SESSION' or 'DEMANDE_CHANGEMENT_SESSION' in triage_result.get('secondary_intents', [])
         is_session_complaint = is_session_change_request and intent.is_complaint
         # Pour DEMANDE_CHANGEMENT_SESSION avec dates spécifiques, on n'a pas besoin de exam_dates_for_session
         has_specific_dates = intent.has_date_range_request if is_session_change_request else False
@@ -3768,7 +3769,7 @@ L'équipe CAB Formations"""
                     threads=threads_data,
                     crm_client=self.crm_client,
                     triage_session_preference=triage_session_pref,
-                    allow_change=(detected_intent in ['CONFIRMATION_SESSION', 'DEMANDE_CHANGEMENT_SESSION'] or date_examen_vtc_result.get('implicit_date_repositioning')),
+                    allow_change=(detected_intent in ['CONFIRMATION_SESSION', 'DEMANDE_CHANGEMENT_SESSION'] or is_session_change_request or date_examen_vtc_result.get('implicit_date_repositioning')),
                     enriched_lookups=enriched_lookups
                 )
 
