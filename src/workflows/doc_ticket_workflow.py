@@ -92,6 +92,56 @@ class DOCTicketWorkflow:
 
         logger.info("✅ DOCTicketWorkflow initialized (State Engine, shared clients)")
 
+    # Scénarios éligibles à l'auto-send.
+    # Chaque entrée: (subject_contains, max_threads ou None si pas de limite)
+    # subject_contains: comparaison case-insensitive
+    AUTO_SEND_SCENARIOS = [
+        {'subject_contains': 'test de sélection réussi', 'max_threads': 1},
+        {'subject_contains': 'test de selection reussi', 'max_threads': 1},
+        # Ajouter d'autres scénarios ici, ex:
+        # {'subject_contains': 'autre sujet', 'max_threads': None},  # pas de limite de threads
+    ]
+
+    def _can_auto_send(self, response_result: Dict, triage_result: Dict = None) -> tuple:
+        """Check if the response is safe to auto-send (vs fallback to draft).
+
+        Guard rails:
+        1. Scenario eligibility: subject must match a whitelist entry + respect max_threads if defined
+        2. Response quality: non-empty, humanized, validation passed
+
+        Returns:
+            (can_send: bool, fallback_reason: Optional[str])
+        """
+        # --- Scenario eligibility ---
+        if not triage_result:
+            return False, 'no_triage_data'
+
+        subject = (triage_result.get('ticket_subject') or '').lower().strip()
+        incoming_count = triage_result.get('incoming_thread_count', 0)
+
+        matched_scenario = None
+        for scenario in self.AUTO_SEND_SCENARIOS:
+            if scenario['subject_contains'] in subject:
+                matched_scenario = scenario
+                break
+
+        if not matched_scenario:
+            return False, f'subject_not_eligible: {subject[:50]}'
+
+        if matched_scenario.get('max_threads') is not None and incoming_count > matched_scenario['max_threads']:
+            return False, f'too_many_threads: {incoming_count}'
+
+        # --- Response quality ---
+        if not response_result.get('response_text', '').strip():
+            return False, 'empty_response'
+        if not response_result.get('was_humanized', False):
+            return False, 'humanizer_failed'
+        for sid, val in response_result.get('validation', {}).items():
+            if not val.get('compliant', True):
+                return False, 'validation_errors'
+
+        return True, None
+
     def _mark_brouillon_auto(self, ticket_id: str) -> None:
         """Mark ticket with BROUILLON AUTO = true after draft creation."""
         try:
@@ -269,7 +319,8 @@ class DOCTicketWorkflow:
         ticket_id: str,
         auto_create_draft: bool = False,
         auto_update_crm: bool = False,
-        auto_update_ticket: bool = False
+        auto_update_ticket: bool = False,
+        auto_send: bool = False
     ) -> Dict:
         """
         Process a DOC ticket through the complete workflow.
@@ -306,6 +357,9 @@ class DOCTicketWorkflow:
             'response_result': {},
             'crm_note': '',
             'draft_created': False,
+            'reply_sent': False,
+            'delivery_method': 'none',
+            'send_fallback_reason': None,
             'crm_updated': False,
             'ticket_updated': False,
             'errors': []
@@ -1468,12 +1522,12 @@ La date d'examen dans Zoho CRM est dans le passé. Le workflow a été stoppé p
                 logger.info("✅ CRM NOTE → Note générée (pas d'auto-update)")
 
             # ================================================================
-            # STEP 7: DRAFT CREATION (Zoho Desk)
+            # STEP 7: REPLY DELIVERY - Envoi ou brouillon
             # ================================================================
-            logger.info("\n7️⃣  DRAFT CREATION - Création du brouillon...")
-            result['workflow_stage'] = 'DRAFT_CREATION'
+            logger.info("\n7️⃣  REPLY DELIVERY - Envoi ou brouillon...")
+            result['workflow_stage'] = 'REPLY_DELIVERY'
 
-            if auto_create_draft:
+            if auto_send or auto_create_draft:
                 # Convertir markdown en HTML pour des liens cliquables
                 draft_content = response_result.get('response_text', '')
                 import re
@@ -1512,26 +1566,88 @@ La date d'examen dans Zoho CRM est dans le passé. Le workflow a été stoppé p
                     # Déterminer l'email selon le département
                     from_email = dept_email_map.get(department) or settings.zoho_desk_email_doc or settings.zoho_desk_email_default
 
-                    logger.info(f"📧 Draft: from={from_email}, to={to_email}, dept={department}")
+                    if auto_send:
+                        # Auto-send: vérifier les guard rails avant envoi
+                        can_send, fallback_reason = self._can_auto_send(response_result, triage_result)
 
-                    self.desk_client.create_ticket_reply_draft(
-                        ticket_id=ticket_id,
-                        content=html_content,
-                        content_type="html",
-                        from_email=from_email,
-                        to_email=to_email
-                    )
-                    logger.info("✅ DRAFT CREATION → Brouillon créé dans Zoho Desk")
-                    result['draft_created'] = True
-                    self._mark_brouillon_auto(ticket_id)
-                except Exception as draft_error:
-                    logger.warning(f"⚠️ Impossible de créer le draft dans Zoho Desk: {draft_error}")
-                    logger.info("📋 La réponse est disponible ci-dessus pour copier-coller manuellement")
-                    result['draft_created'] = False
+                        if can_send:
+                            logger.info(f"📧 Send: from={from_email}, to={to_email}, dept={department}")
+                            self.desk_client.send_ticket_reply(
+                                ticket_id=ticket_id,
+                                content=html_content,
+                                content_type="html",
+                                from_email=from_email,
+                                to_email=to_email
+                            )
+                            logger.info("✅ REPLY DELIVERY → Réponse envoyée directement")
+                            result['reply_sent'] = True
+                            result['delivery_method'] = 'sent'
+                            # Fermer le ticket après envoi réussi
+                            try:
+                                self.desk_client.update_ticket(ticket_id, {'status': 'Closed'})
+                                logger.info("✅ Ticket fermé après envoi auto-send")
+                            except Exception as close_err:
+                                logger.warning(f"⚠️ Impossible de fermer le ticket: {close_err}")
+                        else:
+                            # Fallback: créer un draft au lieu d'envoyer
+                            logger.warning(f"⚠️ Auto-send bloqué ({fallback_reason}) → fallback draft")
+                            self.desk_client.create_ticket_reply_draft(
+                                ticket_id=ticket_id,
+                                content=html_content,
+                                content_type="html",
+                                from_email=from_email,
+                                to_email=to_email
+                            )
+                            logger.info("✅ REPLY DELIVERY → Brouillon créé (fallback)")
+                            result['draft_created'] = True
+                            result['delivery_method'] = 'draft'
+                            result['send_fallback_reason'] = fallback_reason
+                            self._mark_brouillon_auto(ticket_id)
+                    else:
+                        # Mode draft classique
+                        logger.info(f"📧 Draft: from={from_email}, to={to_email}, dept={department}")
+                        self.desk_client.create_ticket_reply_draft(
+                            ticket_id=ticket_id,
+                            content=html_content,
+                            content_type="html",
+                            from_email=from_email,
+                            to_email=to_email
+                        )
+                        logger.info("✅ REPLY DELIVERY → Brouillon créé dans Zoho Desk")
+                        result['draft_created'] = True
+                        result['delivery_method'] = 'draft'
+                        self._mark_brouillon_auto(ticket_id)
+
+                except Exception as delivery_error:
+                    if auto_send and not result.get('draft_created') and not result.get('reply_sent'):
+                        # Si l'envoi direct a échoué, tenter un fallback draft
+                        logger.warning(f"⚠️ Envoi échoué: {delivery_error} → tentative fallback draft")
+                        try:
+                            self.desk_client.create_ticket_reply_draft(
+                                ticket_id=ticket_id,
+                                content=html_content,
+                                content_type="html",
+                                from_email=from_email,
+                                to_email=to_email
+                            )
+                            result['draft_created'] = True
+                            result['delivery_method'] = 'draft'
+                            result['send_fallback_reason'] = f'api_error: {delivery_error}'
+                            self._mark_brouillon_auto(ticket_id)
+                            logger.info("✅ Fallback draft créé après échec envoi")
+                        except Exception as fallback_error:
+                            logger.warning(f"⚠️ Fallback draft aussi échoué: {fallback_error}")
+                            logger.info("📋 La réponse est disponible ci-dessus pour copier-coller manuellement")
+                            result['delivery_method'] = 'none'
+                            result['send_fallback_reason'] = f'api_error: {delivery_error}'
+                    else:
+                        logger.warning(f"⚠️ Impossible de créer le draft dans Zoho Desk: {delivery_error}")
+                        logger.info("📋 La réponse est disponible ci-dessus pour copier-coller manuellement")
+                        result['draft_created'] = False
 
                 # Note: la note CRM consolidée est créée au STEP 4
 
-                # Note interne repositionnement implicite (après le draft)
+                # Note interne repositionnement implicite (après le draft/envoi)
                 if result.get('repositioning_note_pending') and auto_update_crm:
                     note_data = result.get('repositioning_note_data', {})
                     try:
@@ -1550,11 +1666,11 @@ La date d'examen dans Zoho CRM est dans le passé. Le workflow a été stoppé p
                                 f"👉 Action: Envoyer message CMA pour changement de date vers {note_data['month_name']} ({note_data['new_date_str']})"
                             )
                         self.desk_client.add_ticket_comment(ticket_id, note, is_public=False)
-                        logger.info("  📝 Note repositionnement ajoutée (après draft)")
+                        logger.info("  📝 Note repositionnement ajoutée")
                     except Exception as e:
                         logger.warning(f"Erreur ajout note repositionnement: {e}")
 
-                # Note interne faux Refusé CMA (après le draft)
+                # Note interne faux Refusé CMA (après le draft/envoi)
                 if date_examen_vtc_result.get('faux_refus_cma'):
                     identifiant = examt3p_data.get('identifiant', examt3p_data.get('email', ''))
                     mdp = examt3p_data.get('mot_de_passe', '')
@@ -1569,11 +1685,11 @@ La date d'examen dans Zoho CRM est dans le passé. Le workflow a été stoppé p
                     )
                     try:
                         self.desk_client.add_ticket_comment(ticket_id, faux_refus_note, is_public=False)
-                        logger.info("  📝 Note interne ajoutée: faux Refusé CMA (après draft)")
+                        logger.info("  📝 Note interne ajoutée: faux Refusé CMA")
                     except Exception as e:
                         logger.warning(f"  ⚠️ Erreur ajout note faux refus: {e}")
             else:
-                logger.info("✅ DRAFT CREATION → Préparé (pas d'auto-create)")
+                logger.info("✅ REPLY DELIVERY → Préparé (pas d'auto-create/send)")
 
             # ================================================================
             # STEP 8: FINAL VALIDATION
@@ -1706,6 +1822,15 @@ La date d'examen dans Zoho CRM est dans le passé. Le workflow a été stoppé p
 
             if direction == 'in':
                 content = get_clean_thread_content(thread)
+
+                # Strip quoted/forwarded content to avoid contamination
+                # (e.g., our own "Mot de passe", "@email", "241€" in Gmail/Outlook quotes)
+                try:
+                    from business_rules import BusinessRules
+                    content = BusinessRules.strip_forwarded_content(content)
+                except Exception:
+                    pass  # Graceful degradation
+
                 content_lower = content.lower()
 
                 # Skip feedback/automated messages
@@ -1720,6 +1845,9 @@ La date d'examen dans Zoho CRM est dans le passé. Le workflow a été stoppé p
         # Limite: 3 messages max pour éviter trop de contexte
         last_thread_content = "\n---\n".join(recent_candidate_messages[:3]) if recent_candidate_messages else ""
 
+        # Compter les threads entrants (pour éligibilité auto-send)
+        incoming_thread_count = sum(1 for t in threads if isinstance(t, dict) and t.get('direction') == 'in' and t.get('status') != 'DRAFT')
+
         # Default result
         triage_result = {
             'action': 'GO',
@@ -1730,6 +1858,7 @@ La date d'examen dans Zoho CRM est dans le passé. Le workflow a été stoppé p
             'method': 'default',
             'ticket_subject': subject,
             'customer_message': last_thread_content,
+            'incoming_thread_count': incoming_thread_count,
         }
 
         # Rule #1: SPAM detection (simple keywords - pas besoin d'IA)
@@ -5064,6 +5193,37 @@ L'équipe CAB Formations"""
         logger.debug(f"     Date case: {ctx.get('date_case')}")
 
         # ================================================================
+        # SUPPRESSION WARNING DÉJÀ COMMUNIQUÉ
+        # Si un état WARNING (ex: Uber CAS D) a déjà été envoyé dans un thread
+        # précédent, le downgrader pour ne pas répéter le même message.
+        # ================================================================
+        suppressed_warnings = []
+        if detected_states.warning_states:
+            from src.utils.text_utils import get_clean_thread_content as _get_clean_content
+            threads_data_for_check = analysis_result.get('threads', [])
+            # Markers pour chaque WARNING qui peut être supprimé si déjà communiqué
+            warning_suppression_markers = {
+                'UBER_ACCOUNT_NOT_VERIFIED': ['compte uber driver', 'uber chauffeur actif'],
+                'UBER_DOCS_MISSING': ['documents requis par uber', 'pièces demandées par uber'],
+                'UBER_TEST_MISSING': ['test de sélection', 'test en ligne uber'],
+                'UBER_NOT_ELIGIBLE': ['non éligible', 'pas éligible'],
+            }
+            # Collecter le contenu des réponses sortantes précédentes
+            outgoing_content_lower = ""
+            for t in threads_data_for_check:
+                if t.get('direction') == 'out' and t.get('status') != 'DRAFT':
+                    outgoing_content_lower += " " + _get_clean_content(t).lower()
+
+            if outgoing_content_lower:
+                for ws in list(detected_states.warning_states):
+                    markers = warning_suppression_markers.get(ws.name, [])
+                    if markers and any(m in outgoing_content_lower for m in markers):
+                        suppressed_warnings.append(ws.name)
+                        detected_states.warning_states.remove(ws)
+                if suppressed_warnings:
+                    logger.info(f"  🔇 WARNING supprimés (déjà communiqués): {suppressed_warnings}")
+
+        # ================================================================
         # STEP 2: Generate Response from Template
         # ================================================================
         logger.info("  📝 STATE ENGINE: Génération de la réponse...")
@@ -5310,6 +5470,14 @@ L'équipe CAB Formations"""
             # CRITIQUE: Contient session_date_debut, session_date_fin, session_type, etc.
             'enriched_lookups': analysis_result.get('enriched_lookups', {}),
         })
+
+        # ================================================================
+        # SUPPRESSION WARNING: Appliquer uber_case override APRÈS le context_data.update
+        # (le update() ci-dessus réécrit uber_case depuis uber_result)
+        # ================================================================
+        if suppressed_warnings and any(w.startswith('UBER_') for w in suppressed_warnings):
+            detected_state.context_data['uber_case'] = None
+            logger.info("  🔇 uber_case forcé à None (WARNING Uber déjà communiqué)")
 
         # ================================================================
         # THREAD MEMORY: Injecter les flags dans le contexte du template
@@ -5784,6 +5952,7 @@ L'équipe CAB Formations"""
             'is_blocking': template_result.get('is_blocking', False),
             'primary_intent': template_result.get('primary_intent'),
             'secondary_intents': template_result.get('secondary_intents', []),
+            'was_humanized': template_result.get('was_humanized', False),
         }
 
         return response_result

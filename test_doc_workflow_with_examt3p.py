@@ -69,7 +69,7 @@ logger = logging.getLogger(__name__)
 
 def test_doc_workflow(ticket_id: str, use_state_engine: bool = True,
                        auto_create_draft: bool = True, auto_update_crm: bool = True,
-                       quiet: bool = False):
+                       auto_send: bool = False, quiet: bool = False):
     """Test le workflow DOC complet avec validation ExamT3P.
 
     Args:
@@ -77,6 +77,7 @@ def test_doc_workflow(ticket_id: str, use_state_engine: bool = True,
         use_state_engine: Ignoré (toujours State Engine maintenant)
         auto_create_draft: Créer le draft dans Zoho Desk
         auto_update_crm: Mettre à jour le CRM
+        auto_send: Envoyer directement la réponse (avec guard rails)
         quiet: Mode silencieux (moins de logs)
 
     Returns:
@@ -88,7 +89,9 @@ def test_doc_workflow(ticket_id: str, use_state_engine: bool = True,
         print("=" * 80)
         print(f"Ticket ID: {ticket_id}")
         print(f"Mode: STATE ENGINE (deterministe)")
-        if not auto_create_draft or not auto_update_crm:
+        if auto_send:
+            print(f"AUTO-SEND: Envoi direct active (avec guard rails)")
+        elif not auto_create_draft or not auto_update_crm:
             print(f"DRY RUN: CRM update={auto_update_crm}, Draft={auto_create_draft}")
         print()
 
@@ -103,9 +106,10 @@ def test_doc_workflow(ticket_id: str, use_state_engine: bool = True,
         # Exécuter le workflow complet
         result = workflow.process_ticket(
             ticket_id=ticket_id,
-            auto_create_draft=auto_create_draft,    # Créer le draft dans Zoho Desk
-            auto_update_crm=auto_update_crm,        # Mettre à jour le CRM automatiquement
-            auto_update_ticket=auto_update_crm      # Mettre à jour le ticket (routing, tags) si pas dry-run
+            auto_create_draft=auto_create_draft if not auto_send else False,
+            auto_update_crm=auto_update_crm,
+            auto_update_ticket=auto_update_crm,
+            auto_send=auto_send
         )
 
         # Afficher les résultats (seulement si pas quiet)
@@ -299,7 +303,15 @@ def test_doc_workflow(ticket_id: str, use_state_engine: bool = True,
             print("=" * 80)
             print(f"   Workflow complété: {result['success']}")
             print(f"   Arrêté à l'étape: {result['workflow_stage']}")
-            print(f"   Draft créé: {result['draft_created']}")
+            print(f"   Delivery: {result.get('delivery_method', 'none')}")
+            if result.get('reply_sent'):
+                print(f"   Réponse envoyée: Oui")
+            elif result.get('draft_created'):
+                print(f"   Draft créé: Oui")
+            else:
+                print(f"   Draft créé: Non")
+            if result.get('send_fallback_reason'):
+                print(f"   Fallback reason: {result['send_fallback_reason']}")
             print(f"   CRM mis à jour: {result['crm_updated']}")
             print(f"   Ticket mis à jour: {result['ticket_updated']}")
 
@@ -541,6 +553,8 @@ Exemples:
                         help="Ne pas mettre à jour le CRM")
     parser.add_argument("--no-draft", action="store_true",
                         help="Ne pas créer de draft")
+    parser.add_argument("--auto-send", action="store_true",
+                        help="Envoyer directement la réponse (avec guard rails, fallback draft)")
     parser.add_argument("--bulk", action="store_true",
                         help="Traiter tous les tickets DOC ouverts")
     parser.add_argument("--output", "-o", type=str,
@@ -582,7 +596,8 @@ Exemples:
             args.ticket_id,
             use_state_engine=use_state_engine,
             auto_create_draft=auto_create_draft,
-            auto_update_crm=auto_update_crm
+            auto_update_crm=auto_update_crm,
+            auto_send=args.auto_send and not args.dry_run
         )
 
         if result:

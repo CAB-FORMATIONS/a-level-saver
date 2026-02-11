@@ -1186,7 +1186,13 @@ class TemplateEngine:
         is_confirmation_intent = context.get('intention_confirmation_session') or context.get('primary_intent') == 'CONFIRMATION_SESSION'
         has_session_assignment_error = context.get('session_assignment_error', False)
 
-        if has_session_assignment_error:
+        if has_session_assignment_error and is_confirmation_intent:
+            # Le candidat confirme une nouvelle session → l'erreur est résolue
+            # Pas besoin de s'excuser ni de re-proposer des sessions
+            result['session_assignment_error'] = False
+            result['show_sessions_section'] = False
+            logger.info("📚 session_assignment_error + CONFIRMATION_SESSION → erreur résolue, sessions supprimées")
+        elif has_session_assignment_error:
             # Cas spécial: session erronée
             if context.get('session_year_error_corrected'):
                 # Session auto-corrigée → PAS besoin de proposer des alternatives

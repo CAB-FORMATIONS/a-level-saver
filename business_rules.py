@@ -126,6 +126,9 @@ class BusinessRules:
         # "Le 08/02/2026 à 10:30, doc@cab-formations.fr a écrit :"
         content = re.sub(r'Le\s+\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}\s+[àa]\s+\d{1,2}[h:]\d{2}.*?(?:a\s+[eé]crit|wrote)\s*:.*', '', content, flags=re.DOTALL | re.IGNORECASE)
 
+        # 5b. Gmail textual date format: "Le mer. 11 févr. 2026 à 11:34, ... a écrit :"
+        content = re.sub(r'Le\s+\w+\.?\s+\d{1,2}\s+\w+\.?\s+\d{4}\s+[àa]\s+\d{1,2}[h:]\d{2}.*?(?:a\s+[eé]crit|wrote)\s*:.*', '', content, flags=re.DOTALL | re.IGNORECASE)
+
         # 6. Supprimer les en-têtes Outlook FR/EN
         # "De : doc@cab-formations.fr\nEnvoyé : ...\nÀ : ...\nObjet : ..."
         content = re.sub(r'(?:De|From)\s*:.*?(?:Objet|Subject)\s*:.*', '', content, flags=re.DOTALL | re.IGNORECASE)

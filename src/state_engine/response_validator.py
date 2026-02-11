@@ -160,7 +160,10 @@ class ResponseValidator:
             self._check_required_blocks(response_text, state, result)
 
         # 3. Vérifier les blocs interdits
-        self._check_forbidden_blocks(response_text, state, result)
+        # Même logique que les blocs requis: si la matrice a overridé le template,
+        # les blocs interdits de l'état par défaut ne sont plus pertinents
+        if not skip_blocks_validation:
+            self._check_forbidden_blocks(response_text, state, result)
 
         # 4. Vérifier les dates (pas d'hallucination)
         self._check_dates(response_text, proposed_dates, state, result)

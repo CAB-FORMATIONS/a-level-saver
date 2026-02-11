@@ -470,8 +470,9 @@ class ZohoDeskClient(ZohoAPIClient):
         """
         Send a reply on a ticket (sends immediately, NOT a draft).
 
-        WARNING: This method sends the reply directly to the customer.
-        Do NOT use in the automated workflow — use create_ticket_reply_draft() instead.
+        Used by the automated workflow when auto_send=True, with guard rails
+        in _can_auto_send() ensuring the response is safe before sending.
+        Falls back to create_ticket_reply_draft() if guard rails fail.
 
         Args:
             ticket_id: The ticket ID
