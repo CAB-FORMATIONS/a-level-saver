@@ -910,6 +910,7 @@ class TemplateEngine:
             # Problèmes d'identifiants
             'credentials_invalid': context.get('credentials_invalid', False),
             'credentials_inconnus': context.get('credentials_inconnus', False),
+            'candidat_envoie_identifiants': (context.get('primary_intent') or context.get('detected_intent', '')) == 'ENVOIE_IDENTIFIANTS',
 
             # Blocage confirmation session (documents manquants ou credentials invalides)
             # NOTE: La clôture passée (CAS 8) n'est PAS un blocage - on redirige vers la nouvelle date
@@ -1250,33 +1251,41 @@ class TemplateEngine:
         # RÈGLE: Ne s'applique QUE si la matrice n'a PAS défini le flag (Rule 11)
         # EXCEPTION: Si l'intention n'est PAS liée à la section, ThreadMemory
         #   peut supprimer même si la matrice a forcé le flag (éviter répétition)
+        # EXCEPTION 2: QUESTION_GENERALE = le candidat pose une question → lui donner
+        #   un point complet sur son dossier. Ne PAS supprimer les sections.
         # ================================================================
         thread_mem = context.get('thread_memory', {})
         if thread_mem.get('has_history'):
             primary_intent = context.get('primary_intent') or context.get('detected_intent', '')
-            # Intentions qui REQUIÈRENT la section statut (ne pas supprimer)
-            statut_intents = {'STATUT_DOSSIER', 'QUESTION_PROCESSUS', 'QUESTION_DOCUMENTS'}
-            # Intentions qui REQUIÈRENT la section dates (ne pas supprimer)
-            dates_intents = {'REPORT_DATE', 'DEMANDE_DATE_PLUS_TOT', 'CONFIRMATION_DATE'}
+            # QUESTION_GENERALE: bypass toutes les suppressions ThreadMemory
+            # Si le candidat pose une question, il veut de l'info même si déjà envoyée
+            if primary_intent == 'QUESTION_GENERALE':
+                logger.info("🔓 QUESTION_GENERALE: bypass ThreadMemory suppressions (point complet dossier)")
+            else:
+                # Intentions qui REQUIÈRENT la section statut (ne pas supprimer)
+                statut_intents = {'STATUT_DOSSIER', 'QUESTION_PROCESSUS', 'QUESTION_DOCUMENTS'}
+                # Intentions qui REQUIÈRENT la section dates (ne pas supprimer)
+                dates_intents = {'REPORT_DATE', 'DEMANDE_DATE_PLUS_TOT', 'CONFIRMATION_DATE'}
 
-            if thread_mem.get('suppress_dates') and result.get('show_dates_section'):
-                if 'show_dates_section' not in context or primary_intent not in dates_intents:
-                    result['show_dates_section'] = False
-                    logger.info("📅 show_dates_section=False (ThreadMemory: déjà communiqué, pas de changement)")
-            if thread_mem.get('suppress_sessions') and 'show_sessions_section' not in context and result.get('show_sessions_section'):
-                result['show_sessions_section'] = False
-                logger.info("📚 show_sessions_section=False (ThreadMemory: déjà communiqué, pas de changement)")
-            if thread_mem.get('suppress_statut') and result.get('show_statut_section'):
-                if 'show_statut_section' not in context or primary_intent not in statut_intents:
-                    result['show_statut_section'] = False
-                    logger.info("📋 show_statut_section=False (ThreadMemory: déjà communiqué, pas de changement)")
-            if thread_mem.get('suppress_elearning'):
-                result['suppress_elearning'] = True
-                logger.info("📖 suppress_elearning=True (ThreadMemory: déjà communiqué)")
+                if thread_mem.get('suppress_dates') and result.get('show_dates_section'):
+                    if 'show_dates_section' not in context or primary_intent not in dates_intents:
+                        result['show_dates_section'] = False
+                        logger.info("📅 show_dates_section=False (ThreadMemory: déjà communiqué, pas de changement)")
+                if thread_mem.get('suppress_sessions') and 'show_sessions_section' not in context and result.get('show_sessions_section'):
+                    result['show_sessions_section'] = False
+                    logger.info("📚 show_sessions_section=False (ThreadMemory: déjà communiqué, pas de changement)")
+                if thread_mem.get('suppress_statut') and result.get('show_statut_section'):
+                    if 'show_statut_section' not in context or primary_intent not in statut_intents:
+                        result['show_statut_section'] = False
+                        logger.info("📋 show_statut_section=False (ThreadMemory: déjà communiqué, pas de changement)")
+                if thread_mem.get('suppress_elearning'):
+                    result['suppress_elearning'] = True
+                    logger.info("📖 suppress_elearning=True (ThreadMemory: déjà communiqué)")
 
         # ================================================================
         # CONVERSATION INTELLIGENCE V3: Response mode → section visibility
         # Respects Rule 11: matrix flags (context) always take priority
+        # EXCEPTION: QUESTION_GENERALE bypass V3 suppressions (point complet)
         # ================================================================
         v3_mode = context.get('conversation_state', {})
         if isinstance(v3_mode, dict):
@@ -1286,7 +1295,10 @@ class TemplateEngine:
         else:
             v3_response_mode = ''
 
-        if v3_response_mode == 'brief_confirmation':
+        primary_intent_v3 = context.get('primary_intent') or context.get('detected_intent', '')
+        if primary_intent_v3 == 'QUESTION_GENERALE':
+            logger.info("🔓 QUESTION_GENERALE: bypass V3 response_mode suppressions (point complet dossier)")
+        elif v3_response_mode == 'brief_confirmation':
             if 'show_dates_section' not in context:  # Rule 11
                 result['show_dates_section'] = False
             if 'show_sessions_section' not in context:

@@ -2254,6 +2254,13 @@ matrix:
       intention_demande_identifiants: true
       show_statut_section: true
 
+  "*:ENVOIE_IDENTIFIANTS":
+    template: "response_master.html"
+    description: "Candidat envoie ses identifiants ExamT3P - tous états"
+    context_flags:
+      intention_demande_identifiants: true
+      show_statut_section: true
+
   "*:STATUT_DOSSIER":
     template: "response_master.html"
     description: "Question sur le statut du dossier - tous états"
