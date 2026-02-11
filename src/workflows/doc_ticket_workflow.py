@@ -5795,6 +5795,13 @@ L'équipe CAB Formations"""
         if conv_state_for_humanizer and hasattr(conv_state_for_humanizer, 'response_mode'):
             v3_response_mode = conv_state_for_humanizer.response_mode or 'full'
 
+        # ENVOIE_IDENTIFIANTS / QUESTION_GENERALE: force full mode
+        # Le candidat envoie ses accès ou pose une question → réponse complète, pas brief
+        detected_intent_for_mode = triage_result.get('primary_intent') or triage_result.get('detected_intent', '')
+        if detected_intent_for_mode in ('QUESTION_GENERALE', 'ENVOIE_IDENTIFIANTS') and v3_response_mode != 'full':
+            logger.info(f"  🔓 {detected_intent_for_mode}: override response_mode {v3_response_mode} → full (point complet)")
+            v3_response_mode = 'full'
+
         humanize_result = humanize_response(
             template_response=response_text,
             candidate_message=customer_message,

@@ -1251,16 +1251,18 @@ class TemplateEngine:
         # RÈGLE: Ne s'applique QUE si la matrice n'a PAS défini le flag (Rule 11)
         # EXCEPTION: Si l'intention n'est PAS liée à la section, ThreadMemory
         #   peut supprimer même si la matrice a forcé le flag (éviter répétition)
-        # EXCEPTION 2: QUESTION_GENERALE = le candidat pose une question → lui donner
-        #   un point complet sur son dossier. Ne PAS supprimer les sections.
+        # EXCEPTION 2: QUESTION_GENERALE / ENVOIE_IDENTIFIANTS = le candidat pose une
+        #   question ou envoie ses accès → lui donner un point complet sur son dossier.
+        #   Ne PAS supprimer les sections.
         # ================================================================
         thread_mem = context.get('thread_memory', {})
         if thread_mem.get('has_history'):
             primary_intent = context.get('primary_intent') or context.get('detected_intent', '')
-            # QUESTION_GENERALE: bypass toutes les suppressions ThreadMemory
-            # Si le candidat pose une question, il veut de l'info même si déjà envoyée
-            if primary_intent == 'QUESTION_GENERALE':
-                logger.info("🔓 QUESTION_GENERALE: bypass ThreadMemory suppressions (point complet dossier)")
+            # QUESTION_GENERALE / ENVOIE_IDENTIFIANTS: bypass toutes les suppressions ThreadMemory
+            # Si le candidat pose une question ou envoie ses identifiants, il veut un retour complet
+            full_recap_intents = {'QUESTION_GENERALE', 'ENVOIE_IDENTIFIANTS'}
+            if primary_intent in full_recap_intents:
+                logger.info(f"🔓 {primary_intent}: bypass ThreadMemory suppressions (point complet dossier)")
             else:
                 # Intentions qui REQUIÈRENT la section statut (ne pas supprimer)
                 statut_intents = {'STATUT_DOSSIER', 'QUESTION_PROCESSUS', 'QUESTION_DOCUMENTS'}
@@ -1285,7 +1287,7 @@ class TemplateEngine:
         # ================================================================
         # CONVERSATION INTELLIGENCE V3: Response mode → section visibility
         # Respects Rule 11: matrix flags (context) always take priority
-        # EXCEPTION: QUESTION_GENERALE bypass V3 suppressions (point complet)
+        # EXCEPTION: QUESTION_GENERALE / ENVOIE_IDENTIFIANTS bypass V3 suppressions
         # ================================================================
         v3_mode = context.get('conversation_state', {})
         if isinstance(v3_mode, dict):
@@ -1296,8 +1298,9 @@ class TemplateEngine:
             v3_response_mode = ''
 
         primary_intent_v3 = context.get('primary_intent') or context.get('detected_intent', '')
-        if primary_intent_v3 == 'QUESTION_GENERALE':
-            logger.info("🔓 QUESTION_GENERALE: bypass V3 response_mode suppressions (point complet dossier)")
+        full_recap_intents_v3 = {'QUESTION_GENERALE', 'ENVOIE_IDENTIFIANTS'}
+        if primary_intent_v3 in full_recap_intents_v3:
+            logger.info(f"🔓 {primary_intent_v3}: bypass V3 response_mode suppressions (point complet dossier)")
         elif v3_response_mode == 'brief_confirmation':
             if 'show_dates_section' not in context:  # Rule 11
                 result['show_dates_section'] = False
