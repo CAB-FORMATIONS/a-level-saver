@@ -894,7 +894,14 @@ class TemplateEngine:
             # Résultats d'examen
             'resultat_admis': context.get('resultat_admis', False),
             'resultat_non_admis': context.get('resultat_non_admis', False),
+            'resultat_non_admissible': context.get('resultat_non_admissible', False),
+            'resultat_admissible': context.get('resultat_admissible', False),
             'resultat_absent': context.get('resultat_absent', False),
+            'resultat_convoc_pas_recu': context.get('resultat_convoc_pas_recu', False),
+            'resultat_plus_interesse': context.get('resultat_plus_interesse', False),
+            'dossier_termine': context.get('dossier_termine', False),
+            'resultat_category': context.get('resultat_category', 'pre_exam'),
+            'demande_attestation_resultat': context.get('demande_attestation_resultat', False),
 
             # Report de date - Générer les flags depuis can_modify_exam_date et intention
             # NOTE: Ces flags sont générés en premier car ils affectent show_sessions_section
@@ -1347,6 +1354,30 @@ class TemplateEngine:
                 result['has_required_action'] = True
                 logger.info("📋 action_corriger_documents=True (FORCÉ: pièces refusées CMA)")
 
+        # ================================================================
+        # DOSSIER TERMINÉ: Supprimer sections pré-examen inutiles
+        # ================================================================
+        dossier_termine = context.get('dossier_termine', False)
+        if dossier_termine:
+            # Pas de nouvelles dates/sessions pour un dossier terminé
+            if 'show_dates_section' not in context:  # Rule 11: matrice prime
+                result['show_dates_section'] = False
+            if 'show_sessions_section' not in context:
+                result['show_sessions_section'] = False
+            # Pas d'actions pré-examen
+            result['has_required_action'] = False
+            # Pas d'e-learning
+            result['suppress_elearning'] = True
+            result['examen_passe'] = True
+            logger.info(f"📊 Dossier terminé: sections dates/sessions/actions/elearning supprimées")
+
+            # Exception: NON ADMIS / NON ADMISSIBLE / ABSENT → peuvent vouloir se réinscrire
+            reinscription_intents = {'DEMANDE_REINSCRIPTION', 'REPORT_DATE'}
+            if context.get('primary_intent') in reinscription_intents:
+                if 'show_dates_section' not in context:
+                    result['show_dates_section'] = True
+                logger.info(f"📊 Dossier terminé MAIS intent réinscription → dates réactivées")
+
         return result
 
     # Mapping state → flag pour les états (utilisés par response_master.html)
@@ -1493,7 +1524,7 @@ class TemplateEngine:
         # Si ces flags sont actifs, ne pas auto-mapper l'intention correspondante pour éviter la duplication
         section0_overrides = {
             'intention_report_date': ['report_possible', 'report_bloque', 'report_force_majeure'],
-            'intention_resultat_examen': ['resultat_admis', 'resultat_non_admis', 'resultat_absent'],
+            'intention_resultat_examen': ['resultat_admis', 'resultat_non_admis', 'resultat_non_admissible', 'resultat_admissible', 'resultat_absent', 'resultat_convoc_pas_recu', 'resultat_plus_interesse'],
             'intention_demande_identifiants': ['credentials_invalid', 'credentials_inconnus'],
         }
 
@@ -1530,8 +1561,14 @@ class TemplateEngine:
                     logger.debug(f"Auto-mapped secondary_intent {intent} -> {flag_name}")
 
         # Priorité aux flags déjà définis dans le contexte (via matrice)
+        # SAUF si un flag Section 0 couvre déjà cette intention (éviter duplication)
         for flag_name in flags:
             if context.get(flag_name) is True:
+                # Vérifier section0_overrides avant de forcer True
+                if flag_name in section0_overrides:
+                    covered = any(context.get(s0f) for s0f in section0_overrides[flag_name])
+                    if covered:
+                        continue  # Ne pas forcer True, Section 0 couvre déjà
                 flags[flag_name] = True
 
         return flags

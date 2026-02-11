@@ -1296,8 +1296,29 @@ La date d'examen dans Zoho CRM est dans le passé. Le workflow a été stoppé p
             # Check both scenario flag and AI-extracted updates
             ai_updates = response_result.get('crm_updates', {}).copy() if response_result.get('crm_updates') else {}
 
+            # ================================================================
+            # GUARD RAIL: Dossier terminé → bloquer les auto-updates
+            # ================================================================
+            dossier_termine = analysis_result.get('dossier_termine', False)
+            if dossier_termine and ai_updates:
+                blocked_fields = [k for k in ai_updates if k in ('Date_examen_VTC', 'Session', 'Preference_horaire')]
+                if blocked_fields:
+                    logger.warning(f"  🛑 GUARD RAIL: Dossier terminé (Resultat={analysis_result.get('resultat_raw', '?')}) → CRM updates bloqués: {blocked_fields}")
+                    for field in blocked_fields:
+                        del ai_updates[field]
+
             # D-8: Si deadline passée avant paiement, injecter la nouvelle date d'examen
             date_examen_vtc_result = analysis_result.get('date_examen_vtc_result', {})
+
+            # GUARD RAIL suite: bloquer auto-reschedule/auto-assign pour dossiers terminés
+            if dossier_termine:
+                if date_examen_vtc_result.get('deadline_passed_reschedule'):
+                    logger.warning("  🛑 GUARD RAIL: Dossier terminé → CAS 8 auto-reschedule BLOQUÉ")
+                    date_examen_vtc_result['deadline_passed_reschedule'] = False
+                if date_examen_vtc_result.get('auto_assigned_exam_date'):
+                    logger.warning("  🛑 GUARD RAIL: Dossier terminé → auto_assigned_exam_date BLOQUÉ")
+                    date_examen_vtc_result['auto_assigned_exam_date'] = None
+
             if date_examen_vtc_result.get('deadline_passed_reschedule') and date_examen_vtc_result.get('new_exam_date'):
                 new_date = date_examen_vtc_result['new_exam_date']
                 logger.info(f"  📅 D-8: Deadline passée → inscription sur prochaine date: {new_date}")
@@ -2577,6 +2598,12 @@ RÉSUMÉ (2-3 phrases):"""
                     date_examen_vtc_value = date_examen_lookup
         logger.debug(f"  📅 Date_examen_VTC extraite: {date_examen_vtc_value}")
 
+        # Resultat CRM — classification lifecycle
+        resultat_raw = deal_data.get('Resultat', '') if deal_data else ''
+        resultat_info = self._classify_resultat(resultat_raw)
+        if resultat_info['category'] != 'pre_exam':
+            logger.info(f"  📊 Resultat CRM: '{resultat_raw}' → {resultat_info['category']} (dossier_termine={resultat_info['dossier_termine']})")
+
         if not deal_id:
             logger.warning("  ⚠️  No deal found for this ticket")
 
@@ -3287,6 +3314,11 @@ L'équipe CAB Formations"""
             # ================================================================
             # AUTO-ASSIGNATION: Appliquer les mises à jour CRM si détectées
             # ================================================================
+            if resultat_info['dossier_termine'] and date_examen_vtc_result.get('auto_assigned'):
+                logger.warning(f"  🛑 GUARD RAIL: Dossier terminé (Resultat={resultat_raw}) → AUTO-ASSIGNATION BLOQUÉE")
+                date_examen_vtc_result['auto_assigned'] = False
+                date_examen_vtc_result['crm_updates'] = {}
+
             if date_examen_vtc_result.get('auto_assigned') and date_examen_vtc_result.get('crm_updates'):
                 crm_updates = date_examen_vtc_result['crm_updates']
                 logger.info(f"  🔄 AUTO-ASSIGNATION détectée - Mises à jour CRM à appliquer: {list(crm_updates.keys())}")
@@ -4196,6 +4228,10 @@ L'équipe CAB Formations"""
             'confirmed_exam_date_unavailable': confirmed_exam_date_unavailable,
             'available_exam_dates_for_dept': available_exam_dates_for_dept,
             'confirmed_new_exam_date': confirmed_new_exam_date,
+            # Resultat CRM — lifecycle (pour guard rail STEP 5)
+            'dossier_termine': resultat_info['dossier_termine'],
+            'resultat_raw': resultat_raw,
+            'resultat_category': resultat_info['category'],
         }
 
     def _match_session_by_confirmed_dates(
@@ -5081,6 +5117,10 @@ L'équipe CAB Formations"""
             if sessions_flat:
                 logger.info(f"  📚 Sessions extraites de proposed_options: {len(sessions_flat)} session(s)")
 
+        # Resultat CRM — classification lifecycle (recalcul pour ce scope)
+        resultat_raw = deal_data.get('Resultat', '') if deal_data else ''
+        resultat_info = self._classify_resultat(resultat_raw)
+
         detected_state.context_data.update({
             # Données brutes
             'deal_data': deal_data,
@@ -5119,8 +5159,26 @@ L'équipe CAB Formations"""
             'original_date_cloture': date_examen_vtc_result.get('original_date_cloture'),
 
             # Examen passé (CAS 7: date passée + dossier validé)
-            'examen_passe': date_examen_vtc_result.get('case') == 7,
-            'examen_pas_encore_passe': date_examen_vtc_result.get('case') not in [2, 7] if date_examen_vtc_result.get('case') else True,
+            'examen_passe': date_examen_vtc_result.get('case') == 7 or resultat_info['category'] in ('post_exam', 'closed'),
+            'examen_pas_encore_passe': (date_examen_vtc_result.get('case') not in [2, 7] if date_examen_vtc_result.get('case') else True) and resultat_info['category'] == 'pre_exam',
+
+            # Resultat CRM — flags individuels pour templates
+            'resultat_raw': resultat_raw,
+            'resultat_category': resultat_info['category'],
+            'dossier_termine': resultat_info['dossier_termine'],
+            'resultat_admis': resultat_info['flag'] == 'resultat_admis',
+            'resultat_non_admis': resultat_info['flag'] == 'resultat_non_admis',
+            'resultat_non_admissible': resultat_info['flag'] == 'resultat_non_admissible',
+            'resultat_admissible': resultat_info['flag'] == 'resultat_admissible',
+            'resultat_absent': resultat_info['flag'] == 'resultat_absent',
+            'resultat_convoc_pas_recu': resultat_info['flag'] == 'resultat_convoc_pas_recu',
+            'resultat_plus_interesse': resultat_info['flag'] == 'resultat_plus_interesse',
+
+            # Détection demande attestation réussite/admissibilité (mobilité taxi → CMA de dépôt)
+            # Seulement si ADMIS/ADMISSIBLE ET message contient "attestation" SANS mots-clés France Travail
+            'demande_attestation_resultat': self._detect_attestation_resultat(
+                resultat_info, customer_message
+            ),
 
             # Force majeure (examen manqué)
             'force_majeure_possible': date_examen_vtc_result.get('force_majeure_possible', True),  # Default True pour backward compat
@@ -5777,6 +5835,81 @@ L'équipe CAB Formations"""
 
         except Exception as e:
             logger.warning(f"  ⚠️ Erreur recherche cross-département: {e}")
+
+    # ================================================================
+    # Attestation réussite/admissibilité — Détection mobilité taxi
+    # ================================================================
+    ATTESTATION_RESULTAT_KEYWORDS = [
+        'attestation de réussite', 'attestation réussite',
+        'attestation d\'admissibilité', 'attestation admissibilité',
+        'attestation d admissibilité', 'attestation d admissibilite',
+        'attestation de résultat', 'attestation résultat',
+        'attestation examen',
+    ]
+    ATTESTATION_EXCLUDE_KEYWORDS = [
+        'france travail', 'pôle emploi', 'pole emploi',
+        'attestation de formation', 'certificat de formation',
+        'justificatif de formation',
+    ]
+
+    def _detect_attestation_resultat(self, resultat_info: dict, customer_message: str) -> bool:
+        """Détecte si un candidat ADMIS/ADMISSIBLE demande son attestation de résultat.
+
+        Cas typique: mobilité professionnelle vers le taxi → rediriger vers CMA de dépôt.
+        Exclut les demandes d'attestation France Travail / attestation de formation.
+        """
+        if resultat_info['flag'] not in ('resultat_admis', 'resultat_admissible'):
+            return False
+
+        msg = (customer_message or '').lower()
+
+        # Exclure les demandes France Travail / attestation de formation
+        if any(kw in msg for kw in self.ATTESTATION_EXCLUDE_KEYWORDS):
+            return False
+
+        # Chercher les mots-clés attestation spécifiques
+        if any(kw in msg for kw in self.ATTESTATION_RESULTAT_KEYWORDS):
+            logger.info(f"  📄 Demande attestation résultat détectée (Resultat={resultat_info['flag']}) → CMA de dépôt")
+            return True
+
+        return False
+
+    # ================================================================
+    # Resultat CRM — Classification lifecycle
+    # ================================================================
+    RESULTAT_COMPLETED = {
+        'ADMIS', 'NON ADMIS', 'NON ADMISSIBLE',
+        'ABSENT TH', 'ABSENT PR', 'Convoc pas recu',
+        'NON ADMIS PLUS INTERRESSE', 'NON ADMISSIBLE PLUS INTERRESSE'
+    }
+    RESULTAT_MID = {'ADMISSIBLE'}
+
+    def _classify_resultat(self, resultat_value: str) -> dict:
+        """Classifie le Resultat CRM en catégorie de lifecycle.
+
+        Returns dict with:
+            - category: 'pre_exam' | 'mid_exam' | 'post_exam' | 'closed'
+            - flag: string flag name (e.g. 'resultat_admis') or '' for pre_exam
+            - dossier_termine: bool — True if exam cycle is over
+        """
+        val = (resultat_value or '').strip()
+
+        if val == 'ADMIS':
+            return {'category': 'post_exam', 'flag': 'resultat_admis', 'dossier_termine': True}
+        elif val == 'NON ADMIS':
+            return {'category': 'post_exam', 'flag': 'resultat_non_admis', 'dossier_termine': True}
+        elif val == 'NON ADMISSIBLE':
+            return {'category': 'post_exam', 'flag': 'resultat_non_admissible', 'dossier_termine': True}
+        elif val == 'ADMISSIBLE':
+            return {'category': 'mid_exam', 'flag': 'resultat_admissible', 'dossier_termine': False}
+        elif val.startswith('ABSENT'):
+            return {'category': 'post_exam', 'flag': 'resultat_absent', 'dossier_termine': True}
+        elif val == 'Convoc pas recu':
+            return {'category': 'post_exam', 'flag': 'resultat_convoc_pas_recu', 'dossier_termine': True}
+        elif 'PLUS INTERRESSE' in val:
+            return {'category': 'closed', 'flag': 'resultat_plus_interesse', 'dossier_termine': True}
+        else:
+            return {'category': 'pre_exam', 'flag': '', 'dossier_termine': False}
 
     def _filter_next_dates(
         self,

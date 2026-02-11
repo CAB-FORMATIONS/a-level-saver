@@ -9,11 +9,21 @@
 {{#if resultat_absent}}
 {{> partials/resultats/absent}}
 {{/if}}
+{{#if resultat_admissible}}
+{{> partials/resultats/admissible}}
+{{/if}}
+{{#if resultat_non_admissible}}
+{{> partials/resultats/non_admissible}}
+{{/if}}
+{{#if resultat_convoc_pas_recu}}
+Nous constatons que vous n'avez pas reçu votre convocation pour l'examen. Ce cas est traité par la CMA directement. Si vous souhaitez vous réinscrire, les frais CMA de 241€ seront à votre charge.<br>
+{{/if}}
 {{#if examen_pas_encore_passe}}
 Votre examen est prevu le <b>{{date_examen}}</b>. Les resultats ne seront disponibles qu'apres avoir passe l'examen.<br>
 Vous recevrez vos resultats par email sous <b>2 a 4 semaines</b> suivant l'examen. Ils seront egalement consultables sur votre espace <a href="https://www.exament3p.fr">exament3p.fr</a>.<br>
 En attendant, n'hesitez pas a reviser sur votre <a href="https://cab-formations.fr/user">espace e-learning</a>.<br>
 {{/if}}
+{{#unless dossier_termine}}
 {{#if examen_passe}}
 Votre examen ayant eu lieu le <b>{{date_examen}}</b>, vos resultats seront disponibles sous <b>2 a 4 semaines</b>. Vous recevrez une notification par email des leur publication et pourrez les consulter sur <a href="https://www.exament3p.fr">exament3p.fr</a>.<br>
 <br>
@@ -26,13 +36,20 @@ Nous proposons des <b>formations de preparation a l'examen pratique</b> (2h ou 4
 <br>
 Nous croisons les doigts pour vos resultats !<br>
 {{/if}}
+{{/unless}}
 {{#unless examen_passe}}
 {{#unless resultat_admis}}
 {{#unless resultat_non_admis}}
 {{#unless resultat_absent}}
+{{#unless resultat_admissible}}
+{{#unless resultat_non_admissible}}
+{{#unless resultat_convoc_pas_recu}}
 {{#unless examen_pas_encore_passe}}
 Les resultats sont generalement disponibles sous <b>2 a 4 semaines</b> apres l'examen.<br>
 Vous recevrez une notification par email des que votre resultat sera publie. Vous pourrez egalement le consulter sur <a href="https://www.exament3p.fr">exament3p.fr</a>.<br>
+{{/unless}}
+{{/unless}}
+{{/unless}}
 {{/unless}}
 {{/unless}}
 {{/unless}}

@@ -65,6 +65,15 @@
 {{#if resultat_absent}}
 {{> partials/resultats/absent}}
 {{/if}}
+{{#if resultat_admissible}}
+{{> partials/resultats/admissible}}
+{{/if}}
+{{#if resultat_non_admissible}}
+{{> partials/resultats/non_admissible}}
+{{/if}}
+{{#if resultat_convoc_pas_recu}}
+{{> partials/resultats/absent}}
+{{/if}}
 {{#if report_bloque}}
 {{> partials/report/bloque}}
 {{/if}}
