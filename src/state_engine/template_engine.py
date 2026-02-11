@@ -1378,6 +1378,17 @@ class TemplateEngine:
                     result['show_dates_section'] = True
                 logger.info(f"📊 Dossier terminé MAIS intent réinscription → dates réactivées")
 
+        # ================================================================
+        # AUTO-ASSIGNATION: Supprimer statut "en attente" (contradictoire)
+        # Quand CAS 1 auto-assigne date+session, la confirmation couvre le statut.
+        # "En attente de traitement" contredit "inscription confirmée".
+        # ================================================================
+        if result.get('auto_assigned') and result.get('no_evalbox_status'):
+            result['show_statut_section'] = False
+            result['has_required_action'] = False
+            result['action_choisir_date'] = False
+            logger.info("📋 show_statut_section=False (auto-assignation → confirmation suffit, 'en attente' serait contradictoire)")
+
         return result
 
     # Mapping state → flag pour les états (utilisés par response_master.html)
