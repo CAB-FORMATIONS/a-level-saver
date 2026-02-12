@@ -32,4 +32,18 @@ Merci de nous les communiquer pour que nous puissions suivre votre dossier.<br>
 Ils seront créés lors de la constitution de votre dossier CMA.<br>
 {{/if}}
 {{/if}}
+{{#if session_preference}}
+{{#if session_assigned}}
+{{#unless session_dates_passed}}
+<br>
+<b>Votre session de formation (visioconférence)</b><br>
+{{#if session_is_jour}}
+&nbsp;&nbsp;→ <b>Cours du jour</b> : du {{session_date_debut}} au {{session_date_fin}} (8h30-17h30)<br>
+{{else}}
+&nbsp;&nbsp;→ <b>Cours du soir</b> : du {{session_date_debut}} au {{session_date_fin}} (18h-22h)<br>
+{{/if}}
+Vous recevrez le lien d'invitation à la visioconférence par email avant le début de la formation.<br>
+{{/unless}}
+{{/if}}
+{{/if}}
 {{/if}}

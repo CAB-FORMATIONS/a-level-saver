@@ -699,6 +699,16 @@ EXEMPLE PLAINTE - Message: "J'avais clairement indiqué mon choix pour une forma
             # Evalbox qui déclenchent le routage vers Refus CMA si envoi de documents
             # "Pret a payer" inclus car le candidat peut répondre à une demande de document manquant
             evalbox_needs_doc_routing = ['Refusé CMA', 'Documents manquants', 'Documents refusés', 'Pret a payer']
+
+            # ================================================================
+            # RULE OVERRIDES — Architecture LLM-first
+            # Les shortcuts GO ne retournent plus early : on sauvegarde l'override
+            # et on laisse le LLM tourner pour capturer les signaux secondaires
+            # (secondary_intents, session_preference, communication_mode, etc.)
+            # Les shortcuts ROUTE retournent toujours early (ticket quitte DOC).
+            # ================================================================
+            rule_go_override = None  # Sera appliqué APRÈS le LLM si défini
+
             if evalbox in evalbox_needs_doc_routing:
                 # Vérifier si le dernier message contient des identifiants ExamT3P
                 thread_lower = thread_content.lower() if thread_content else ''
@@ -708,47 +718,48 @@ EXEMPLE PLAINTE - Message: "J'avais clairement indiqué mon choix pour une forma
                 )
 
                 if has_credentials:
-                    # Le candidat a fourni ses identifiants → on traite le ticket normalement
+                    # GO override: sauvegarder, laisser le LLM tourner pour les signaux secondaires
                     logger.info(f"  🔍 Evalbox = '{evalbox}' MAIS identifiants détectés → GO (vérification compte)")
-                    return {
+                    logger.info(f"  🔄 Rule override sauvegardé — LLM va tourner pour signaux secondaires")
+                    rule_go_override = {
                         'action': 'GO',
                         'target_department': current_department,
                         'reason': f"Evalbox = '{evalbox}' mais le candidat fournit des identifiants - vérification du compte ExamT3P nécessaire",
                         'confidence': 1.0,
                         'method': 'rule_credentials_override',
                         'primary_intent': 'ENVOIE_IDENTIFIANTS',
-                        'secondary_intents': [],
                         'detected_intent': 'ENVOIE_IDENTIFIANTS',
-                        'intent_context': {'has_credentials': True, 'evalbox_status': evalbox}
+                        'intent_context_extra': {'has_credentials': True, 'evalbox_status': evalbox}
                     }
-
-                # Vérifier si le candidat ENVOIE des documents (intention TRANSMET_DOCUMENTS)
-                has_document_keywords = False
-                if BusinessRules:
-                    if ticket_subject and BusinessRules.is_document_submission(ticket_subject):
-                        has_document_keywords = True
-                    if thread_content and BusinessRules.is_document_submission(thread_content):
-                        has_document_keywords = True
-
-                if has_document_keywords:
-                    # Le candidat envoie des documents → router vers Refus CMA pour traitement
-                    logger.info(f"  🔍 Evalbox = '{evalbox}' ET envoi de documents → Route vers Refus CMA")
-                    return {
-                        'action': 'ROUTE',
-                        'target_department': 'Refus CMA',
-                        'reason': f"Evalbox = '{evalbox}' et le candidat envoie des documents",
-                        'confidence': 1.0,
-                        'method': 'rule_evalbox_with_documents',
-                        'primary_intent': 'TRANSMET_DOCUMENTS',
-                        'secondary_intents': [],
-                        'detected_intent': 'TRANSMET_DOCUMENTS',
-                        'intent_context': {'evalbox_status': evalbox}
-                    }
+                    # PAS de return — le LLM va analyser le message complet
                 else:
-                    # Pas d'envoi de documents → rester en DOC, le workflow informera le candidat
-                    logger.info(f"  🔍 Evalbox = '{evalbox}' MAIS pas d'envoi de documents → GO (workflow informera le candidat)")
-                    # NE PAS retourner ici - laisser le triage IA détecter l'intention réelle
-                    # Le workflow utilisera le template approprié pour informer du refus
+                    # Vérifier si le candidat ENVOIE des documents (intention TRANSMET_DOCUMENTS)
+                    has_document_keywords = False
+                    if BusinessRules:
+                        if ticket_subject and BusinessRules.is_document_submission(ticket_subject):
+                            has_document_keywords = True
+                        if thread_content and BusinessRules.is_document_submission(thread_content):
+                            has_document_keywords = True
+
+                    if has_document_keywords:
+                        # ROUTE: ticket quitte DOC → return early (pas besoin de LLM)
+                        logger.info(f"  🔍 Evalbox = '{evalbox}' ET envoi de documents → Route vers Refus CMA")
+                        return {
+                            'action': 'ROUTE',
+                            'target_department': 'Refus CMA',
+                            'reason': f"Evalbox = '{evalbox}' et le candidat envoie des documents",
+                            'confidence': 1.0,
+                            'method': 'rule_evalbox_with_documents',
+                            'primary_intent': 'TRANSMET_DOCUMENTS',
+                            'secondary_intents': [],
+                            'detected_intent': 'TRANSMET_DOCUMENTS',
+                            'intent_context': {'evalbox_status': evalbox}
+                        }
+                    else:
+                        # Pas d'envoi de documents → rester en DOC, le workflow informera le candidat
+                        logger.info(f"  🔍 Evalbox = '{evalbox}' MAIS pas d'envoi de documents → GO (workflow informera le candidat)")
+                        # NE PAS retourner ici - laisser le triage IA détecter l'intention réelle
+                        # Le workflow utilisera le template approprié pour informer du refus
 
             # Règle automatique: Demande d'attestation France Travail / Pôle Emploi → Comptabilité
             thread_lower = thread_content.lower() if thread_content else ''
@@ -762,6 +773,7 @@ EXEMPLE PLAINTE - Message: "J'avais clairement indiqué mon choix pour une forma
             has_france_travail = any(kw in combined_text for kw in france_travail_keywords)
 
             if has_attestation and has_france_travail:
+                # ROUTE: ticket quitte DOC → return early (pas besoin de LLM)
                 logger.info(f"  🔍 Demande d'attestation France Travail détectée → Route vers Comptabilité")
                 return {
                     'action': 'ROUTE',
@@ -861,7 +873,7 @@ EXEMPLE PLAINTE - Message: "J'avais clairement indiqué mon choix pour une forma
                 if intent_context.get('assigned_session_wrong'):
                     logger.info(f"  ❌ Session erronée reçue: {intent_context.get('assigned_session_wrong')}")
 
-            return {
+            llm_result = {
                 'action': action,
                 'target_department': target_dept,
                 'reason': result.get('reason', 'Analyse IA'),
@@ -874,6 +886,40 @@ EXEMPLE PLAINTE - Message: "J'avais clairement indiqué mon choix pour une forma
                 'detected_intent': primary_intent,
                 'intent_context': intent_context
             }
+
+            # ================================================================
+            # MERGE: Appliquer le rule_go_override si détecté
+            # On garde les signaux secondaires du LLM (secondary_intents,
+            # session_preference, communication_mode, etc.) mais on override
+            # le primary_intent avec la règle haute confiance.
+            # ================================================================
+            if rule_go_override:
+                logger.info(f"  🔄 Rule override appliqué: {rule_go_override['method']}")
+                logger.info(f"     Primary intent: {llm_result['primary_intent']} → {rule_go_override['primary_intent']}")
+                logger.info(f"     LLM secondary_intents préservés: {llm_result['secondary_intents']}")
+                if llm_result['intent_context'].get('session_preference'):
+                    logger.info(f"     LLM session_preference préservée: {llm_result['intent_context']['session_preference']}")
+
+                # Override: action, primary intent, method, confidence
+                llm_result['action'] = rule_go_override['action']
+                llm_result['target_department'] = rule_go_override['target_department']
+                llm_result['primary_intent'] = rule_go_override['primary_intent']
+                llm_result['detected_intent'] = rule_go_override['detected_intent']
+                llm_result['method'] = rule_go_override['method']
+                llm_result['confidence'] = rule_go_override['confidence']
+                llm_result['reason'] = rule_go_override['reason']
+
+                # Merge intent_context: LLM fields + rule-specific fields
+                llm_result['intent_context'].update(rule_go_override.get('intent_context_extra', {}))
+
+                # Si le LLM a détecté l'intent original comme secondaire, l'ajouter
+                llm_primary = primary_intent  # L'intent que le LLM avait détecté
+                if llm_primary and llm_primary != rule_go_override['primary_intent']:
+                    if llm_primary not in llm_result['secondary_intents']:
+                        llm_result['secondary_intents'].append(llm_primary)
+                        logger.info(f"     LLM primary '{llm_primary}' ajouté aux secondary_intents")
+
+            return llm_result
 
         except json.JSONDecodeError as e:
             logger.warning(f"  ⚠️ TriageAgent JSON error: {e}")
