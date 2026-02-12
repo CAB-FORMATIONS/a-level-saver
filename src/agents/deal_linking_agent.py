@@ -537,23 +537,26 @@ Always respond in JSON format with the following structure:
         normalized = ' '.join(normalized.lower().split())
         return normalized
 
-    def _search_duplicate_by_name_and_postal(
+    def _search_duplicate_by_name_and_identity(
         self,
         candidate_name: str,
-        postal_code: str,
+        numero_permis: str = None,
+        cma_de_depot: str = None,
         exclude_deal_ids: List[str] = None,
         candidate_email: str = None,
         candidate_phone: str = None
     ) -> Dict[str, Any]:
         """
-        Recherche des doublons potentiels par nom + code postal avec évaluation de confiance.
+        Recherche des doublons potentiels par nom + identité (permis ou CMA) avec évaluation de confiance.
 
-        Cherche des deals 20€ GAGNÉ avec le même nom (normalisé) et code postal.
+        Cherche des deals 20€ GAGNÉ avec le même nom (normalisé).
+        Priorité de matching: Numero_Permis (fort) > CMA_de_depot (géographique).
         Évalue la confiance du match en comparant email/téléphone.
 
         Args:
             candidate_name: Nom complet du candidat (ex: "Gaël Carole")
-            postal_code: Code postal (ex: "93330")
+            numero_permis: Numéro de permis de conduire (prioritaire)
+            cma_de_depot: CMA de dépôt (fallback géographique)
             exclude_deal_ids: IDs de deals à exclure de la recherche
             candidate_email: Email du candidat actuel (pour comparaison)
             candidate_phone: Téléphone du candidat actuel (pour comparaison)
@@ -579,7 +582,7 @@ Always respond in JSON format with the following structure:
             'duplicate_type': None
         }
 
-        if not candidate_name or not postal_code:
+        if not candidate_name or (not numero_permis and not cma_de_depot):
             return result
 
         exclude_deal_ids = exclude_deal_ids or []
@@ -590,7 +593,7 @@ Always respond in JSON format with the following structure:
 
             # Normaliser le nom pour comparaison
             normalized_candidate_name = self._normalize_name_for_comparison(candidate_name)
-            logger.info(f"  🔍 Recherche doublon par nom+CP: '{candidate_name}' ({normalized_candidate_name}) + {postal_code}")
+            logger.info(f"  🔍 Recherche doublon par nom+identité: '{candidate_name}' ({normalized_candidate_name}) | Permis: {numero_permis or 'N/A'} | CMA: {cma_de_depot or 'N/A'}")
 
             # Extraire prénom et nom pour recherche
             name_parts = candidate_name.split()
@@ -621,7 +624,7 @@ Always respond in JSON format with the following structure:
             candidate_email_norm = candidate_email.lower().strip() if candidate_email else None
             candidate_phone_norm = self._normalize_phone(candidate_phone) if candidate_phone else None
 
-            # Filtrer: 20€ GAGNÉ + même code postal + nom similaire
+            # Filtrer: 20€ GAGNÉ + même identité (permis/CMA) + nom similaire
             duplicate_deals = []
             has_email_match = False
             has_phone_match = False
@@ -641,9 +644,21 @@ Always respond in JSON format with the following structure:
                 if stage != 'GAGNÉ' or amount != 20:
                     continue
 
-                # Vérifier code postal
-                deal_postal = deal.get('Mailing_Zip', '')
-                if str(deal_postal) != str(postal_code):
+                # Vérifier identité: Numero_Permis (fort) puis CMA_de_depot (fallback)
+                deal_permis = str(deal.get('Numero_Permis', '') or '').strip()
+                deal_cma = str(deal.get('CMA_de_depot', '') or '').strip()
+                matched_by_permis = False
+
+                if numero_permis and deal_permis:
+                    # Les deux ont un permis → comparaison définitive
+                    if deal_permis != numero_permis:
+                        continue  # Permis différents = personnes différentes
+                    matched_by_permis = True
+                elif cma_de_depot:
+                    # Fallback CMA de dépôt
+                    if not deal_cma or deal_cma != cma_de_depot:
+                        continue
+                else:
                     continue
 
                 # Vérifier nom (normalisé)
@@ -667,7 +682,8 @@ Always respond in JSON format with the following structure:
                 )
 
                 if name_match:
-                    logger.info(f"  ✅ MATCH: {deal_name} (CP: {deal_postal}, Stage: {stage})")
+                    match_by = f"Permis: {deal_permis}" if (numero_permis and deal_permis) else f"CMA: {deal_cma}"
+                    logger.info(f"  ✅ MATCH: {deal_name} ({match_by}, Stage: {stage})")
 
                     # Récupérer email/phone du contact du deal pour comparaison
                     deal_email = None
@@ -703,6 +719,7 @@ Always respond in JSON format with the following structure:
                     # Ajouter les infos de contact au deal pour référence
                     deal['_duplicate_contact_email'] = deal_email
                     deal['_duplicate_contact_phone'] = deal_phone
+                    deal['_matched_by_permis'] = matched_by_permis
                     duplicate_deals.append(deal)
 
             result['duplicates'] = duplicate_deals
@@ -714,33 +731,36 @@ Always respond in JSON format with the following structure:
             }
 
             if duplicate_deals:
-                logger.warning(f"  ⚠️ {len(duplicate_deals)} doublon(s) potentiel(s) trouvé(s) par nom+CP")
+                logger.warning(f"  ⚠️ {len(duplicate_deals)} doublon(s) potentiel(s) trouvé(s) par nom+identité")
 
                 # Déterminer la confiance
-                if has_email_match or has_phone_match:
+                # Priorité 1: Match par numéro de permis = certitude
+                any_permis_match = any(d.get('_matched_by_permis') for d in duplicate_deals)
+                if any_permis_match:
+                    result['confidence'] = 'HIGH_CONFIDENCE'
+                    logger.info(f"  🔒 CONFIANCE HAUTE: numéro de permis identique")
+                elif has_email_match or has_phone_match:
                     result['confidence'] = 'HIGH_CONFIDENCE'
                     logger.info(f"  🔒 CONFIANCE HAUTE: email ou téléphone identique")
                 elif has_different_email and has_different_phone:
                     result['confidence'] = 'NEEDS_CONFIRMATION'
                     logger.info(f"  ❓ CONFIRMATION REQUISE: email ET téléphone différents")
                 elif has_different_email or has_different_phone:
-                    # Un seul est différent, l'autre peut être absent
                     result['confidence'] = 'NEEDS_CONFIRMATION'
                     logger.info(f"  ❓ CONFIRMATION REQUISE: données de contact différentes")
                 else:
-                    # Pas de données de contact pour comparer → demander confirmation
                     result['confidence'] = 'NEEDS_CONFIRMATION'
                     logger.info(f"  ❓ CONFIRMATION REQUISE: impossible de vérifier email/téléphone")
 
                 # Classifier le type de doublon
                 result['duplicate_type'] = self._classify_duplicate_type(duplicate_deals[0])
             else:
-                logger.info(f"  📭 Aucun doublon trouvé par nom+CP")
+                logger.info(f"  📭 Aucun doublon trouvé par nom+identité")
 
             return result
 
         except Exception as e:
-            logger.error(f"Erreur recherche doublon par nom+CP: {e}")
+            logger.error(f"Erreur recherche doublon par nom+identité: {e}")
             return result
 
     def _has_examt3p_account(self, deal: Dict[str, Any]) -> bool:
@@ -1252,18 +1272,20 @@ Emails alternatifs trouvés:"""
                                 else:
                                     candidate_name = str(contact_name_data) if contact_name_data else ''
 
-                                postal_code = current_deal.get('Mailing_Zip', '')
+                                numero_permis = str(current_deal.get('Numero_Permis', '') or '').strip()
+                                cma_de_depot = str(current_deal.get('CMA_de_depot', '') or '').strip()
 
                                 # Récupérer email/phone du candidat actuel pour comparaison
                                 current_email = contact_data.get('Email', '').lower().strip() if contact_data and contact_data.get('Email') else None
                                 current_phone_raw = contact_data.get('Phone') or contact_data.get('Mobile') if contact_data else None
                                 current_phone = self._normalize_phone(current_phone_raw) if current_phone_raw else None
 
-                                if candidate_name and postal_code:
+                                if candidate_name and (numero_permis or cma_de_depot):
                                     existing_deal_ids = [d.get('id') for d in all_deals if d.get('id')]
-                                    name_postal_result = self._search_duplicate_by_name_and_postal(
+                                    name_postal_result = self._search_duplicate_by_name_and_identity(
                                         candidate_name=candidate_name,
-                                        postal_code=str(postal_code),
+                                        numero_permis=numero_permis or None,
+                                        cma_de_depot=cma_de_depot or None,
                                         exclude_deal_ids=existing_deal_ids,
                                         candidate_email=current_email,
                                         candidate_phone=current_phone
@@ -1681,7 +1703,8 @@ Emails alternatifs trouvés:"""
                 else:
                     candidate_name = str(contact_name_data) if contact_name_data else ''
 
-                postal_code = selected_deal.get('Mailing_Zip', '')
+                numero_permis = str(selected_deal.get('Numero_Permis', '') or '').strip()
+                cma_de_depot = str(selected_deal.get('CMA_de_depot', '') or '').strip()
 
                 # Récupérer email/phone du candidat actuel pour comparaison
                 current_email = email  # Email extrait du ticket
@@ -1694,13 +1717,14 @@ Emails alternatifs trouvés:"""
                 if not current_phone:
                     current_phone = self._extract_phone_from_ticket(ticket, threads)
 
-                if candidate_name and postal_code:
+                if candidate_name and (numero_permis or cma_de_depot):
                     # Exclure les deals déjà trouvés
                     existing_deal_ids = [d.get('id') for d in all_deals if d.get('id')]
 
-                    name_postal_result = self._search_duplicate_by_name_and_postal(
+                    name_postal_result = self._search_duplicate_by_name_and_identity(
                         candidate_name=candidate_name,
-                        postal_code=str(postal_code),
+                        numero_permis=numero_permis or None,
+                        cma_de_depot=cma_de_depot or None,
                         exclude_deal_ids=existing_deal_ids,
                         candidate_email=current_email,
                         candidate_phone=current_phone

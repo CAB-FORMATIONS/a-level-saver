@@ -2200,13 +2200,14 @@ La date d'examen dans Zoho CRM est dans le passé. Le workflow a été stoppé p
                     direction = thread.get('direction', '')
                     if status == 'DRAFT':
                         continue
-                    # Chercher dans les threads sortants ET dans le contenu cité des entrants
-                    # (le candidat peut répondre depuis un autre ticket, la citation est dans l'entrant)
-                    content = get_clean_thread_content(thread).lower()
-                    if direction == 'out' or direction == 'in':
+                    # Chercher UNIQUEMENT dans les threads sortants (réponses de CAB)
+                    # Les threads entrants contiennent du contenu cité (ex: "offre uber à 20€"
+                    # dans l'email de confirmation d'inscription) → faux positifs
+                    if direction == 'out':
+                        content = get_clean_thread_content(thread).lower()
                         if any(marker in content for marker in duplicate_markers):
                             duplicate_already_communicated = True
-                            logger.info(f"  📋 Marqueur doublon trouvé dans thread {direction}: {thread.get('id')}")
+                            logger.info(f"  📋 Marqueur doublon trouvé dans thread sortant: {thread.get('id')}")
                             break
 
                 if duplicate_already_communicated:
@@ -4798,12 +4799,36 @@ L'équipe CAB Formations"""
             deal_name = deal.get('Deal_Name', 'Opportunité')
             previous_dates.append(f"{deal_name} ({closing_date})")
 
+        # Extraire la date d'examen du deal doublon (le plus ancien = l'offre déjà utilisée)
+        # Champ CRM: Date_exam (texte libre, ex: "30 janvier 2024")
+        duplicate_exam_date_str = None
+        for deal in duplicate_deals:
+            if deal.get('id') == (selected_deal.get('id') if selected_deal else None):
+                continue  # Skip le deal actuel, on veut l'ancien
+            date_exam = deal.get('Date_exam')
+            if date_exam:
+                duplicate_exam_date_str = str(date_exam).strip()
+                break
+        # Fallback: si tous les deals sont le deal actuel, chercher dans tous
+        if not duplicate_exam_date_str:
+            for deal in duplicate_deals:
+                date_exam = deal.get('Date_exam')
+                if date_exam:
+                    duplicate_exam_date_str = str(date_exam).strip()
+                    break
+
+        if duplicate_exam_date_str:
+            logger.info(f"  📅 Date d'examen du deal doublon: {duplicate_exam_date_str}")
+            benefited_line = f"Après vérification de votre dossier, je constate que vous avez déjà bénéficié de l'offre Uber à 20€ pour le passage de l'examen VTC, avec une inscription à la date d'examen du {duplicate_exam_date_str}."
+        else:
+            benefited_line = "Après vérification de votre dossier, je constate que vous avez déjà bénéficié de l'offre Uber à 20€ pour le passage de l'examen VTC."
+
         # Générer la réponse
-        response_text = """Bonjour,
+        response_text = f"""Bonjour,
 
 Je vous remercie pour votre message.
 
-Après vérification de votre dossier, je constate que vous avez déjà bénéficié de l'offre Uber à 20€ pour le passage de l'examen VTC. Cette offre n'est valable qu'une seule fois par candidat.
+{benefited_line} Cette offre n'est valable qu'une seule fois par candidat.
 
 Si vous souhaitez vous réinscrire à l'examen VTC, voici vos options :
 
