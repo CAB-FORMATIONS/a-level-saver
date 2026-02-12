@@ -717,6 +717,16 @@ class ZohoCRMClient(ZohoAPIClient):
         response = self._make_request("GET", url)
         return response.get("data", [{}])[0] if response.get("data") else {}
 
+    def update_contact(
+        self,
+        contact_id: str,
+        data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Update a contact."""
+        url = f"{settings.zoho_crm_api_url}/Contacts/{contact_id}"
+        payload = {"data": [data]}
+        return self._make_request("PUT", url, json=payload)
+
     def update_deal(
         self,
         deal_id: str,

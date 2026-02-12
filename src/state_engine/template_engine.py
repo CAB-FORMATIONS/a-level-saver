@@ -851,6 +851,10 @@ class TemplateEngine:
             # Utilise _filter_closest_sessions_by_exam pour exclure les sessions après l'examen (Rule 16)
             'no_session_alternatives': self._compute_no_session_alternatives(context),
 
+            # Cascade d'alternatives (DEMANDE_CHANGEMENT_SESSION)
+            'session_change_includes_next_date': context.get('session_change_includes_next_date', False),
+            'session_change_needs_cma': context.get('session_change_needs_cma', False),
+
             # Force majeure (pour les templates empathiques)
             'mentions_force_majeure': context.get('mentions_force_majeure', False),
             'force_majeure_type': context.get('force_majeure_type'),
@@ -879,7 +883,9 @@ class TemplateEngine:
             # ou via _map_warning_state_flags pour les états WARNING
             'uber_cas_a': context.get('uber_cas_a', False),
             'uber_cas_b': context.get('uber_cas_b', False),
-            'uber_cas_d': context.get('uber_cas_d', False),
+            'uber_cas_d': context.get('uber_cas_d', False) and not context.get('uber_cas_d_email_received', False),
+            'uber_cas_d_email_received': context.get('uber_cas_d_email_received', False),
+            'uber_alternative_email': context.get('uber_alternative_email', ''),
             'uber_cas_e': context.get('uber_cas_e', False),
             'uber_doublon': context.get('uber_doublon', False),
             'uber_doublon_clarification': context.get('uber_doublon_clarification', False),

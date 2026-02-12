@@ -6,7 +6,7 @@ Votre demande de changement vers le <b>{{tm_candidate_confirmed_date}}</b> a bie
 {{#if has_sessions_proposees}}<br>
 <b>Voici les sessions de formation disponibles pour cette date{{#if session_preference}} ({{session_preference}}){{/if}} :</b><br>
 {{#each sessions_proposees}}{{#if this.is_first_of_exam}}<b>Examen du {{this.date_examen_formatted}}</b> &mdash; {{this.departement}} (cloture : {{this.cloture}})<br>{{/if}}&nbsp;&nbsp;&rarr; {{this.nom}} : du {{this.debut}} au {{this.fin}}<br>
-{{/each}}<br>
+{{/each}}{{#if session_change_needs_cma}}<i>Note : Un changement de date d'examen necessite une demande aupres de la CMA. Nous nous en chargeons pour vous.</i><br>{{/if}}<br>
 Merci de nous confirmer votre choix de session pour que nous puissions finaliser votre inscription.<br>
 {{else}}
 <br>
@@ -98,7 +98,7 @@ Nous vous proposons l'examen du <b>{{repositioning_target_date}}</b>.<br>
 <br>
 <b>Voici les sessions de formation disponibles{{#if session_preference}} ({{session_preference}}){{/if}} :</b><br>
 {{#each sessions_proposees}}{{#if this.is_first_of_exam}}<b>Examen du {{this.date_examen_formatted}}</b> &mdash; {{this.departement}} (cloture : {{this.cloture}})<br>{{/if}}&nbsp;&nbsp;&rarr; {{this.nom}} : du {{this.debut}} au {{this.fin}}<br>
-{{/each}}<br>
+{{/each}}{{#if session_change_needs_cma}}<i>Note : Un changement de date d'examen necessite une demande aupres de la CMA. Nous nous en chargeons pour vous.</i><br>{{/if}}<br>
 Merci de nous confirmer votre choix de session pour que nous puissions finaliser votre inscription.<br>
 {{else}}{{#if repositioning_target_date}}
 Merci de nous confirmer cette date pour que nous puissions vous proposer les sessions de formation disponibles.<br>
@@ -125,7 +125,7 @@ La CMA vous repositionnera sur la date souhaitee des qu'elle sera ouverte aux in
 {{/if}}{{#if has_sessions_proposees}}<br>
 <b>Voici les dates disponibles avec leurs sessions de formation{{#if session_preference}} ({{session_preference}}){{/if}} :</b><br>
 {{#each sessions_proposees}}{{#if this.is_first_of_exam}}<b>Examen du {{this.date_examen_formatted}}</b> &mdash; {{this.departement}} (cloture : {{this.cloture}})<br>{{/if}}&nbsp;&nbsp;&rarr; {{this.nom}} : du {{this.debut}} au {{this.fin}}<br>
-{{/each}}<br>
+{{/each}}{{#if session_change_needs_cma}}<i>Note : Un changement de date d'examen necessite une demande aupres de la CMA. Nous nous en chargeons pour vous.</i><br>{{/if}}<br>
 Merci de nous confirmer votre choix de date et session.<br>
 {{else}}{{#if same_month_other_depts}}<br>
 <b>En {{requested_month_name}} dans d'autres departements :</b><br>

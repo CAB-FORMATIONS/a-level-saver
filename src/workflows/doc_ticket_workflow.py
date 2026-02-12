@@ -3930,8 +3930,22 @@ L'équipe CAB Formations"""
             # CAS 7: Demande de changement de session avec date d'examen assignée
             # → proposer sessions alternatives avant cette date d'examen
             # NOTE: Vérifie aussi les intentions secondaires (ex: principale=ENVOIE_IDENTIFIANTS + secondaire=DEMANDE_CHANGEMENT_SESSION)
+            # CASCADE: Charger date actuelle + prochaine date pour proposer des alternatives
             exam_dates_for_session = [date_examen_info]
-            logger.info(f"  📚 DEMANDE_CHANGEMENT_SESSION + date assignée → recherche sessions avant {date_examen_info.get('Date_Examen')}")
+            current_dept = date_examen_vtc_result.get('current_departement') or date_examen_info.get('Departement')
+            if current_dept:
+                evalbox_for_cascade = enriched_lookups.get('evalbox_status') or deal_data.get('Evalbox', '')
+                cloture_for_cascade = date_examen_vtc_result.get('date_cloture')
+                from src.utils.date_examen_vtc_helper import classify_engagement_level as _classify_eng_cas7
+                engagement_cas7 = _classify_eng_cas7(evalbox_for_cascade, cloture_for_cascade, examt3p_data)
+                if engagement_cas7.get('can_reposition'):
+                    from src.utils.date_examen_vtc_helper import get_next_exam_dates as _get_next_dates_cas7
+                    next_dept_dates = _get_next_dates_cas7(self.crm_client, str(current_dept), limit=3)
+                    for d in next_dept_dates:
+                        if d.get('Date_Examen') != date_examen_info.get('Date_Examen'):
+                            exam_dates_for_session.append(d)
+                            break
+            logger.info(f"  📚 DEMANDE_CHANGEMENT_SESSION + date assignée → {len(exam_dates_for_session)} date(s) pour recherche sessions")
         else:
             exam_dates_for_session = []
 
@@ -3959,6 +3973,26 @@ L'équipe CAB Formations"""
         is_session_complaint = is_session_change_request and intent.is_complaint
         # Pour DEMANDE_CHANGEMENT_SESSION avec dates spécifiques, on n'a pas besoin de exam_dates_for_session
         has_specific_dates = intent.has_date_range_request if is_session_change_request else False
+
+        # Safety net: Si changement de session demandé mais exam_dates_for_session n'a qu'1 date
+        # (possible si V3 a overridé CAS 7), ajouter la prochaine date pour la cascade d'alternatives
+        if is_session_change_request and exam_dates_for_session and has_assigned_date and len(exam_dates_for_session) < 2:
+            _sn_dept = date_examen_vtc_result.get('current_departement') or (date_examen_info.get('Departement') if date_examen_info else None)
+            if _sn_dept:
+                _sn_evalbox = enriched_lookups.get('evalbox_status') or deal_data.get('Evalbox', '')
+                _sn_cloture = date_examen_vtc_result.get('date_cloture')
+                from src.utils.date_examen_vtc_helper import classify_engagement_level as _classify_eng_sn
+                _sn_engagement = _classify_eng_sn(_sn_evalbox, _sn_cloture, examt3p_data)
+                if _sn_engagement.get('can_reposition'):
+                    from src.utils.date_examen_vtc_helper import get_next_exam_dates as _get_next_dates_sn
+                    _sn_current_dates = {d.get('Date_Examen') for d in exam_dates_for_session}
+                    _sn_next_dates = _get_next_dates_sn(self.crm_client, str(_sn_dept), limit=3)
+                    for d in _sn_next_dates:
+                        if d.get('Date_Examen') not in _sn_current_dates:
+                            exam_dates_for_session.append(d)
+                            logger.info(f"  📚 CHANGEMENT SESSION safety net: +1 date ({d.get('Date_Examen')})")
+                            break
+
         # Détecter si la session assignée est passée (pour CAS 6b)
         session_is_passed = False
         if enriched_lookups.get('session_date_fin'):
@@ -4053,12 +4087,14 @@ L'équipe CAB Formations"""
                     conversation_state and conversation_state.target_date
                     and any(d.type == 'date_choice' and d.confidence == 'explicit' for d in conversation_state.candidate_decisions)
                 )
+                # Pour changement de session, charger TOUS les types (jour + soir) pour la cascade d'alternatives
+                session_pref_for_loading = None if is_session_change_request else triage_session_pref
                 session_data = analyze_session_situation(
                     deal_data=deal_data,
                     exam_dates=exam_dates_for_session,
                     threads=threads_data,
                     crm_client=self.crm_client,
-                    triage_session_preference=triage_session_pref,
+                    triage_session_preference=session_pref_for_loading,
                     allow_change=(detected_intent in ['CONFIRMATION_SESSION', 'DEMANDE_CHANGEMENT_SESSION'] or is_session_change_request or date_examen_vtc_result.get('implicit_date_repositioning') or v3_date_change),
                     enriched_lookups=enriched_lookups
                 )
@@ -4067,6 +4103,21 @@ L'équipe CAB Formations"""
                 logger.info(f"  ➡️ Préférence détectée: {session_data['session_preference']}")
             if session_data.get('proposed_options'):
                 logger.info(f"  ✅ {len(session_data['proposed_options'])} option(s) de session proposée(s)")
+
+            # ================================================================
+            # CASCADE D'ALTERNATIVES (DEMANDE_CHANGEMENT_SESSION)
+            # ================================================================
+            if is_session_change_request and not has_specific_dates and not is_session_complaint:
+                current_session_type = enriched_lookups.get('session_type')  # 'jour' ou 'soir'
+                current_session_id = deal_data.get('Session', {}).get('id') if isinstance(deal_data.get('Session'), dict) else None
+                _cascade_evalbox = enriched_lookups.get('evalbox_status') or deal_data.get('Evalbox', '')
+                _cascade_cloture = date_examen_vtc_result.get('date_cloture')
+                from src.utils.date_examen_vtc_helper import classify_engagement_level as _classify_eng_cascade
+                _cascade_engagement = _classify_eng_cascade(_cascade_evalbox, _cascade_cloture, examt3p_data)
+
+                session_data = self._apply_session_change_cascade(
+                    session_data, current_session_type, current_session_id, _cascade_engagement
+                )
 
             # ================================================================
             # CORRECTION AUTOMATIQUE ERREUR D'ANNÉE (mars 2024 → mars 2026)
@@ -5249,6 +5300,55 @@ L'équipe CAB Formations"""
                     logger.info(f"  🔇 WARNING supprimés (déjà communiqués): {suppressed_warnings}")
 
         # ================================================================
+        # CAS D UBER: Détection d'email alternatif fourni par le candidat
+        # Si le CAS D a déjà été communiqué ET le candidat fournit un autre email
+        # → on l'acknowledge au lieu de répéter "contactez Uber"
+        # ================================================================
+        uber_cas_d_email_received = False
+        uber_alternative_email = ''
+        if 'UBER_ACCOUNT_NOT_VERIFIED' in suppressed_warnings:
+            import re
+            candidate_msg = (customer_message or '').strip()
+            if candidate_msg:
+                # Extraire les emails du message candidat
+                emails_found = re.findall(r'[\w.+-]+@[\w-]+\.[\w.-]+', candidate_msg)
+                # Filtrer les emails CAB/system
+                candidate_emails = [
+                    e for e in emails_found
+                    if 'cabformation' not in e.lower()
+                    and 'cab-formation' not in e.lower()
+                    and 'zoho' not in e.lower()
+                ]
+                if candidate_emails:
+                    uber_cas_d_email_received = True
+                    uber_alternative_email = candidate_emails[0]
+                    logger.info(f"  📧 CAS D: Email alternatif Uber détecté dans message candidat: {uber_alternative_email}")
+                    # Mise à jour de l'email du contact CRM avec l'email Uber fourni
+                    _contact_data = analysis_result.get('contact_data', {})
+                    _contact_id = _contact_data.get('contact_id')
+                    _old_email = _contact_data.get('Email') or _contact_data.get('email', '')
+                    if _contact_id and uber_alternative_email.lower() != _old_email.lower():
+                        try:
+                            self.crm_client.update_contact(_contact_id, {'Email': uber_alternative_email})
+                            logger.info(f"  ✅ Email contact CRM mis à jour: {_old_email} → {uber_alternative_email}")
+                        except Exception as e:
+                            logger.warning(f"  ⚠️ Erreur mise à jour email contact CRM: {e}")
+
+                    # Note interne pour l'équipe : vérification manuelle requise
+                    try:
+                        internal_note = (
+                            f"📧 EMAIL ALTERNATIF UBER — Le candidat a fourni une adresse email différente "
+                            f"pour son compte Uber Driver : {uber_alternative_email}\n"
+                            f"Email du contact CRM mis à jour ({_old_email} → {uber_alternative_email}).\n"
+                            f"Action requise : Vérifier avec Uber si cette adresse est liée à un compte Driver actif "
+                            f"et mettre à jour le champ Compte_Uber si confirmé."
+                        )
+                        self.desk_client.add_ticket_comment(ticket_id, internal_note, is_public=False)
+                        logger.info("  📝 Note interne ajoutée (email alternatif Uber)")
+                    except Exception as e:
+                        logger.warning(f"  ⚠️ Erreur ajout note interne CAS D email: {e}")
+
+        # ================================================================
         # STEP 2: Generate Response from Template
         # ================================================================
         logger.info("  📝 STATE ENGINE: Génération de la réponse...")
@@ -5430,6 +5530,10 @@ L'équipe CAB Formations"""
             'all_sessions_jour': session_data.get('all_sessions_jour', []),
             'all_sessions_soir': session_data.get('all_sessions_soir', []),
 
+            # Cascade d'alternatives (DEMANDE_CHANGEMENT_SESSION)
+            'session_change_includes_next_date': session_data.get('_includes_next_date', False),
+            'session_change_needs_cma': session_data.get('_needs_cma', False),
+
             # Blocage confirmation session (documents manquants ou credentials invalides)
             # NOTE: La clôture passée (CAS 8) n'est PAS un blocage - on redirige vers la nouvelle date
             'session_confirmation_blocked': session_data.get('session_confirmation_blocked', False),
@@ -5462,6 +5566,8 @@ L'équipe CAB Formations"""
             # Uber
             'is_uber_20_deal': uber_result.get('is_uber_20_deal', False),
             'uber_case': uber_result.get('case', ''),
+            'uber_cas_d_email_received': uber_cas_d_email_received,
+            'uber_alternative_email': uber_alternative_email,
 
             # Repositionnement implicite de date d'examen
             'implicit_date_repositioning': date_examen_vtc_result.get('implicit_date_repositioning', False),
@@ -5827,11 +5933,25 @@ L'équipe CAB Formations"""
             logger.info(f"  🔓 {detected_intent_for_mode}: override response_mode {v3_response_mode} → full (point complet)")
             v3_response_mode = 'full'
 
+        # Si CAS D email reçu, nettoyer previous_response pour éviter que
+        # le humanizer ne copie les instructions "contacter Uber" de l'ancien message
+        prev_resp_for_humanizer = previous_response
+        if uber_cas_d_email_received and prev_resp_for_humanizer:
+            import re as _re_humanizer
+            # Retirer la section CAS D de l'ancien message (entre "Vérification" et la fin du bloc Uber)
+            prev_resp_for_humanizer = _re_humanizer.sub(
+                r'(?i)<b>V[ée]rification de votre compte Uber</b>.*?(?=<b>|$)',
+                '',
+                prev_resp_for_humanizer,
+                flags=_re_humanizer.DOTALL
+            )
+            logger.info("  📧 CAS D email reçu: section Uber retirée du previous_response pour humanizer")
+
         humanize_result = humanize_response(
             template_response=response_text,
             candidate_message=customer_message,
             candidate_name=candidate_name,
-            previous_response=previous_response,
+            previous_response=prev_resp_for_humanizer,
             use_ai=True,  # Activer l'humanisation IA
             response_mode=v3_response_mode
         )
@@ -6084,6 +6204,75 @@ L'équipe CAB Formations"""
         'NON ADMIS PLUS INTERRESSE', 'NON ADMISSIBLE PLUS INTERRESSE'
     }
     RESULTAT_MID = {'ADMISSIBLE'}
+
+    def _apply_session_change_cascade(self, session_data, current_type, current_id, engagement):
+        """Cascade d'alternatives pour DEMANDE_CHANGEMENT_SESSION.
+
+        Niveaux:
+        1. Même type, même date, session différente → proposer celle-là uniquement
+        2. Combo: autre type même date (Alt A) + même type prochaine date (Alt B)
+        3. Fallback: prochaine date (tout type disponible)
+        0. Rien trouvé → garder les options originales
+        """
+        proposed = session_data.get('proposed_options', [])
+        if not proposed:
+            session_data['_cascade_level'] = 0
+            return session_data
+
+        current_option = proposed[0]  # Date actuelle (toujours en premier)
+        next_option = proposed[1] if len(proposed) > 1 else None
+        current_sessions = current_option.get('sessions', [])
+
+        # Step 1: Autre session du MÊME type sur la MÊME date
+        same_type_alts = [s for s in current_sessions
+                          if s.get('session_type') == current_type
+                          and str(s.get('id', '')) != str(current_id or '')]
+        if same_type_alts:
+            current_option['sessions'] = same_type_alts
+            session_data['proposed_options'] = [current_option]
+            session_data['_cascade_level'] = 1
+            logger.info(f"  🔄 CASCADE 1: {len(same_type_alts)} alternative(s) même type trouvée(s)")
+            return session_data
+
+        # Step 2: Combo — autre type même date (Alt A) + même type prochaine date (Alt B)
+        import copy
+        other_type = [s for s in current_sessions if s.get('session_type') != current_type]
+        next_same_type = []
+        if next_option and engagement.get('can_reposition'):
+            next_sessions = next_option.get('sessions', [])
+            next_same_type = [s for s in next_sessions if s.get('session_type') == current_type]
+
+        combo = []
+        if other_type:
+            alt_a = copy.deepcopy(current_option)
+            alt_a['sessions'] = other_type
+            combo.append(alt_a)
+        if next_same_type:
+            alt_b = copy.deepcopy(next_option)
+            alt_b['sessions'] = next_same_type
+            combo.append(alt_b)
+
+        if combo:
+            session_data['proposed_options'] = combo
+            session_data['_cascade_level'] = 2
+            session_data['_includes_next_date'] = bool(next_same_type)
+            session_data['_needs_cma'] = engagement.get('needs_cma_message', False)
+            logger.info(f"  🔄 CASCADE 2: combo {len(other_type)} autre type + {len(next_same_type)} même type prochaine date")
+            return session_data
+
+        # Step 3: Fallback — tout ce qui est dispo sur prochaine date
+        if next_option and engagement.get('can_reposition'):
+            session_data['proposed_options'] = [next_option]
+            session_data['_cascade_level'] = 3
+            session_data['_includes_next_date'] = True
+            session_data['_needs_cma'] = engagement.get('needs_cma_message', False)
+            logger.info(f"  🔄 CASCADE 3: fallback prochaine date")
+            return session_data
+
+        # Rien trouvé — garder les options originales
+        session_data['_cascade_level'] = 0
+        logger.info(f"  🔄 CASCADE 0: aucune alternative trouvée")
+        return session_data
 
     def _classify_resultat(self, resultat_value: str) -> dict:
         """Classifie le Resultat CRM en catégorie de lifecycle.

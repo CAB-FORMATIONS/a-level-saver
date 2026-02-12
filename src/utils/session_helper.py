@@ -821,14 +821,20 @@ def match_sessions_by_date_range(
             f"and(Date_fin:greater_equal:{search_start}))"
         )
 
-        params = {
-            "criteria": criteria,
-            "page": 1,
-            "per_page": 200
-        }
-
-        response = crm_client._make_request("GET", url, params=params)
-        all_sessions = response.get("data", [])
+        all_sessions = []
+        for page_num in range(1, 15):  # Max 14 pages (~2800 sessions)
+            params = {
+                "criteria": criteria,
+                "page": page_num,
+                "per_page": 200
+            }
+            response = crm_client._make_request("GET", url, params=params)
+            page_data = response.get("data", [])
+            if not page_data:
+                break
+            all_sessions.extend(page_data)
+            if len(page_data) < 200:
+                break
 
         logger.info(f"  {len(all_sessions)} session(s) trouvée(s) dans la période")
 
