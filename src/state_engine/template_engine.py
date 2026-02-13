@@ -1765,7 +1765,7 @@ class TemplateEngine:
                 # 1. On connaît déjà la préférence (session_preference)
                 # 2. C'est un REPORT_DATE (on attend d'abord la confirmation de la nouvelle date)
                 # 3. Section 4 affiche les sessions avec CTA (éviter duplication)
-                has_sessions = bool(context.get('session_data', {}).get('proposed_options', []))
+                has_sessions = bool(self._flatten_session_options_filtered(context))
                 if primary_intent == 'REPORT_DATE':
                     # REPORT_DATE: on propose les sessions APRÈS confirmation de la nouvelle date
                     pass  # Pas d'action requise ici
@@ -1847,6 +1847,24 @@ class TemplateEngine:
                         'session_name': session_type_label,
                         'session_debut': self._format_date(session.get('Date_d_but', '')),
                         'session_fin': self._format_date(session.get('Date_fin', '')),
+                        'session_type': session_type,
+                    }
+        # Fallback: sessions_proposees (flat structure from date_range matching)
+        if not session_by_exam_date and session_data and session_data.get('sessions_proposees'):
+            for s in session_data['sessions_proposees']:
+                exam_date = s.get('date_examen', '') or s.get('Date_Examen', '')
+                session_type = s.get('session_type', '') or s.get('type', '')
+                date_debut = s.get('Date_d_but', '') or s.get('date_debut', '')
+                date_fin = s.get('Date_fin', '') or s.get('date_fin', '')
+                if exam_date and not session_by_exam_date.get(exam_date):
+                    session_type_label = 'Cours du jour' if session_type == 'jour' else 'Cours du soir' if session_type == 'soir' else ''
+                    # Filtrer par préférence si spécifiée
+                    if session_preference and session_type != session_preference:
+                        continue
+                    session_by_exam_date[exam_date] = {
+                        'session_name': session_type_label,
+                        'session_debut': self._format_date(date_debut) if date_debut else '',
+                        'session_fin': self._format_date(date_fin) if date_fin else '',
                         'session_type': session_type,
                     }
 
@@ -2521,6 +2539,39 @@ class TemplateEngine:
         """
         session_data = context.get('session_data', {})
         all_sessions = self._flatten_session_options(session_data)
+
+        # Si proposed_options est vide mais sessions_proposees existe (cas match_sessions_by_date_range),
+        # utiliser directement sessions_proposees comme source
+        if not all_sessions and session_data.get('sessions_proposees'):
+            raw_sessions = session_data['sessions_proposees']
+            for s in raw_sessions:
+                session_type = s.get('session_type', '')
+                date_debut = s.get('Date_d_but', '') or s.get('date_debut', '')
+                date_fin = s.get('Date_fin', '') or s.get('date_fin', '')
+                session_type_label = 'Cours du jour' if session_type == 'jour' else 'Cours du soir' if session_type == 'soir' else ''
+                all_sessions.append({
+                    'date_examen': '',
+                    'date_examen_formatted': '',
+                    'date_examen_raw': '',
+                    'departement': '',
+                    'cloture': '',
+                    'date_cloture_formatted': '',
+                    'nom': session_type_label or s.get('Name', ''),
+                    'session_type_label': session_type_label,
+                    'session_name': s.get('Name', ''),
+                    'session_id': s.get('id', ''),
+                    'debut': self._format_date(date_debut) if date_debut else '',
+                    'date_debut': self._format_date(date_debut) if date_debut else '',
+                    'fin': self._format_date(date_fin) if date_fin else '',
+                    'date_fin': self._format_date(date_fin) if date_fin else '',
+                    'type': session_type,
+                    'horaires': '8h30-17h30' if session_type == 'jour' else '18h-22h' if session_type == 'soir' else '',
+                    'is_jour': session_type == 'jour',
+                    'is_soir': session_type == 'soir',
+                    'is_first_of_exam': True,
+                })
+            if all_sessions:
+                logger.info(f"📚 Sessions injectées depuis sessions_proposees (date_range match): {len(all_sessions)}")
 
         # FILTRE 1: Si deadline passée et report automatique, ne montrer que les sessions
         # pour la nouvelle date d'examen (pas toutes les dates alternatives)

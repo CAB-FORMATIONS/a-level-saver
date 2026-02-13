@@ -697,8 +697,13 @@ EXEMPLE PLAINTE - Message: "J'avais clairement indiqué mon choix pour une forma
             # - Si Evalbox = "Refusé CMA" SANS envoi de documents → GO (il ne sait pas encore, workflow l'informe)
             evalbox = deal_data.get('Evalbox', '')
             # Evalbox qui déclenchent le routage vers Refus CMA si envoi de documents
-            # "Pret a payer" inclus car le candidat peut répondre à une demande de document manquant
-            evalbox_needs_doc_routing = ['Refusé CMA', 'Documents manquants', 'Documents refusés', 'Pret a payer']
+            # UNIQUEMENT les statuts où la CMA a le dossier et peut demander des corrections
+            # "Pret a payer" EXCLU : la CMA n'a pas encore reçu le dossier (pas encore payé)
+            # → un candidat qui mentionne "passeport" avec Pret a payer pose une question, pas un refus CMA
+            evalbox_needs_doc_routing = [
+                'Refusé CMA', 'Documents manquants', 'Documents refusés',
+                'Dossier Synchronisé', 'Dossier Synchronise',
+            ]
 
             # ================================================================
             # RULE OVERRIDES — Architecture LLM-first

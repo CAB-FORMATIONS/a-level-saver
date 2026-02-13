@@ -2129,6 +2129,12 @@ La date d'examen dans Zoho CRM est dans le passé. Le workflow a été stoppé p
                 triage_result['reason'] = f"Doublon Uber mais demande hors-scope détectée (département recalculé: Contact)"
                 triage_result['method'] = 'duplicate_with_other_service'
 
+                # Note de contexte routing
+                self._generate_routing_context_note(
+                    ticket_id, 'Contact', last_thread_content, subject,
+                    all_deals, selected_deal, routing_method='duplicate_with_other_service'
+                )
+
                 if auto_transfer:
                     try:
                         logger.info(f"🔄 Transfert automatique vers Contact...")
@@ -2316,6 +2322,12 @@ La date d'examen dans Zoho CRM est dans le passé. Le workflow a été stoppé p
                 triage_result['method'] = 'info_request_routing'
                 triage_result['email_searched'] = linking_result.get('email')
 
+                # Note de contexte routing
+                self._generate_routing_context_note(
+                    ticket_id, 'Contact', clean_thread_content, subject,
+                    all_deals, None, routing_method='info_request_routing'
+                )
+
                 # Auto-transfer vers Contact
                 if auto_transfer:
                     try:
@@ -2370,6 +2382,12 @@ La date d'examen dans Zoho CRM est dans le passé. Le workflow a été stoppé p
                 triage_result['method'] = 'out_of_scope_routing'
                 triage_result['email_searched'] = linking_result.get('email')
 
+                # Note de contexte routing
+                self._generate_routing_context_note(
+                    ticket_id, 'Contact', clean_thread_content, subject,
+                    all_deals, None, routing_method='out_of_scope_routing'
+                )
+
                 # Auto-transfer vers Contact
                 if auto_transfer:
                     try:
@@ -2407,6 +2425,12 @@ La date d'examen dans Zoho CRM est dans le passé. Le workflow a été stoppé p
             triage_result['reason'] = f"Routage automatique via BusinessRules: {linking_result.get('routing_reason', 'département différent de DOC')}"
             triage_result['method'] = 'business_rules_routing'
             triage_result['selected_deal'] = selected_deal
+
+            # Note de contexte routing
+            self._generate_routing_context_note(
+                ticket_id, suggested_department, last_thread_content, subject,
+                all_deals, selected_deal, routing_method='business_rules_routing'
+            )
 
             # Auto-transfer if enabled
             if auto_transfer:
@@ -2625,6 +2649,12 @@ RÉSUMÉ (2-3 phrases):"""
 
         # Determine action based on AI recommendation
         if ai_triage['action'] == 'ROUTE' and ai_triage['target_department'] != 'DOC':
+            # Note de contexte routing
+            self._generate_routing_context_note(
+                ticket_id, ai_triage['target_department'], last_thread_content, subject,
+                all_deals, selected_deal, routing_method='ai',
+                ai_reason=ai_triage.get('reason', '')
+            )
             # Auto-transfer if enabled
             if auto_transfer:
                 logger.info(f"🔄 Transfert automatique vers {ai_triage['target_department']}...")
@@ -2646,6 +2676,159 @@ RÉSUMÉ (2-3 phrases):"""
             triage_result['reason'] = 'Ticket DOC valide - continuer workflow'
 
         return triage_result
+
+    # ─── Routing Context Notes ───────────────────────────────────────────
+
+    ROUTING_RULES = {
+        'UPSELL_OPPORTUNITY': {
+            'header': '💰 UPSELL POTENTIEL',
+            'recommendation': (
+                "Ce candidat a un deal {amount}€ ({stage}) mais demande l'offre Uber 20€.\n"
+                "→ Opportunité de closer le deal existant plutôt que créer un dossier 20€."
+            ),
+        },
+        'PROSPECT_UBER_20': {
+            'header': '🆕 PROSPECT UBER 20€',
+            'recommendation': (
+                "Nouveau prospect mentionnant l'offre Uber 20€.\n"
+                "Aucun dossier existant. À contacter pour qualification."
+            ),
+        },
+        'PROSPECT_FORMATION': {
+            'header': '🎓 PROSPECT FORMATION',
+            'recommendation': (
+                "Demande d'information sur la formation VTC.\n"
+                "Pas de dossier existant. À qualifier et orienter."
+            ),
+        },
+        'OUT_OF_SCOPE': {
+            'header': '🚫 HORS PÉRIMÈTRE VTC',
+            'recommendation': (
+                "Demande hors périmètre (CACES, taxi, ambulance, etc.).\n"
+                "Informer que CAB ne traite pas ce type de formation."
+            ),
+        },
+        'DUPLICATE_OTHER_SERVICE': {
+            'header': '⚠️ DOUBLON + AUTRE SERVICE',
+            'recommendation': (
+                "Doublon Uber détecté mais le candidat demande un service différent.\n"
+                "Traiter comme une nouvelle demande indépendante."
+            ),
+        },
+        'AI_ROUTE_CONTEXT': {
+            'header': '🤖 ROUTAGE IA',
+            'recommendation': '',
+        },
+        'BUSINESS_RULES_GENERIC': {
+            'header': '⚙️ ROUTAGE AUTOMATIQUE',
+            'recommendation': (
+                "Ticket routé par les règles métier.\n"
+                "Vérifier le deal associé et le message du candidat."
+            ),
+        },
+    }
+
+    def _generate_routing_context_note(self, ticket_id, target_department, message_content,
+                                       subject, all_deals, selected_deal,
+                                       routing_method='', ai_reason=''):
+        """Génère et poste une note interne contextuelle lors du routing d'un ticket."""
+        try:
+            rule = self._classify_routing_context(
+                routing_method, message_content, subject, all_deals, selected_deal
+            )
+            excerpt = self._extract_message_excerpt(message_content)
+            deals_summary = self._format_deals_for_note(all_deals)
+            note = self._build_routing_note(
+                rule, target_department, excerpt, deals_summary,
+                selected_deal, ai_reason
+            )
+            self.desk_client.add_ticket_comment(ticket_id, note, is_public=False)
+            logger.info(f"  📝 Note de contexte routing ajoutée ({rule})")
+            return note
+        except Exception as e:
+            logger.warning(f"  ⚠️ Erreur note routing: {e}")
+            return None
+
+    def _classify_routing_context(self, routing_method, message_content, subject,
+                                  all_deals, selected_deal):
+        """Classifie le type de contexte de routing pour choisir le bon template de note."""
+        content_lower = ((message_content or '') + ' ' + (subject or '')).lower()
+        uber_keywords = [
+            '20€', '20 €', '20 euros', 'offre uber', 'offre à 20', 'offre a 20',
+            'formation à 20', 'formation a 20', 'vtc à 20', 'vtc a 20',
+        ]
+
+        if routing_method == 'business_rules_routing':
+            if any(kw in content_lower for kw in uber_keywords):
+                return 'UPSELL_OPPORTUNITY'
+            return 'BUSINESS_RULES_GENERIC'
+        elif routing_method == 'info_request_routing':
+            if any(kw in content_lower for kw in uber_keywords + ['uber']):
+                return 'PROSPECT_UBER_20'
+            return 'PROSPECT_FORMATION'
+        elif routing_method == 'out_of_scope_routing':
+            return 'OUT_OF_SCOPE'
+        elif routing_method == 'duplicate_with_other_service':
+            return 'DUPLICATE_OTHER_SERVICE'
+        else:
+            return 'AI_ROUTE_CONTEXT'
+
+    def _extract_message_excerpt(self, content, max_length=300):
+        """Extrait un résumé propre du message (strip HTML, tronquer)."""
+        if not content:
+            return "(Message vide)"
+        import re
+        text = re.sub(r'<[^>]+>', ' ', content)
+        text = re.sub(r'\s+', ' ', text).strip()
+        if len(text) > max_length:
+            text = text[:max_length] + "..."
+        return text or "(Message vide)"
+
+    def _format_deals_for_note(self, all_deals, max_deals=3):
+        """Formate un résumé des deals pour la note de contexte."""
+        if not all_deals:
+            return "Aucun deal trouvé"
+        lines = []
+        for deal in all_deals[:max_deals]:
+            name = deal.get('Deal_Name', 'N/A')
+            amount = deal.get('Amount', '?')
+            stage = deal.get('Stage', '?')
+            evalbox = deal.get('Evalbox', 'N/A')
+            lines.append(f"- {name} | {amount}€ | {stage} | Evalbox: {evalbox}")
+        if len(all_deals) > max_deals:
+            lines.append(f"  ... et {len(all_deals) - max_deals} autre(s)")
+        return "\n".join(lines)
+
+    def _build_routing_note(self, rule, target_department, excerpt, deals_summary,
+                            selected_deal, ai_reason):
+        """Construit la note interne de contexte routing."""
+        rule_info = self.ROUTING_RULES.get(rule, self.ROUTING_RULES['BUSINESS_RULES_GENERIC'])
+        header = rule_info['header']
+        recommendation = rule_info['recommendation']
+
+        # Remplir les placeholders dynamiques
+        if rule == 'UPSELL_OPPORTUNITY' and selected_deal:
+            amount = selected_deal.get('Amount', '?')
+            stage = selected_deal.get('Stage', '?')
+            recommendation = recommendation.format(amount=amount, stage=stage)
+        elif rule == 'AI_ROUTE_CONTEXT':
+            recommendation = ai_reason or "Routé par l'IA de triage."
+
+        note_parts = [
+            f"{header} — Transfert vers {target_department}",
+            "",
+            "MESSAGE DU CANDIDAT:",
+            excerpt,
+            "",
+            "DEALS EXISTANTS:",
+            deals_summary,
+            "",
+            "ACTION RECOMMANDÉE:",
+            recommendation,
+        ]
+        return "\n".join(note_parts)
+
+    # ─── End Routing Context Notes ───────────────────────────────────────
 
     def _run_analysis(self, ticket_id: str, triage_result: Dict) -> Dict:
         """
@@ -4129,15 +4312,18 @@ L'équipe CAB Formations"""
                 session_type = session_error_check.get('wrong_session_type')  # 'jour' ou 'soir'
                 proposed = session_data.get('proposed_options', [])
 
-                if proposed and wrong_month and session_type:
-                    logger.info(f"  🔍 Recherche session corrigée: mois={wrong_month}, type={session_type}")
-                    from src.utils.date_utils import parse_date_flexible
-
-                    # Extraire toutes les sessions de proposed_options (structure imbriquée)
-                    all_sessions = []
+                # Extraire toutes les sessions (proposed_options imbriqué OU sessions_proposees flat)
+                all_sessions = []
+                if proposed:
                     for opt in proposed:
                         sessions_list = opt.get('sessions', [])
                         all_sessions.extend(sessions_list)
+                elif session_data.get('sessions_proposees'):
+                    all_sessions = list(session_data['sessions_proposees'])
+
+                if all_sessions and wrong_month and session_type:
+                    logger.info(f"  🔍 Recherche session corrigée: mois={wrong_month}, type={session_type}")
+                    from src.utils.date_utils import parse_date_flexible
 
                     # Chercher la session qui correspond au même mois
                     best_match = None
@@ -4852,32 +5038,72 @@ L'équipe CAB Formations"""
             deal_name = deal.get('Deal_Name', 'Opportunité')
             previous_dates.append(f"{deal_name} ({closing_date})")
 
-        # Extraire la date d'examen du deal doublon (le plus ancien = l'offre déjà utilisée)
-        # Champ CRM: Date_exam (texte libre, ex: "30 janvier 2024")
-        duplicate_exam_date_str = None
-        for deal in duplicate_deals:
-            if deal.get('id') == (selected_deal.get('id') if selected_deal else None):
-                continue  # Skip le deal actuel, on veut l'ancien
-            date_exam = deal.get('Date_exam')
-            if date_exam:
-                duplicate_exam_date_str = str(date_exam).strip()
-                break
-        # Fallback: si tous les deals sont le deal actuel, chercher dans tous
-        if not duplicate_exam_date_str:
-            for deal in duplicate_deals:
-                date_exam = deal.get('Date_exam')
-                if date_exam:
-                    duplicate_exam_date_str = str(date_exam).strip()
-                    break
+        # --- Tri des deals: ancien (première offre) vs récent (inscription en cours) ---
+        deals_sorted = sorted(
+            duplicate_deals,
+            key=lambda d: d.get('Closing_Date', '') or d.get('Created_Time', '') or '',
+        )
+        old_deal = deals_sorted[0] if deals_sorted else {}
+        recent_deal = deals_sorted[-1] if len(deals_sorted) >= 2 else None
 
-        if duplicate_exam_date_str:
-            logger.info(f"  📅 Date d'examen du deal doublon: {duplicate_exam_date_str}")
-            benefited_line = f"Après vérification de votre dossier, je constate que vous avez déjà bénéficié de l'offre Uber à 20€ pour le passage de l'examen VTC, avec une inscription à la date d'examen du {duplicate_exam_date_str}."
+        # Cas B: l'opportunité récente est-elle vraiment différente de l'ancienne?
+        has_recent_deal = recent_deal is not None and recent_deal.get('id') != old_deal.get('id')
+
+        # Date de l'ANCIEN deal (quand le candidat a bénéficié de l'offre)
+        old_exam_date_str = None
+        old_date_exam = old_deal.get('Date_exam')
+        if old_date_exam:
+            old_exam_date_str = str(old_date_exam).strip()
+
+        # Date du deal RÉCENT (opportunité en cours)
+        recent_exam_date_str = None
+        if has_recent_deal:
+            recent_date_exam = recent_deal.get('Date_exam')
+            if recent_date_exam:
+                recent_exam_date_str = str(recent_date_exam).strip()
+
+        # --- Logs enrichis ---
+        logger.info(f"  📅 Ancien deal: {old_deal.get('Deal_Name', 'N/A')} | Date_exam: {old_exam_date_str or 'N/A'}")
+        if has_recent_deal:
+            logger.info(f"  📅 Deal récent: {recent_deal.get('Deal_Name', 'N/A')} | Date_exam: {recent_exam_date_str or 'N/A'}")
+            logger.info(f"  📋 CAS B: Doublon avec opportunité récente en cours")
+        else:
+            logger.info(f"  📋 CAS A: Doublon sans opportunité récente")
+
+        # --- Ligne "déjà bénéficié" — toujours basée sur l'ancien deal ---
+        if old_exam_date_str:
+            benefited_line = f"Après vérification de votre dossier, je constate que vous avez déjà bénéficié de l'offre Uber à 20€ pour le passage de l'examen VTC, avec une inscription à la date d'examen du {old_exam_date_str}."
         else:
             benefited_line = "Après vérification de votre dossier, je constate que vous avez déjà bénéficié de l'offre Uber à 20€ pour le passage de l'examen VTC."
 
-        # Générer la réponse
-        response_text = f"""Bonjour,
+        # --- Générer la réponse selon le cas ---
+        if has_recent_deal:
+            # CAS B: Candidat avec une inscription récente en plus de l'ancienne
+            recent_ref = f" (date d'examen du {recent_exam_date_str})" if recent_exam_date_str else ""
+            response_text = f"""Bonjour,
+
+Je vous remercie pour votre message.
+
+{benefited_line} Cette offre n'est valable qu'une seule fois par candidat.
+
+Je constate que vous avez une inscription récente{recent_ref}. Cependant, nous ne sommes pas en mesure de prendre en charge une seconde inscription dans le cadre de l'offre Uber à 20€.
+
+Pour cette inscription, les frais d'examen (241€) restent à votre charge et doivent être réglés en autonomie auprès de la CMA via le site ExamT3P : https://www.exament3p.fr
+
+Si vous avez besoin d'une formation de préparation à l'examen VTC, nous pouvons vous proposer :
+
+📚 Formation en présentiel : sur l'un de nos centres de formation
+
+📚 Formation E-learning
+
+Ces formations sont finançables via votre CPF (Compte Personnel de Formation).
+
+Bien cordialement,
+
+L'équipe Cab Formations"""
+        else:
+            # CAS A: Candidat avec uniquement un ancien deal (pas d'inscription récente)
+            response_text = f"""Bonjour,
 
 Je vous remercie pour votre message.
 
@@ -4889,7 +5115,7 @@ OPTION 1 : Inscription autonome
 
 • Vous pouvez vous inscrire vous-même sur le site de la CMA (ExamT3P)
 • Les frais d'inscription à l'examen s'élèvent à 241€, à votre charge
-• Site d'inscription : https://exament3p.cma-france.fr
+• Site d'inscription : https://www.exament3p.fr
 
 OPTION 2 : Formation avec CAB Formations
 Si vous souhaitez suivre une formation de préparation à l'examen VTC, nous pouvons vous proposer :
@@ -4913,6 +5139,9 @@ L'équipe Cab Formations"""
             'is_duplicate_uber_response': True,
             'duplicate_deals_count': len(duplicate_deals),
             'previous_dates': previous_dates,
+            'has_recent_deal': has_recent_deal,
+            'old_deal_name': old_deal.get('Deal_Name'),
+            'recent_deal_name': recent_deal.get('Deal_Name') if has_recent_deal else None,
             'crm_updates': {},  # Pas de mise à jour CRM pour les doublons
             'detected_scenarios': ['DUPLICATE_UBER_OFFER']
         }
@@ -6894,28 +7123,34 @@ Réponds UNIQUEMENT avec le format demandé, rien d'autre."""
             # Chercher dans les sessions proposées par l'analyse
             proposed_options = session_data.get('proposed_options', [])
 
+            # Extraire toutes les sessions (proposed_options imbriqué OU sessions_proposees flat)
+            all_sessions_flat = []
+            if proposed_options:
+                for option in proposed_options:
+                    for sess in option.get('sessions', []):
+                        all_sessions_flat.append(sess)
+            elif session_data.get('sessions_proposees'):
+                all_sessions_flat = list(session_data['sessions_proposees'])
+
             session_found = False
-            for option in proposed_options:
-                for sess in option.get('sessions', []):
-                    sess_id = sess.get('id')
-                    sess_debut = sess.get('Date_d_but', '')
-                    sess_fin = sess.get('Date_fin', '')
-                    sess_type = sess.get('session_type_label', '')
+            for sess in all_sessions_flat:
+                sess_id = sess.get('id')
+                sess_debut = sess.get('Date_d_but', '') or sess.get('date_debut', '')
+                sess_fin = sess.get('Date_fin', '') or sess.get('date_fin', '')
+                sess_type = sess.get('session_type_label', '') or sess.get('session_type', '')
 
-                    # Matching: soit par dates, soit par type (jour/soir)
-                    if sess_id:
-                        match_date = (sess_debut and sess_debut in session_name) or \
-                                    (sess_fin and sess_fin in session_name)
-                        match_type = ('soir' in session_name.lower() and 'soir' in sess_type.lower()) or \
-                                    ('jour' in session_name.lower() and 'jour' in sess_type.lower())
+                # Matching: soit par dates, soit par type (jour/soir)
+                if sess_id:
+                    match_date = (sess_debut and sess_debut in session_name) or \
+                                (sess_fin and sess_fin in session_name)
+                    match_type = ('soir' in session_name.lower() and 'soir' in str(sess_type).lower()) or \
+                                ('jour' in session_name.lower() and 'jour' in str(sess_type).lower())
 
-                        if match_date or match_type:
-                            crm_updates['Session_choisie'] = sess_id
-                            logger.info(f"  📊 Session_choisie: {session_name} → ID {sess_id}")
-                            session_found = True
-                            break
-                if session_found:
-                    break
+                    if match_date or match_type:
+                        crm_updates['Session_choisie'] = sess_id
+                        logger.info(f"  📊 Session_choisie: {session_name} → ID {sess_id}")
+                        session_found = True
+                        break
 
             if not session_found:
                 logger.warning(f"  ⚠️ Session formation non trouvée: {session_name}")

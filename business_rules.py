@@ -344,13 +344,26 @@ class BusinessRules:
             # Router vers Refus CMA SEULEMENT si:
             # 1. Envoi de documents détecté
             # 2. ET Date_Dossier_reçu est remplie (dossier déjà soumis)
-            # Si Date_Dossier_reçu est vide → le candidat n'a pas encore soumis son dossier
-            # → traiter dans DOC (questions sur les documents requis, envoi initial)
+            # 3. ET Evalbox indique que le dossier a été ENVOYÉ À LA CMA
+            #    (Dossier Synchronisé, VALIDE CMA, Convoc CMA reçue, Refusé CMA, Documents refusés, Documents manquants)
+            #
+            # Si Evalbox = Pret a payer ou moins → la CMA n'a PAS encore le dossier
+            # → les documents sont encore chez CAB → rester DOC
+            # Exemple: candidat mentionne "passeport" avec Evalbox=Pret a payer → question sur l'upload, pas un refus CMA
+            EVALBOX_CMA_INVOLVED = [
+                "Dossier Synchronisé", "Dossier Synchronise",
+                "VALIDE CMA", "Convoc CMA reçue", "Convoc CMA recue",
+                "Refusé CMA", "Refuse CMA",
+                "Documents refusés", "Documents refuses",
+                "Documents manquants",
+            ]
             if has_document_keywords:
                 date_dossier_recu = selected_deal.get("Date_Dossier_re_u")
-                if date_dossier_recu:
+                if date_dossier_recu and evalbox in EVALBOX_CMA_INVOLVED:
                     logger.info(f"🚨 Routing to Refus CMA due to document keywords (Evalbox: {evalbox}, Date_Dossier_reçu: {date_dossier_recu})")
                     return "Refus CMA"
+                elif date_dossier_recu:
+                    logger.info(f"📋 Document keywords trouvés mais Evalbox={evalbox} (CMA pas encore impliquée) → DOC")
                 else:
                     logger.info(f"📋 Document keywords trouvés mais Date_Dossier_reçu vide → DOC (dossier pas encore soumis)")
 
