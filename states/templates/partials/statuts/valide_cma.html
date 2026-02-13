@@ -1,3 +1,14 @@
 <!-- Partial: Statut VALIDÉ CMA -->
-Votre dossier est <b>validé et payé</b>. Vous êtes inscrit à l'examen du <b>{{date_examen_formatted}}</b>.<br>
+Votre dossier est <b>validé et payé</b>.<br>
+{{#if examen_passe}}
+Votre examen a eu lieu le <b>{{date_examen_formatted}}</b>.<br>
+{{else}}
+{{#if exam_today}}
+Vous êtes inscrit(e) à l'examen <b>aujourd'hui</b>.<br>
+{{else}}
+Vous êtes inscrit(e) à l'examen du <b>{{date_examen_formatted}}</b>.<br>
+{{#unless examen_imminent}}
 <i>La convocation sera disponible environ 10 jours avant l'examen.</i><br>
+{{/unless}}
+{{/if}}
+{{/if}}

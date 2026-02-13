@@ -1,0 +1,9 @@
+{{#if examen_passe}}
+Votre examen a eu lieu le <b>{{date_examen_formatted}}</b>.
+{{else}}
+{{#if exam_today}}
+Votre examen a lieu <b>aujourd'hui</b>.
+{{else}}
+Votre examen est prévu le <b>{{date_examen_formatted}}</b>{{#if examen_imminent}} (<b>J-{{days_until_exam}}</b>){{/if}}.
+{{/if}}
+{{/if}}

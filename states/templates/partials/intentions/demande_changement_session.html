@@ -70,20 +70,20 @@ Pour modifier votre session, merci de nous préciser vos disponibilités et nous
 {{#if no_session_alternatives}}
 <!-- Aucune session disponible avant l'examen (ni proposées, ni alternatives) -->
 {{#if evalbox_valide_cma}}
-Votre dossier est <b>validé par la CMA</b> et votre examen est prévu le <b>{{date_examen_formatted}}</b>. À ce stade, il n'est plus possible de modifier votre session de formation car aucune session ne se termine avant votre date d'examen.<br>
+Votre dossier est <b>validé par la CMA</b> et {{> partials/common/exam_date_line}} À ce stade, il n'est plus possible de modifier votre session de formation car aucune session ne se termine avant votre date d'examen.<br>
 <br>
 {{#if session_choisie}}
 Votre session actuelle reste : <b>{{session_choisie}}</b>{{#if session_date_debut}} (du {{session_date_debut}} au {{session_date_fin}}){{/if}}.<br>
 {{/if}}
 {{else}}
 {{#if evalbox_convoc_recue}}
-Votre <b>convocation a été reçue</b> pour l'examen du <b>{{date_examen_formatted}}</b>. À ce stade, il n'est plus possible de modifier votre session de formation car aucune session ne se termine avant votre date d'examen.<br>
+Votre <b>convocation a été reçue</b> et {{> partials/common/exam_date_line}} À ce stade, il n'est plus possible de modifier votre session de formation car aucune session ne se termine avant votre date d'examen.<br>
 <br>
 {{#if session_choisie}}
 Votre session actuelle reste : <b>{{session_choisie}}</b>{{#if session_date_debut}} (du {{session_date_debut}} au {{session_date_fin}}){{/if}}.<br>
 {{/if}}
 {{else}}
-Malheureusement, aucune session de formation ne se termine avant votre date d'examen du <b>{{date_examen_formatted}}</b>. Nous vous invitons à nous contacter pour étudier les options possibles.<br>
+Malheureusement, aucune session de formation ne se termine avant votre date d'examen{{#if date_examen_formatted}} du <b>{{date_examen_formatted}}</b>{{/if}}. Nous vous invitons à nous contacter pour étudier les options possibles.<br>
 {{/if}}
 {{/if}}
 {{else}}
@@ -142,10 +142,16 @@ Merci de nous indiquer si l'une de ces alternatives vous convient, ou si vous av
 {{else}}
 <!-- CAS 2: Pas de dates spécifiques - Comportement standard -->
 {{#if session_choisie}}
+{{#if session_in_progress}}
+Votre session actuelle (<b>{{session_choisie}}</b>{{#if session_date_debut}} du {{session_date_debut}} au {{session_date_fin}}{{/if}}) est <b>en cours</b>. Un changement de session n'est plus possible à ce stade.<br>
+<br>
+{{else}}
 {{#unless session_dates_passed}}
 Votre session actuelle est : <b>{{session_choisie}}</b>{{#if session_date_debut}} (du {{session_date_debut}} au {{session_date_fin}}){{/if}}.<br>
 <br>
 {{/unless}}
+{{/if}}
+{{#unless session_in_progress}}
 {{#if has_sessions_proposees}}
 Voici les alternatives disponibles :<br>
 {{#each sessions_proposees}}
@@ -161,6 +167,7 @@ Pour modifier votre session, merci de nous préciser :<br>
 </ul>
 Nous vous proposerons alors les sessions disponibles.<br>
 {{/if}}
+{{/unless}}
 {{else}}
 Vous n'avez pas encore de session de formation assignée.<br>
 <br>

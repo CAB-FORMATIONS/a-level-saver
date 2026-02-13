@@ -29,21 +29,35 @@ Notre équipe va procéder à cette vérification et vous recontactera rapidemen
 {{else}}
 <b>Concernant votre session de formation</b><br>
 {{#if session_confirmed}}
+{{#if session_finished}}
+Nous avons bien noté votre choix{{#if matched_session_name}} : <b>{{matched_session_name}}</b>{{/if}}{{#if matched_session_start}} du <b>{{matched_session_start}}</b> au <b>{{matched_session_end}}</b>{{/if}}. Cependant, cette session est <b>terminée</b>. Nous allons vous proposer une prochaine session disponible.<br>
+{{else}}
+{{#if session_in_progress}}
+Votre changement de session a bien été pris en compte : <b>{{matched_session_name}}</b>{{#if matched_session_start}} du <b>{{matched_session_start}}</b> au <b>{{matched_session_end}}</b>{{/if}}. Cette session est <b>actuellement en cours</b>.<br>
+{{else}}
 Nous avons bien enregistré votre choix{{#if matched_session_name}} : <b>{{matched_session_name}}</b>{{/if}}{{#if matched_session_start}} du <b>{{matched_session_start}}</b> au <b>{{matched_session_end}}</b>{{/if}}.<br>
 {{#if session_deja_commencee}}
 <b>Note :</b> Cette session a déjà débuté. Nous vous y inscrivons immédiatement afin que vous puissiez rejoindre le groupe en cours.<br>
 {{/if}}
-{{#if date_examen}}
-Votre examen est prévu le <b>{{date_examen}}</b>.<br>
-{{/if}}
+{{#if session_starts_soon}}
+<b>Note :</b> La formation commence dans <b>{{days_until_session_start}} jour(s)</b>. Vous recevrez très prochainement le lien d'invitation à la visioconférence par email.<br>
+{{else}}
 Vous recevrez le lien d'invitation à la visioconférence par email avant le début de la formation.<br>
+{{/if}}
+{{/if}}
+{{/if}}
+{{#if date_examen}}
+{{> partials/common/exam_date_line}}<br>
+{{/if}}
 {{else}}
 {{#if session_choisie}}
 Votre session est confirmée : <b>{{session_choisie}}</b>.<br>
 {{#if date_examen}}
-Votre examen est prévu le <b>{{date_examen}}</b>.<br>
+{{> partials/common/exam_date_line}}<br>
 {{/if}}
+{{#unless session_finished}}{{#unless session_in_progress}}
 Vous recevrez le lien d'invitation à la visioconférence par email avant le début de la formation.<br>
+{{/unless}}{{/unless}}
 {{else}}
 {{#if has_date_range_request}}
 {{!-- CAS: Le candidat a demandé des dates spécifiques --}}
@@ -86,7 +100,7 @@ Dès que votre session sera confirmée, vous recevrez un email avec le lien d'in
 {{/if}}
 {{/if}}
 {{#if date_examen}}
-Votre examen est prévu le <b>{{date_examen}}</b>.<br>
+{{> partials/common/exam_date_line}}<br>
 {{/if}}
 {{/if}}
 {{/if}}

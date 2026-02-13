@@ -24,10 +24,14 @@ Merci de nous confirmer si vous souhaitez changer pour l'une de ces dates.<br>
 {{else}}
 <!-- Aucune date plus tôt disponible (clôtures passées) -->
 <b>Concernant votre demande de date plus proche</b><br>
+{{#if exam_within_30_days}}
+Bonne nouvelle : votre examen est déjà prévu le <b>{{date_examen}}</b>{{#if cma_departement}} (CMA {{cma_departement}}){{/if}}, c'est la date la plus proche disponible. Il n'y a pas de date antérieure car les inscriptions pour les sessions précédentes sont clôturées.<br>
+{{else}}
 {{#if requested_month_name}}
 Malheureusement, il n'est plus possible de s'inscrire pour <b>{{requested_month_name}}</b>. Les dates de clôture des inscriptions pour ce mois sont déjà passées, y compris dans les autres départements.<br>
 {{else}}
 Malheureusement, il n'y a pas de date d'examen disponible avant le <b>{{date_examen}}</b>. Les dates de clôture des inscriptions pour les sessions antérieures sont déjà passées.<br>
 {{/if}}
 <b>Votre inscription reste confirmée pour le {{date_examen}}</b>{{#if cma_departement}} (CMA {{cma_departement}}){{/if}}. C'est actuellement la date la plus proche à laquelle vous pouvez passer l'examen.{{#if date_cloture}} La date de clôture des inscriptions pour cette session est le {{date_cloture}}.{{/if}}<br>
+{{/if}}
 {{/if}}

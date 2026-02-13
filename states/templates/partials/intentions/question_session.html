@@ -3,15 +3,31 @@
 {{#if show_session_info}}
 <b>Concernant votre formation en visioconférence</b><br>
 {{#if session_assigned}}
-<!-- Session déjà assignée - rappeler les dates -->
+<!-- Session déjà assignée - rappeler les dates avec conscience temporelle -->
+{{#if session_finished}}
+Votre dernière session de formation était :<br>
+{{else}}
+{{#if session_in_progress}}
+Votre session de formation est <b>en cours</b> :<br>
+{{else}}
 Votre session de formation est confirmée :<br>
+{{/if}}
+{{/if}}
 {{#if session_is_jour}}
 → <b>Cours du jour</b> : du {{session_date_debut}} au {{session_date_fin}} (8h30-17h30, pause 1h le midi)<br>
 {{else}}
 → <b>Cours du soir</b> : du {{session_date_debut}} au {{session_date_fin}} (18h-22h)<br>
 {{/if}}
 <br>
-La formation se déroule en visioconférence. Vous recevrez le lien d'invitation par email quelques jours avant le début de la formation.<br>
+{{#if session_finished}}
+La formation se déroule en visioconférence.<br>
+{{else}}
+{{#if session_in_progress}}
+La formation se déroule en visioconférence. Si vous n'avez pas encore reçu le lien d'invitation, merci de vérifier vos spams.<br>
+{{else}}
+La formation se déroule en visioconférence. Vous recevrez le lien d'invitation par email{{#if session_starts_soon}} <b>très prochainement</b>{{else}} quelques jours avant le début de la formation{{/if}}.<br>
+{{/if}}
+{{/if}}
 {{else}}
 <!-- Pas de session assignée - infos génériques -->
 {{#if session_preference_soir}}

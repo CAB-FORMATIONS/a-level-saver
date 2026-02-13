@@ -4,5 +4,8 @@ Votre dossier est <b>complet</b> et le paiement des frais d'inscription est en c
 <i>Dans le cadre du partenariat Uber, les frais d'inscription (241€) sont pris en charge.</i><br>
 {{/if}}
 {{#if date_examen}}
-Votre examen est prévu le <b>{{date_examen_formatted}}</b>{{#if cma_departement}} (CMA {{cma_departement}}){{/if}}. Vous recevrez votre convocation officielle environ 10 jours avant l'examen.<br>
+{{> partials/common/exam_date_line}}{{#if cma_departement}} (CMA {{cma_departement}}){{/if}}<br>
+{{#unless examen_passe}}{{#unless exam_today}}
+Vous recevrez votre convocation officielle environ 10 jours avant l'examen.<br>
+{{/unless}}{{/unless}}
 {{/if}}

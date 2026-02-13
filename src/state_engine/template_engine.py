@@ -748,6 +748,12 @@ class TemplateEngine:
             'date_debut_formation': self._format_date(context.get('matched_session_start') or enriched_lookups.get('session_date_debut', '')),
             'date_fin_formation': self._format_date(context.get('matched_session_end') or enriched_lookups.get('session_date_fin', '')),
 
+            # Flags temporels session (conscience temporelle générale)
+            **self._compute_session_temporal_flags(
+                context.get('matched_session_start') or enriched_lookups.get('session_date_debut', ''),
+                context.get('matched_session_end') or enriched_lookups.get('session_date_fin', '')
+            ),
+
             # Statut
             'statut_actuel': statut_actuel,
             'evalbox_status': evalbox,
@@ -823,9 +829,11 @@ class TemplateEngine:
             # Flags temporels pour templates (comparateurs Handlebars non supportés)
             'exam_within_7_days': context.get('exam_within_7_days', False),
             'exam_within_10_days': context.get('exam_within_10_days', False),
+            'exam_within_30_days': (context.get('days_until_exam') is not None and 0 < context.get('days_until_exam', 999) <= 30),
             'examen_pas_encore_passe': context.get('examen_pas_encore_passe', False),
             'examen_passe': context.get('examen_passe', False) or context.get('date_examen_passed', False),
             'examen_imminent': context.get('examen_imminent', False),
+            'exam_today': context.get('days_until_exam') == 0 if context.get('days_until_exam') is not None else False,
             'convocation_anormale': context.get('convocation_anormale', False),
             'days_until_exam': context.get('days_until_exam'),
 
@@ -2057,6 +2065,43 @@ class TemplateEngine:
             return date_obj < datetime.now().date()
         except Exception:
             return False
+
+    def _compute_session_temporal_flags(self, session_start_str: str, session_end_str: str) -> Dict[str, Any]:
+        """Calcule les flags temporels pour la session assignée (vs aujourd'hui).
+        Intelligence générale disponible dans TOUS les templates."""
+        result = {
+            'session_upcoming': False,
+            'session_in_progress': False,
+            'session_finished': False,
+            'session_starts_soon': False,
+            'days_until_session_start': None,
+        }
+        if not session_start_str and not session_end_str:
+            return result
+        today = datetime.now().date()
+        try:
+            start_date = datetime.strptime(str(session_start_str)[:10], '%Y-%m-%d').date()
+        except Exception:
+            start_date = None
+        try:
+            end_date = datetime.strptime(str(session_end_str)[:10], '%Y-%m-%d').date()
+        except Exception:
+            end_date = None
+        if start_date:
+            days_until = (start_date - today).days
+            result['days_until_session_start'] = days_until
+            if start_date > today:
+                result['session_upcoming'] = True
+                if days_until <= 3:
+                    result['session_starts_soon'] = True
+            elif end_date and today > end_date:
+                result['session_finished'] = True
+            else:
+                result['session_in_progress'] = True
+        elif end_date:
+            if today > end_date:
+                result['session_finished'] = True
+        return result
 
     def _get_next_exam_date_cas3(self, context: Dict) -> str:
         """Retourne la prochaine date d'examen formatée pour CAS 3 (Refusé CMA)."""

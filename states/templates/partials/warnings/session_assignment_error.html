@@ -14,7 +14,7 @@ Vous recevrez le lien d'invitation à la visioconférence par email avant le dé
 {{else}}
 {{!-- Pas de correction automatique possible: proposer les sessions disponibles --}}
 {{#if has_exam_date}}
-Votre examen est prévu le <b>{{date_examen_formatted}}</b>.
+{{> partials/common/exam_date_line}}
 {{/if}}
 {{#if original_session_type}}
 Nous avons bien noté votre préférence initiale pour les <b>{{original_session_type_text}}</b>.<br>
