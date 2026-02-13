@@ -4089,14 +4089,16 @@ L'équipe CAB Formations"""
                 )
                 # Pour changement de session, charger TOUS les types (jour + soir) pour la cascade d'alternatives
                 session_pref_for_loading = None if is_session_change_request else triage_session_pref
+                _is_explicit_change = (detected_intent in ['CONFIRMATION_SESSION', 'DEMANDE_CHANGEMENT_SESSION'] or is_session_change_request)
                 session_data = analyze_session_situation(
                     deal_data=deal_data,
                     exam_dates=exam_dates_for_session,
                     threads=threads_data,
                     crm_client=self.crm_client,
                     triage_session_preference=session_pref_for_loading,
-                    allow_change=(detected_intent in ['CONFIRMATION_SESSION', 'DEMANDE_CHANGEMENT_SESSION'] or is_session_change_request or date_examen_vtc_result.get('implicit_date_repositioning') or v3_date_change),
-                    enriched_lookups=enriched_lookups
+                    allow_change=(_is_explicit_change or date_examen_vtc_result.get('implicit_date_repositioning') or v3_date_change),
+                    enriched_lookups=enriched_lookups,
+                    is_explicit_session_change=_is_explicit_change
                 )
 
             if session_data.get('session_preference'):

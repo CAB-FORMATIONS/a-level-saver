@@ -464,7 +464,8 @@ def analyze_session_situation(
     crm_client = None,
     triage_session_preference: Optional[str] = None,
     allow_change: bool = False,
-    enriched_lookups: Optional[Dict[str, Any]] = None
+    enriched_lookups: Optional[Dict[str, Any]] = None,
+    is_explicit_session_change: bool = False
 ) -> Dict[str, Any]:
     """
     Analyse la situation et propose les sessions appropriées pour les dates d'examen.
@@ -480,6 +481,8 @@ def analyze_session_situation(
                       session est déjà assignée (utilisé pour CONFIRMATION_SESSION
                       quand le candidat veut changer de session)
         enriched_lookups: Lookups enrichis (pour récupérer session_type actuelle)
+        is_explicit_session_change: Si True, le candidat demande explicitement un changement
+                                    de session → ne pas optimiser même si session actuelle est optimale
 
     Returns:
         {
@@ -594,6 +597,47 @@ def analyze_session_situation(
                     'exam_info': exam_info,
                     'sessions': sessions_cache[exam_date]
                 })
+
+    # 4.5 Si allow_change=True (repositionnement auto) mais session actuelle est DÉJÀ la plus proche
+    # → pas besoin de proposer d'alternatives, on confirme la session actuelle
+    # SAUF si is_explicit_session_change=True (le candidat veut changer de session)
+    if allow_change and not is_explicit_session_change and current_session and not result['current_session_is_past'] and result['proposed_options']:
+        current_session_end_str = enriched_lookups.get('session_date_fin') if enriched_lookups else None
+        current_type = enriched_lookups.get('session_type') if enriched_lookups else None
+        if current_session_end_str and current_type:
+            try:
+                current_end = datetime.strptime(current_session_end_str, "%Y-%m-%d")
+                is_optimal = True
+                for option in result['proposed_options']:
+                    exam_date_str = option['exam_info'].get('Date_Examen')
+                    if not exam_date_str:
+                        continue
+                    exam_date_obj = datetime.strptime(exam_date_str, "%Y-%m-%d")
+                    # Session actuelle se termine avant l'examen ?
+                    if current_end >= exam_date_obj:
+                        is_optimal = False
+                        break
+                    # Parmi les sessions du même type, y en a-t-il une plus proche de l'examen ?
+                    same_type = [s for s in option.get('sessions', []) if s.get('session_type') == current_type]
+                    if same_type:
+                        # sessions[0] = la plus proche (triée par days_before_exam asc)
+                        closest = same_type[0]
+                        closest_end_str = closest.get('Date_fin')
+                        if closest_end_str:
+                            closest_end = datetime.strptime(closest_end_str, "%Y-%m-%d")
+                            if closest_end > current_end:
+                                # Il existe une session plus proche de l'examen → proposer
+                                is_optimal = False
+                                break
+                if is_optimal:
+                    session_name = current_session.get('name', str(current_session)) if isinstance(current_session, dict) else str(current_session)
+                    logger.info(f"  ✅ Session actuelle ({session_name}) est la plus proche de la nouvelle date → confirmation")
+                    result['proposed_options'] = []
+                    result['current_session_valid_for_new_date'] = True
+                    result['message'] = f"Votre session de formation est déjà programmée : {session_name}"
+                    return result
+            except (ValueError, TypeError) as e:
+                logger.warning(f"  ⚠️ Erreur parsing dates pour check session optimale: {e}")
 
     # 5. CAS SPÉCIAL: Session passée + Examen futur = Proposer rafraîchissement
     if result['current_session_is_past'] and result['proposed_options']:
