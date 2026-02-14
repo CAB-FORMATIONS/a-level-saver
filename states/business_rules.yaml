@@ -1,0 +1,362 @@
+# =============================================================================
+# BUSINESS RULES - Règles métier externalisées
+# =============================================================================
+# Ce fichier centralise TOUTES les listes de statuts, mappings et mots-clés
+# métier qui étaient auparavant dupliqués dans le code Python.
+#
+# RÈGLE : Si une constante métier est définie ici, le code Python
+#          DOIT la lire via business_rules_loader.py et NE DOIT PAS
+#          la redéfinir localement.
+# =============================================================================
+
+# ---------------------------------------------------------
+# STATUTS EVALBOX - Listes catégorisées
+# ---------------------------------------------------------
+statuts:
+  # Statuts qui BLOQUENT la modification de Date_examen_VTC
+  # (si clôture passée → force majeure uniquement)
+  # Utilisé dans: examt3p_crm_sync.py, crm_update_agent.py, state_detector.py
+  blocking_evalbox:
+    - 'VALIDE CMA'
+    - 'Convoc CMA reçue'
+
+  # Statuts qui empêchent le CAS 8 (report auto pour deadline ratée)
+  # Utilisé dans: date_examen_vtc_helper.py
+  blocked_for_reschedule:
+    - 'VALIDE CMA'
+    - 'Convoc CMA reçue'
+    - 'Refusé CMA'
+
+  # Statuts considérés comme vraiment validés par la CMA
+  # ATTENTION: "Dossier Synchronisé" = en instruction, PAS validé !
+  # Utilisé dans: date_examen_vtc_helper.py (CAS 7)
+  validated:
+    - 'VALIDE CMA'
+    - 'Convoc CMA reçue'
+
+  # Statuts où CAB a déjà payé les 241€ à la CMA
+  # Utilisé dans: template_engine.py (cma_already_paid)
+  cma_already_paid:
+    - 'Dossier Synchronisé'
+    - 'VALIDE CMA'
+    - 'Convoc CMA reçue'
+    - 'Refusé CMA'
+
+  # Statuts qui déclenchent le routage vers "Refus CMA" si envoi de documents
+  # "Pret a payer" EXCLU : la CMA n'a pas encore reçu le dossier
+  # Utilisé dans: triage_agent.py
+  evalbox_needs_doc_routing:
+    - 'Refusé CMA'
+    - 'Documents manquants'
+    - 'Documents refusés'
+    - 'Dossier Synchronisé'
+    - 'Dossier Synchronise'
+
+  # Statuts indiquant que le dossier est constitué (progression checklist)
+  # Utilisé dans: template_engine.py
+  dossier_constitue:
+    - 'Dossier crée'
+    - 'Pret a payer'
+    - 'Pret a payer par cheque'
+    - 'Dossier Synchronisé'
+    - 'VALIDE CMA'
+    - 'Convoc CMA reçue'
+    - 'Refusé CMA'
+
+  # Statuts indiquant que le paiement CMA est effectué
+  # Utilisé dans: template_engine.py
+  paiement_effectue:
+    - 'Dossier Synchronisé'
+    - 'VALIDE CMA'
+    - 'Convoc CMA reçue'
+    - 'Refusé CMA'
+
+  # Niveau d'engagement 4 (modification impossible sans force majeure)
+  # Utilisé dans: date_examen_vtc_helper.py classify_engagement_level()
+  engagement_level_4:
+    - 'VALIDE CMA'
+    - 'Convoc CMA reçue'
+
+  # Niveau d'engagement 1 (compte ExamT3P + statuts pré-paiement)
+  # Utilisé dans: date_examen_vtc_helper.py classify_engagement_level()
+  engagement_level_1:
+    - 'Dossier crée'
+    - 'Dossier créé'
+    - 'Pret a payer'
+    - 'Pret a payer par cheque'
+
+  # Statuts "Prêt à payer" (incluant variante chèque)
+  # Utilisé dans: date_examen_vtc_helper.py (CAS 10)
+  pret_a_payer:
+    - 'Pret a payer'
+    - 'Pret a payer par cheque'
+
+# ---------------------------------------------------------
+# MAPPINGS EXAMT3P → EVALBOX CRM
+# ---------------------------------------------------------
+mappings:
+  # Mapping exact ExamT3P "Statut du Dossier" → Evalbox CRM
+  # Case-insensitive lookup (le code normalise en lowercase)
+  # Utilisé dans: examt3p_crm_sync.py
+  examt3p_to_evalbox:
+    'En cours de composition': 'Dossier crée'
+    'EN COURS DE COMPOSITION': 'Dossier crée'
+    'En attente de paiement': 'Pret a payer'
+    'EN ATTENTE DE PAIEMENT': 'Pret a payer'
+    "En cours d'instruction": 'Dossier Synchronisé'
+    "EN COURS D'INSTRUCTION": 'Dossier Synchronisé'
+    'Incomplet': 'Refusé CMA'
+    'INCOMPLET': 'Refusé CMA'
+    'Valide': 'VALIDE CMA'
+    'VALIDE': 'VALIDE CMA'
+    'En attente de convocation': 'Convoc CMA reçue'
+    'EN ATTENTE DE CONVOCATION': 'Convoc CMA reçue'
+
+  # Mapping fallback par mot-clé (si le mapping exact échoue)
+  # Clé = mot-clé à chercher dans le statut (lowercase)
+  # Valeur = evalbox cible
+  # ATTENTION: "valide" a une exclusion: si "convocation" est aussi présent → Convoc CMA reçue
+  # Utilisé dans: examt3p_crm_sync.py
+  examt3p_to_evalbox_fallback:
+    composition: 'Dossier crée'
+    paiement: 'Pret a payer'
+    instruction: 'Dossier Synchronisé'
+    incomplet: 'Refusé CMA'
+    valide: 'VALIDE CMA'
+    convocation: 'Convoc CMA reçue'
+
+  # Mapping Evalbox → texte d'affichage pour le candidat
+  # Utilisé dans: template_engine.py _format_statut()
+  statut_display:
+    'Dossier crée': 'Dossier en cours de création'
+    'Pret a payer': 'Dossier prêt pour paiement CMA'
+    'Dossier Synchronisé': 'Dossier transmis à la CMA (instruction en cours)'
+    'VALIDE CMA': 'Dossier validé par la CMA'
+    'Convoc CMA reçue': 'Convocation disponible'
+    'Refusé CMA': 'Document(s) refusé(s) par la CMA'
+
+  # Mapping état → prochaines étapes (texte)
+  # Utilisé dans: template_engine.py _get_prochaines_etapes()
+  prochaines_etapes:
+    'EXAM_DATE_EMPTY': "Choisissez une date d'examen parmi celles proposées."
+    'DOSSIER_SYNCHRONIZED': "Surveillez vos emails pour la validation CMA."
+    'VALIDE_CMA_WAITING_CONVOC': "Votre convocation arrivera environ 10 jours avant l'examen."
+    'CONVOCATION_RECEIVED': "Téléchargez et imprimez votre convocation."
+    'READY_TO_PAY': "Le paiement CMA est en cours de traitement."
+
+  # Mapping CMA_de_depot → département (fallback quand pas de numéro)
+  # Utilisé dans: date_examen_vtc_helper.py extract_departement_from_cma()
+  # et examt3p_crm_sync.py
+  cma_region_to_dept:
+    'IDF': '75'
+    'Ile De France': '75'
+    'PACA': '13'
+    'Rhone': '69'
+    'Lyon': '69'
+
+# ---------------------------------------------------------
+# CRM - Configuration des champs
+# ---------------------------------------------------------
+crm:
+  # Champs lookup (nécessitent ID, pas string)
+  # Utilisé dans: crm_update_agent.py, crm_lookup_helper.py
+  lookup_fields:
+    - 'Date_examen_VTC'
+    - 'Session_choisie'
+    - 'Session'
+
+  # Mapping champs lookup → modules CRM
+  # Utilisé dans: crm_lookup_helper.py
+  lookup_module_map:
+    'Date_examen_VTC': 'Dates_Examens_VTC_TAXI'
+    'Session': 'Sessions1'
+
+  # Champs CRM suivis via Timeline API
+  # Utilisé dans: thread_memory.py
+  tracked_fields:
+    - 'Evalbox'
+    - 'Session'
+    - 'Session_souhait_e'
+    - 'Date_examen_VTC'
+    - 'IDENTIFIANT_EVALBOX'
+    - 'Stage'
+    - 'Date_de_depot_CMA'
+    - 'Frais_Examen'
+    - 'PAYE_EN_PROD'
+
+  # Sources Timeline indiquant une action humaine (non automation)
+  # Utilisé dans: thread_memory.py
+  human_sources:
+    - 'crm_ui'
+    - 'webform'
+    - 'manual'
+
+# ---------------------------------------------------------
+# SESSIONS DE FORMATION - Configuration
+# ---------------------------------------------------------
+sessions:
+  # Préfixes pour identifier le type de session depuis le nom CRM
+  type_prefixes:
+    jour: 'cdj'
+    soir: 'cds'
+
+  # Horaires fixes des sessions (ne PAS utiliser les données CRM)
+  horaires:
+    jour: '8h30-17h30'
+    soir: '18h-22h'
+
+  # Labels affichables pour les types de session
+  labels:
+    jour: 'Cours du jour'
+    soir: 'Cours du soir'
+    default: 'Session de formation'
+
+  # Statuts de session éligibles pour la recherche CRM
+  eligible_statuses:
+    - 'PLANIFIÉ'
+
+  # Filtre de lieu pour sessions Uber (les deux doivent être présents)
+  uber_venue_filters:
+    - 'VISIO'
+    - 'VTC'
+
+# ---------------------------------------------------------
+# INTENTS - Configurations de comportement
+# ---------------------------------------------------------
+intents:
+  # Intents qui protègent une section de la suppression par ThreadMemory
+  # Utilisé dans: thread_memory.py
+  protects_section:
+    'ENVOIE_IDENTIFIANTS': 'identifiants'
+    'DEMANDE_DATE_EXAMEN': 'dates'
+    'DEMANDE_DATE_PLUS_TOT': 'dates'
+    'DEMANDE_CHANGEMENT_SESSION': 'sessions'
+    'CONFIRMATION_SESSION': 'sessions'
+    'DEMANDE_ACCES_ELEARNING': 'elearning'
+    'CONFIRMATION_PAIEMENT': 'paiement'
+    'DEMANDE_STATUT_DOSSIER': 'statut'
+    'DEMANDE_ANNULATION': 'annulation'
+
+  # Intents qui bypasse les suppressions V3 (point complet dossier)
+  # Utilisé dans: template_engine.py
+  full_recap_bypass:
+    - 'QUESTION_GENERALE'
+    - 'ENVOIE_IDENTIFIANTS'
+
+  # Intents qui réactivent la section dates pour dossiers terminés
+  # Utilisé dans: template_engine.py
+  reinscription:
+    - 'DEMANDE_REINSCRIPTION'
+    - 'REPORT_DATE'
+
+# ---------------------------------------------------------
+# DÉTECTION - Patterns et marqueurs
+# ---------------------------------------------------------
+detection:
+  # Patterns regex pour détecter que le candidat n'a PAS passé l'examen
+  # (CAS 7: date passée + statut validé)
+  # Utilisé dans: date_examen_vtc_helper.py
+  exam_not_passed_patterns:
+    - "n'ai pas pu passer"
+    - "n'ai pas passé"
+    - "pas présenté"
+    - "pas pu me présenter"
+    - "absent à l'examen"
+    - "j'étais absent"
+    - "reporté mon examen"
+    - "annulé mon examen"
+    - "pas encore passé"
+    - "quand est.mon examen"
+    - "date de.mon examen"
+
+  # Marqueurs de proposition de dates dans les réponses CAB (anti-répétition)
+  # Utilisé dans: ticket_info_extractor.py
+  date_proposal_markers:
+    - "prochaines dates d'examen"
+    - "prochaines dates disponibles"
+    - "dates disponibles"
+    - "voici les dates"
+    - "merci de nous confirmer la date"
+    - "date qui vous convient"
+    - "option 1"
+    - "option 2"
+
+  # Marqueurs de proposition de sessions (anti-répétition)
+  # Utilisé dans: ticket_info_extractor.py
+  session_proposal_markers:
+    - "cours du jour"
+    - "cours du soir"
+    - "session de formation"
+    - "sessions disponibles"
+    - "merci de nous confirmer votre choix de session"
+    - "confirmer la session"
+
+  # Marqueurs d'injection de session (anti-duplication dans legacy)
+  # Utilisé dans: template_engine.py
+  session_injection_markers:
+    - 'votre choix de session'
+    - 'cours du jour</b> ou <b>cours du soir'
+    - 'sessions de formation disponibles'
+    - 'préférence de session'
+
+  # Marqueurs de signature pour insertion de bloc session
+  # Utilisé dans: template_engine.py
+  signature_markers:
+    - 'Bien cordialement'
+    - 'Cordialement'
+    - "L'équipe CAB"
+
+  # Patterns pour détecter la préférence de session dans les messages candidat
+  # Utilisé dans: session_helper.py
+  session_preference_patterns_jour:
+    - "cours du jour"
+    - "en journée"
+    - "la journée"
+    - "formation.{0,20}jour"
+    - "préfère.{0,20}jour"
+    - "choisis.{0,20}jour"
+
+  session_preference_patterns_soir:
+    - "cours du soir"
+    - "le soir"
+    - "en soirée"
+    - "formation.{0,20}soir"
+    - "préfère.{0,20}soir"
+    - "choisis.{0,20}soir"
+    - "après.{0,10}travail"
+
+  # Indicateurs de contraintes horaires (session_helper.py)
+  time_constraint_indicators:
+    - 'ne convient pas'
+    - 'après 19h'
+    - 'rentre du travail'
+    - '18h'
+    - '19h'
+
+# ---------------------------------------------------------
+# VALIDATION - Termes interdits dans les réponses
+# ---------------------------------------------------------
+validation:
+  # Termes qui ne doivent JAMAIS apparaître dans les réponses aux candidats
+  # Utilisé dans: response_validator.py
+  forbidden_terms:
+    - 'BFS'
+    - 'Evalbox'
+    - 'CDJ'
+    - 'CDS'
+    - '20€'
+    - 'Montreuil'
+    - 'lookup'
+    - 'CRM'
+    - 'deal'
+    - 'API'
+    - 'ticket_id'
+    - 'deal_id'
+    - 'module'
+    - 'field'
+
+# ---------------------------------------------------------
+# URLS - Liens officiels
+# ---------------------------------------------------------
+urls:
+  examt3p_platform: 'https://www.exament3p.fr'
