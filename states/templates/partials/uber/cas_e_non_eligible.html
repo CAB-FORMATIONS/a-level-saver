@@ -1,4 +1,21 @@
 <!-- Partial: UBER CAS E - Non éligible -->
+{{#if uber_remboursement_accepte}}
+<!-- CAS E + DEMANDE_ANNULATION: Candidat non éligible qui demande remboursement → accepter -->
+<b>Remboursement de votre inscription</b><br>
+<br>
+Nous avons vérifié votre dossier auprès d'Uber et constaté que votre profil n'est pas éligible à l'offre VTC en partenariat avec Uber.<br>
+<br>
+Votre demande de remboursement est acceptée. Nous allons <b>recréditer votre carte de paiement du montant de 20€</b>. Vous verrez le crédit apparaître sur votre relevé dans un délai de <b>5 à 7 jours ouvrés</b>.<br>
+<br>
+Si vous souhaitez tout de même passer votre examen VTC, vous pouvez vous inscrire via d'autres financements :<br>
+→ <b>CPF (Compte Personnel de Formation)</b> : formation 100% financée si vous avez des droits disponibles<br>
+→ <b>France Travail / Pôle Emploi</b> : prise en charge possible selon votre situation<br>
+→ <b>Financement personnel</b> : inscription directe à notre formation complète<br>
+<br>
+<b>Souhaitez-vous être rappelé(e) par un conseiller</b> pour étudier ensemble la meilleure option ? Répondez simplement à cet email et nous vous recontacterons.<br>
+<br>
+{{else}}
+<!-- CAS E standard: non éligible, pas de demande d'annulation -->
 <b>Éligibilité à l'offre Uber</b><br>
 <br>
 Nous avons vérifié votre dossier auprès d'Uber et malheureusement, votre profil n'est pas éligible à l'offre VTC en partenariat avec Uber.<br>
@@ -19,3 +36,4 @@ Si Uber confirme que vous n'êtes pas éligible à l'offre à 20€, vous pouvez
 <br>
 <b>Souhaitez-vous être rappelé(e) par un conseiller</b> pour étudier ensemble la meilleure option de financement ? Répondez simplement à cet email et nous vous recontacterons.<br>
 <br>
+{{/if}}

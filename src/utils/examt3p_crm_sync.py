@@ -686,21 +686,25 @@ def sync_exam_date_from_examt3p(
     # ================================================================
     # 2b. VÉRIFIER RÈGLE DE BLOCAGE
     # ================================================================
-    # Seul "Convoc CMA reçue" autorise l'écrasement de la date CRM par ExamT3P.
-    # Pour tous les autres statuts, le CRM est la source de vérité (auto-report, etc.)
-    # et ExamT3P peut contenir une date passée qui est un artefact.
+    # Si ExamT3P a une date FUTURE → écraser CRM systématiquement (quel que soit Evalbox).
+    # Si ExamT3P a une date PASSÉE → bloquer sauf si Evalbox = "Convoc CMA reçue"
+    # (date passée ExamT3P = artefact, CRM est la source de vérité via auto-report).
     current_evalbox = deal_data.get('Evalbox', '')
+    examt3p_date_is_past = is_date_past(examt3p_date)
 
-    if crm_date and current_evalbox != 'Convoc CMA reçue':
-        logger.info(f"  🔒 BLOCAGE SYNC DATE: Evalbox={current_evalbox!r} ≠ 'Convoc CMA reçue' → CRM protégé ({crm_date})")
+    if crm_date and examt3p_date_is_past and current_evalbox != 'Convoc CMA reçue':
+        logger.info(f"  🔒 BLOCAGE SYNC DATE: ExamT3P date passée ({examt3p_date}) + Evalbox={current_evalbox!r} ≠ 'Convoc CMA reçue' → CRM protégé ({crm_date})")
         result['blocked'] = True
         result['blocked_reason'] = (
+            f"Date ExamT3P ({examt3p_date}) est dans le passé et "
             f"Evalbox={current_evalbox!r} n'est pas 'Convoc CMA reçue'. "
-            f"La date CRM ({crm_date}) est protégée. "
-            f"Seule une convocation CMA peut écraser la date CRM."
+            f"La date CRM ({crm_date}) est protégée."
         )
         result['sync_performed'] = True
         return result
+
+    if not examt3p_date_is_past:
+        logger.info(f"  ✅ Date ExamT3P future ({examt3p_date}) → sync autorisée (Evalbox={current_evalbox!r})")
 
     # ================================================================
     # 3. RÉCUPÉRER LE DÉPARTEMENT

@@ -177,7 +177,8 @@ def process_all_pending(workflow, cycle_num, delay_seconds=3.0):
                 ticket_id=ticket_id,
                 auto_create_draft=True,
                 auto_update_crm=True,
-                auto_update_ticket=True
+                auto_update_ticket=True,
+                auto_send=True
             )
 
             success = result.get('success', False)

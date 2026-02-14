@@ -136,6 +136,8 @@ INTENTIONS POSSIBLES (par ordre de spécificité - préfère les intentions spé
   Exemples avec date existante: "je voudrais juillet au lieu de mars", "dates à Montpellier" (si sa date actuelle est ailleurs), "je ne peux pas en mars"
   Exemples d'indisponibilité: "je serai en voyage le jour de l'examen", "je pars le 15 et l'examen est le 24", "je ne serai pas disponible à cette date"
   ⚠️ CAS PIÈGE: "je n'ai pas reçu ma convocation et je suis en voyage à partir du 15" → Le vrai problème est l'ABSENCE, pas la convocation. primary_intent = REPORT_DATE
+  ⚠️ CAS PIÈGE INFORMATIF: Si le candidat INFORME que sa date a été changée/déplacée (par l'administration, la CMA, etc.) sans DEMANDER de changement → ce n'est PAS REPORT_DATE. Il constate un fait. Chercher sa VRAIE demande dans le reste du message.
+  Exemples: "ma date a été reportée en mars", "ça a été annulé et je le passerai fin mars", "la CMA m'a déplacé en avril" → Le candidat ne demande PAS un report, il INFORME. Sa vraie demande est ailleurs (session, convocation, etc.)
   ⚠️ CAS IMPLICITE: Si le candidat demande une formation/session à un MOIS ou une DATE qui est APRÈS sa date d'examen actuelle → c'est REPORT_DATE (pas DEMANDE_CHANGEMENT_SESSION).
   Mettre implicit_date_repositioning: true dans intent_context.
   Exemples (Date examen actuelle = "2026-03-31"):

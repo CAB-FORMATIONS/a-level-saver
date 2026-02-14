@@ -904,6 +904,7 @@ class TemplateEngine:
             'uber_cas_d_email_received': context.get('uber_cas_d_email_received', False),
             'uber_alternative_email': context.get('uber_alternative_email', ''),
             'uber_cas_e': context.get('uber_cas_e', False),
+            'uber_remboursement_accepte': False,  # Set to True in CAS D/E block when DEMANDE_ANNULATION
             'uber_doublon': context.get('uber_doublon', False),
             'uber_doublon_clarification': context.get('uber_doublon_clarification', False),
             'uber_doublon_recoverable': context.get('uber_doublon_recoverable', False),
@@ -1164,9 +1165,14 @@ class TemplateEngine:
             result['credentials_invalid'] = False
             result['credentials_inconnus'] = False
             # Supprimer les intentions qui ajouteraient du contenu redondant
+            # Préserver le fait qu'une annulation a été demandée (pour le partial CAS E)
+            is_annulation = result.get('intention_demande_annulation', False)
             for key in list(result.keys()):
                 if key.startswith('intention_'):
                     result[key] = False
+            # Flag dédié pour que le partial CAS E affiche le remboursement
+            if is_annulation:
+                result['uber_remboursement_accepte'] = True
             logger.info("🚫 Uber CAS D/E: toutes les sections supprimées (seul le bloc Uber + alternatives s'affiche)")
             return result
 
