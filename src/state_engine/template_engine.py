@@ -1147,6 +1147,29 @@ class TemplateEngine:
             result['intention_question_processus'] = False
             logger.info(f"📚 V3: intentions date supprimées (date confirmée {v3_confirmed})")
 
+        # UBER CAS D/E: Candidat non éligible ou compte non vérifié
+        # → Supprimer TOUTES les sections (dates, sessions, statut, e-learning, identifiants, credentials)
+        # Le partial uber gère tout + propose alternatives CPF/rappel conseiller
+        is_uber_blocked = result.get('uber_cas_d', False) or result.get('uber_cas_e', False)
+        if is_uber_blocked:
+            result['show_dates_section'] = False
+            result['show_sessions_section'] = False
+            result['show_statut_section'] = False
+            result['show_confirmation_section'] = False
+            result['show_convocation_section'] = False
+            result['show_paiement_section'] = False
+            # Supprimer e-learning (contrôlé par suppress_elearning dans response_master)
+            result['suppress_elearning'] = True
+            # Supprimer credentials (Section 0 bloc)
+            result['credentials_invalid'] = False
+            result['credentials_inconnus'] = False
+            # Supprimer les intentions qui ajouteraient du contenu redondant
+            for key in list(result.keys()):
+                if key.startswith('intention_'):
+                    result[key] = False
+            logger.info("🚫 Uber CAS D/E: toutes les sections supprimées (seul le bloc Uber + alternatives s'affiche)")
+            return result
+
         # Calculer show_dates_section (CENTRALISÉ - Section 4)
         # Afficher les dates si:
         # - Pas de date d'examen assignée
@@ -2755,7 +2778,7 @@ class TemplateEngine:
         try:
             from src.utils.date_utils import parse_date_flexible
             dossier_date = parse_date_flexible(date_dossier_recu)
-            today = datetime.now()
+            today = datetime.now().date()
             days_since = (today - dossier_date).days
             days_remaining = max(0, UBER_VERIFICATION_DELAY_DAYS - days_since)
 
