@@ -1147,6 +1147,86 @@ Le candidat a un ancien dossier dont les frais CMA (241€) ont déjà été ré
             logger.info("✅ ANALYSIS → Données extraites")
 
             # ================================================================
+            # CROSS-TICKET INSISTENCE: Détection via ThreadMemory META
+            # Si on a déjà traité DEMANDE_ANNULATION sur un ticket précédent
+            # (META record avec intent=DEMANDE_ANNULATION), c'est une insistance.
+            # ================================================================
+            detected_intent_go = triage_result.get('detected_intent', '')
+            if detected_intent_go == 'DEMANDE_ANNULATION':
+                thread_memory_result = analysis_result.get('thread_memory')
+                if thread_memory_result and thread_memory_result.has_history:
+                    previous_annulation = any(
+                        rec.intent == 'DEMANDE_ANNULATION'
+                        for rec in thread_memory_result.previous_records
+                    )
+                    if previous_annulation:
+                        # Cross-ticket insistence detected — check if candidate still wants annulation
+                        from src.utils.text_utils import get_clean_thread_content
+                        from business_rules import BusinessRules
+                        candidate_still_wants = True  # Default: assume yes for cross-ticket
+                        try:
+                            threads = self.desk_client.get_all_threads_with_full_content(ticket_id)
+                            last_inbound = next(
+                                (t for t in threads if t.get('direction') == 'in'), None
+                            )
+                            if last_inbound:
+                                last_msg = BusinessRules.strip_forwarded_content(
+                                    get_clean_thread_content(last_inbound).lower()
+                                ).lower()
+                                annulation_keywords = ANNULATION_KEYWORDS
+                                candidate_still_wants = any(kw in last_msg for kw in annulation_keywords)
+                                if not candidate_still_wants:
+                                    logger.info("  ✅ CROSS-TICKET: Le dernier message ne mentionne plus l'annulation → pas d'insistance")
+                        except Exception as e:
+                            logger.warning(f"  ⚠️ Erreur vérification cross-ticket insistance: {e}")
+
+                        if candidate_still_wants:
+                            logger.warning("🔴 CROSS-TICKET INSISTANCE DÉTECTÉE → Escalade Lamia (META précédent avec DEMANDE_ANNULATION)")
+                            # Vérifier si CMA déjà payée via les sections de la META précédente
+                            last_annulation_meta = next(
+                                (rec for rec in reversed(thread_memory_result.previous_records) if rec.intent == 'DEMANDE_ANNULATION'),
+                                None
+                            )
+                            cma_payment_at_risk = last_annulation_meta and 'paiement' in last_annulation_meta.sections
+
+                            if cma_payment_at_risk:
+                                escalation_note = (
+                                    "⚠️ INSISTANCE ANNULATION CROSS-TICKET — CMA DÉJÀ PAYÉE\n\n"
+                                    "Le candidat a déjà reçu une réponse sur un ticket précédent mentionnant le paiement CMA (241€) "
+                                    "et revient avec un nouveau ticket pour annuler/être remboursé.\n\n"
+                                    "→ ANNULATION DE L'EXAMEN : demander remboursement à la CMA en urgence.\n"
+                                    "→ Ticket escaladé en priorité HIGH et assigné à Lamia pour traitement manuel."
+                                )
+                            else:
+                                escalation_note = (
+                                    "⚠️ INSISTANCE ANNULATION/REMBOURSEMENT CROSS-TICKET\n\n"
+                                    "Le candidat a déjà reçu une réponse sur un ticket précédent expliquant la politique de non-remboursement "
+                                    "et revient avec un nouveau ticket pour annuler/être remboursé.\n\n"
+                                    "→ Ticket escaladé en priorité HIGH et assigné à Lamia pour traitement manuel."
+                                )
+
+                            from config import settings as _cfg
+                            escalation_agent_id = _cfg.escalation_agent_id
+                            if auto_update_ticket:
+                                try:
+                                    self.desk_client.update_ticket(ticket_id, {
+                                        'priority': 'High',
+                                        'assigneeId': escalation_agent_id,
+                                    })
+                                    self.desk_client.add_ticket_comment(
+                                        ticket_id, escalation_note, is_public=False
+                                    )
+                                    logger.info("  ✅ Ticket mis à jour: priorité HIGH + assigné à Lamia")
+                                except Exception as e:
+                                    logger.error(f"  ❌ Erreur mise à jour ticket: {e}")
+
+                            result['workflow_stage'] = 'ESCALATED_ANNULATION_INSISTENCE'
+                            result['escalated_to'] = _cfg.escalation_agent_name
+                            result['cma_payment_at_risk'] = cma_payment_at_risk
+                            result['success'] = True
+                            return result
+
+            # ================================================================
             # CHECK: Date d'examen passée → Traitement manuel obligatoire
             # ================================================================
             # Si la date d'examen est dans le passé (Zoho CRM ou ExamT3P),
@@ -3629,6 +3709,68 @@ L'équipe CAB Formations"""
                         logger.info(f"  📅 Dates disponibles: {[d.get('Date_Examen') for d in dept_dates[:5]]}")
                 else:
                     logger.warning(f"  ⚠️ Département non trouvé, impossible de vérifier la date")
+
+            # ================================================================
+            # V3 FALLBACK: Confirmation de date via V3 Conversation Analyzer
+            # Si le triage n'a pas extrait confirmed_new_exam_date mais V3 a
+            # détecté un target_date confirmé par le candidat (date_choice explicite)
+            # ET que cette date était dans les proposed_dates d'un META précédent
+            # (= date proposée par le système, pas inventée par le candidat)
+            # ================================================================
+            if not confirmed_exam_date_valid and conversation_state and conversation_state.target_date:
+                v3_has_date_choice = any(
+                    d.type == 'date_choice' and d.confidence == 'explicit'
+                    for d in conversation_state.candidate_decisions
+                )
+                if v3_has_date_choice:
+                    v3_target = conversation_state.target_date  # YYYY-MM-DD
+                    logger.info(f"  📅 V3 FALLBACK: target_date={v3_target} avec date_choice explicite")
+
+                    # Vérifier que cette date était dans les proposed_dates d'un META précédent
+                    previously_proposed = False
+                    if thread_memory_result and thread_memory_result.has_history:
+                        for rec in thread_memory_result.previous_records:
+                            if v3_target in (rec.proposed_dates or []):
+                                previously_proposed = True
+                                logger.info(f"  ✅ V3 FALLBACK: Date {v3_target} trouvée dans META proposed_dates")
+                                break
+
+                    if previously_proposed:
+                        # Vérifier engagement level (guard rail: VALIDE CMA, clôture passée, etc.)
+                        evalbox_for_v3 = deal_data.get('Evalbox', '') if deal_data else ''
+                        cloture_for_v3 = date_examen_vtc_result.get('date_cloture')
+                        from src.utils.date_examen_vtc_helper import classify_engagement_level as _classify_eng_v3
+                        engagement_v3 = _classify_eng_v3(evalbox_for_v3, cloture_for_v3, examt3p_data)
+
+                        if engagement_v3.get('can_reposition', False):
+                            # Trouver la date dans les dates du département
+                            current_dept_v3 = None
+                            if date_examen_vtc_result.get('current_departement'):
+                                current_dept_v3 = str(date_examen_vtc_result['current_departement'])
+                            elif date_examen_vtc_result.get('date_examen_info', {}).get('Departement'):
+                                current_dept_v3 = str(date_examen_vtc_result['date_examen_info']['Departement'])
+
+                            if current_dept_v3:
+                                from src.utils.date_examen_vtc_helper import get_next_exam_dates as _get_dates_v3
+                                dept_dates_v3 = _get_dates_v3(self.crm_client, current_dept_v3, limit=20)
+
+                                for d in dept_dates_v3:
+                                    if str(d.get('Date_Examen', ''))[:10] == v3_target:
+                                        confirmed_exam_date_valid = True
+                                        confirmed_exam_date_id = d.get('id')
+                                        confirmed_exam_date_info = d
+                                        confirmed_new_exam_date = v3_target
+                                        logger.info(f"  ✅ V3 FALLBACK: Date {v3_target} VALIDÉE pour dept {current_dept_v3} (ID: {confirmed_exam_date_id}, engagement level {engagement_v3['level']})")
+                                        break
+
+                                if not confirmed_exam_date_valid:
+                                    logger.warning(f"  ⚠️ V3 FALLBACK: Date {v3_target} non disponible pour département {current_dept_v3}")
+                            else:
+                                logger.warning(f"  ⚠️ V3 FALLBACK: Département non trouvé")
+                        else:
+                            logger.warning(f"  🛑 V3 FALLBACK: Engagement level {engagement_v3['level']} → repositionnement bloqué ({engagement_v3['description']})")
+                    else:
+                        logger.info(f"  ℹ️ V3: target_date={v3_target} pas dans META proposed_dates → pas de confirmation CRM automatique")
 
             # ================================================================
             # ENRICHISSEMENT: Si intention date-related avec mois/lieu spécifiques

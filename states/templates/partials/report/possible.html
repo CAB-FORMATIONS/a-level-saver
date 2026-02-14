@@ -3,6 +3,15 @@
 <!-- V3: Candidat a déjà confirmé une date — ne pas re-demander -->
 <b>Concernant votre changement de date</b><br>
 Votre demande de changement vers le <b>{{tm_candidate_confirmed_date}}</b> a bien ete prise en compte.{{#if tm_report_in_progress}} Nous avons contacte la CMA pour effectuer le changement.{{/if}}<br>
+{{#if session_confirmed}}
+<br>
+Nous avons egalement enregistre votre choix de session : <b>{{matched_session_name}}</b>{{#if matched_session_start}} du <b>{{matched_session_start}}</b> au <b>{{matched_session_end}}</b>{{/if}}.<br>
+{{#if session_starts_soon}}
+<b>Note :</b> La formation commence dans <b>{{days_until_session_start}} jour(s)</b>. Vous recevrez le lien d'invitation a la visioconference par email.<br>
+{{else}}
+Vous recevrez le lien d'invitation a la visioconference par email avant le debut de la formation.<br>
+{{/if}}
+{{else}}
 {{#if has_sessions_proposees}}<br>
 <b>Voici les sessions de formation disponibles pour cette date{{#if session_preference}} ({{session_preference}}){{/if}} :</b><br>
 {{#each sessions_proposees}}{{#if this.is_first_of_exam}}<b>Examen du {{this.date_examen_formatted}}</b> &mdash; {{this.departement}} (cloture : {{this.cloture}})<br>{{/if}}&nbsp;&nbsp;&rarr; {{this.nom}} : du {{this.debut}} au {{this.fin}}<br>
@@ -11,6 +20,7 @@ Merci de nous confirmer votre choix de session pour que nous puissions finaliser
 {{else}}
 <br>
 Nous revenons vers vous des que le changement est effectif. Vous pouvez suivre l'avancement de votre dossier sur <a href="https://www.exament3p.fr">exament3p.fr</a>.<br>
+{{/if}}
 {{/if}}
 {{else}}
 {{#if is_clarification_mode}}

@@ -901,29 +901,51 @@ EXEMPLE PLAINTE - Message: "J'avais clairement indiqué mon choix pour une forma
             # ================================================================
             if rule_go_override:
                 logger.info(f"  🔄 Rule override appliqué: {rule_go_override['method']}")
-                logger.info(f"     Primary intent: {llm_result['primary_intent']} → {rule_go_override['primary_intent']}")
-                logger.info(f"     LLM secondary_intents préservés: {llm_result['secondary_intents']}")
-                if llm_result['intent_context'].get('session_preference'):
-                    logger.info(f"     LLM session_preference préservée: {llm_result['intent_context']['session_preference']}")
 
-                # Override: action, primary intent, method, confidence
-                llm_result['action'] = rule_go_override['action']
-                llm_result['target_department'] = rule_go_override['target_department']
-                llm_result['primary_intent'] = rule_go_override['primary_intent']
-                llm_result['detected_intent'] = rule_go_override['detected_intent']
-                llm_result['method'] = rule_go_override['method']
-                llm_result['confidence'] = rule_go_override['confidence']
-                llm_result['reason'] = rule_go_override['reason']
-
-                # Merge intent_context: LLM fields + rule-specific fields
-                llm_result['intent_context'].update(rule_go_override.get('intent_context_extra', {}))
-
-                # Si le LLM a détecté l'intent original comme secondaire, l'ajouter
+                # Intents que le LLM a détectés et qui ont PRIORITÉ sur le rule override
+                # Car le candidat CONFIRME/REPORTE/CHANGE quelque chose — c'est plus important
+                # que le simple fait que le thread contienne des identifiants
+                llm_priority_intents = {
+                    'CONFIRMATION_DATE_EXAMEN', 'CONFIRMATION_SESSION', 'REPORT_DATE',
+                    'DEMANDE_CHANGEMENT_SESSION', 'DEMANDE_ANNULATION', 'DEMANDE_REINSCRIPTION',
+                    'FORCE_MAJEURE_REPORT', 'DEMANDE_DATE_PLUS_TOT',
+                }
                 llm_primary = primary_intent  # L'intent que le LLM avait détecté
-                if llm_primary and llm_primary != rule_go_override['primary_intent']:
-                    if llm_primary not in llm_result['secondary_intents']:
-                        llm_result['secondary_intents'].append(llm_primary)
-                        logger.info(f"     LLM primary '{llm_primary}' ajouté aux secondary_intents")
+
+                if llm_primary in llm_priority_intents:
+                    # LLM a détecté un intent prioritaire → garder l'intent du LLM
+                    # Le rule override ne change que l'action (GO au lieu de ROUTE)
+                    logger.info(f"     LLM intent '{llm_primary}' prioritaire → conservé (rule override = action GO seulement)")
+                    llm_result['action'] = rule_go_override['action']
+                    llm_result['target_department'] = rule_go_override['target_department']
+                    # Ajouter ENVOIE_IDENTIFIANTS en secondary si pas déjà présent
+                    if 'ENVOIE_IDENTIFIANTS' not in llm_result['secondary_intents']:
+                        llm_result['secondary_intents'].append('ENVOIE_IDENTIFIANTS')
+                    llm_result['intent_context'].update(rule_go_override.get('intent_context_extra', {}))
+                else:
+                    # LLM n'a pas détecté d'intent prioritaire → appliquer le rule override complet
+                    logger.info(f"     Primary intent: {llm_result['primary_intent']} → {rule_go_override['primary_intent']}")
+                    logger.info(f"     LLM secondary_intents préservés: {llm_result['secondary_intents']}")
+                    if llm_result['intent_context'].get('session_preference'):
+                        logger.info(f"     LLM session_preference préservée: {llm_result['intent_context']['session_preference']}")
+
+                    # Override: action, primary intent, method, confidence
+                    llm_result['action'] = rule_go_override['action']
+                    llm_result['target_department'] = rule_go_override['target_department']
+                    llm_result['primary_intent'] = rule_go_override['primary_intent']
+                    llm_result['detected_intent'] = rule_go_override['detected_intent']
+                    llm_result['method'] = rule_go_override['method']
+                    llm_result['confidence'] = rule_go_override['confidence']
+                    llm_result['reason'] = rule_go_override['reason']
+
+                    # Merge intent_context: LLM fields + rule-specific fields
+                    llm_result['intent_context'].update(rule_go_override.get('intent_context_extra', {}))
+
+                    # Si le LLM a détecté l'intent original comme secondaire, l'ajouter
+                    if llm_primary and llm_primary != rule_go_override['primary_intent']:
+                        if llm_primary not in llm_result['secondary_intents']:
+                            llm_result['secondary_intents'].append(llm_primary)
+                            logger.info(f"     LLM primary '{llm_primary}' ajouté aux secondary_intents")
 
             return llm_result
 
