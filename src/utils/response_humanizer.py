@@ -12,6 +12,8 @@ from typing import Dict, Any, Optional
 
 import anthropic
 
+from src.constants.models import MODEL_HUMANIZER
+
 logger = logging.getLogger(__name__)
 
 # Prompt système pour l'humanisation
@@ -248,7 +250,7 @@ NE JAMAIS utiliser de dates provenant du MESSAGE DU CANDIDAT. Les SEULES dates a
                 logger.info(f"🔄 Retry humanization (attempt {attempt + 1}/{max_attempts}) - dates requises: {dates_str}")
 
             response = client.messages.create(
-                model="claude-sonnet-4-20250514",
+                model=MODEL_HUMANIZER,
                 max_tokens=2000,
                 system=HUMANIZE_SYSTEM_PROMPT,
                 messages=[{"role": "user", "content": base_prompt}]

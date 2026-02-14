@@ -30,6 +30,10 @@ config:
     - "CRM"
     - "deal"
     - "API"
+    - "ticket_id"
+    - "deal_id"
+    - "module"
+    - "field"
 
   required_blocks_global:
     - "salutation"

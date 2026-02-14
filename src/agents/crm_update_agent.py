@@ -30,6 +30,7 @@ from typing import Dict, Any, List, Optional, Tuple
 
 from .base_agent import BaseAgent
 from src.zoho_client import ZohoCRMClient
+from src.constants.evalbox import BLOCKING_MODIFICATION
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +61,7 @@ Réponds toujours en JSON avec la structure:
 """
 
     # Statuts qui bloquent la modification de Date_examen_VTC
-    BLOCKING_EVALBOX_STATUSES = ['VALIDE CMA', 'Convoc CMA reçue']
+    BLOCKING_EVALBOX_STATUSES = BLOCKING_MODIFICATION
 
     # Champs lookup (nécessitent ID, pas string)
     LOOKUP_FIELDS = ['Date_examen_VTC', 'Session_choisie', 'Session']

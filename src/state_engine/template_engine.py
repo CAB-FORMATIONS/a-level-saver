@@ -27,6 +27,15 @@ from datetime import datetime
 import gender_guesser.detector as gender_detector
 
 from .state_detector import DetectedState, DetectedStates
+from src.constants.thresholds import (
+    CONVOCATION_DAYS_BEFORE_EXAM, EXAM_WITHIN_DAYS, SESSION_STARTS_SOON_DAYS,
+    MAX_DATES_DISPLAYED, CMA_CONTACT_URGENT_DAYS, UBER_VERIFICATION_DELAY_DAYS,
+)
+from src.constants.evalbox import (
+    VALIDATED, BLOCKING_MODIFICATION, PAID_STATUSES, PAID_EXCLUDING_REFUSED,
+    READY_TO_PAY, DOCUMENTS_PROBLEM, DOSSIER_CONSTITUE, STATUT_DISPLAY,
+)
+from src.constants.intents import FULL_RECAP_INTENTS, STATUT_INTENTS, DATES_INTENTS
 
 # Détecteur de genre par prénom (singleton)
 _gender_detector = gender_detector.Detector()
@@ -612,7 +621,7 @@ class TemplateEngine:
             next_dates = context.get('next_dates', [])
             if next_dates:
                 formatted_dates = []
-                for d in next_dates[:5]:  # Limiter à 5 dates
+                for d in next_dates[:MAX_DATES_DISPLAYED]:  # Limiter à 5 dates
                     date_str = d.get('Date_Examen', '')
                     date_formatted = self._format_date(date_str) if date_str else ''
                     cloture_str = d.get('Date_Cloture_Inscription', '')
@@ -690,7 +699,7 @@ class TemplateEngine:
             try:
                 from datetime import timedelta
                 exam_date = datetime.strptime(date_examen, '%Y-%m-%d')
-                convoc_date = exam_date - timedelta(days=10)
+                convoc_date = exam_date - timedelta(days=CONVOCATION_DAYS_BEFORE_EXAM)
                 date_convocation = convoc_date.strftime('%d/%m/%Y')
             except Exception as e:
                 pass
@@ -762,16 +771,16 @@ class TemplateEngine:
             # Booléens pour les statuts Evalbox (pour templates conditionnels)
             'evalbox_dossier_cree': evalbox == 'Dossier crée',
             'evalbox_dossier_synchronise': evalbox == 'Dossier Synchronisé',
-            'evalbox_pret_a_payer': evalbox in ['Pret a payer', 'Pret a payer par cheque'],
+            'evalbox_pret_a_payer': evalbox in READY_TO_PAY,
             'evalbox_valide_cma': evalbox == 'VALIDE CMA',
             'evalbox_refus_cma': evalbox == 'Refusé CMA',
-            'evalbox_documents_refuses': evalbox in ['Documents refusés', 'Documents manquants'],
+            'evalbox_documents_refuses': evalbox in DOCUMENTS_PROBLEM,
             'evalbox_convoc_recue': evalbox == 'Convoc CMA reçue',
             'no_evalbox_status': not evalbox or evalbox in ['None', '', 'N/A'],
             # Flag pour avertissement modification identifiants (true = paiement non effectué)
             # Payé = Dossier Synchronisé, VALIDE CMA, Convoc CMA reçue, Refusé CMA
             # Non payé = Dossier crée, Pret a payer, Documents refusés/manquants, N/A
-            'evalbox_non_paye': evalbox not in ['Dossier Synchronisé', 'VALIDE CMA', 'Convoc CMA reçue', 'Refusé CMA'],
+            'evalbox_non_paye': evalbox not in PAID_STATUSES,
 
             # Numéro de dossier
             'num_dossier': examt3p_data.get('num_dossier', '') or context.get('num_dossier', ''),
@@ -829,7 +838,7 @@ class TemplateEngine:
             # Flags temporels pour templates (comparateurs Handlebars non supportés)
             'exam_within_7_days': context.get('exam_within_7_days', False),
             'exam_within_10_days': context.get('exam_within_10_days', False),
-            'exam_within_30_days': (context.get('days_until_exam') is not None and 0 < context.get('days_until_exam', 999) <= 30),
+            'exam_within_30_days': (context.get('days_until_exam') is not None and 0 < context.get('days_until_exam', 999) <= EXAM_WITHIN_DAYS),
             'examen_pas_encore_passe': context.get('examen_pas_encore_passe', False),
             'examen_passe': context.get('examen_passe', False) or context.get('date_examen_passed', False),
             'examen_imminent': context.get('examen_imminent', False),
@@ -1041,11 +1050,11 @@ class TemplateEngine:
             'cancellation_is_contestation': intent_context.get('cancellation_reason') == 'contestation',
             # CMA déjà payée (Dossier Synchronisé, VALIDE CMA, Convoc CMA reçue, Refusé CMA)
             # Note: Refusé CMA = CAB a payé 241€ puis la CMA a refusé des documents
-            'cma_already_paid': evalbox in ['Dossier Synchronisé', 'VALIDE CMA', 'Convoc CMA reçue', 'Refusé CMA'],
+            'cma_already_paid': evalbox in PAID_STATUSES,
             # Clôture passée ou non (pour DEMANDE_ANNULATION avec CMA payée)
             # Refusé CMA a son propre flag (repositionné auto, pas de remboursement à mentionner)
-            'cma_paid_cloture_open': evalbox in ['Dossier Synchronisé', 'VALIDE CMA', 'Convoc CMA reçue'] and not context.get('cloture_passed', False),
-            'cma_paid_cloture_passed': evalbox in ['Dossier Synchronisé', 'VALIDE CMA', 'Convoc CMA reçue'] and context.get('cloture_passed', False),
+            'cma_paid_cloture_open': evalbox in PAID_EXCLUDING_REFUSED and not context.get('cloture_passed', False),
+            'cma_paid_cloture_passed': evalbox in PAID_EXCLUDING_REFUSED and context.get('cloture_passed', False),
             # Refusé CMA = 241€ engagés, candidat repositionné sur prochaine date, peut encore décaler
             'cma_refused_repositioned': evalbox == 'Refusé CMA',
 
@@ -1274,24 +1283,20 @@ class TemplateEngine:
             primary_intent = context.get('primary_intent') or context.get('detected_intent', '')
             # QUESTION_GENERALE / ENVOIE_IDENTIFIANTS: bypass toutes les suppressions ThreadMemory
             # Si le candidat pose une question ou envoie ses identifiants, il veut un retour complet
-            full_recap_intents = {'QUESTION_GENERALE', 'ENVOIE_IDENTIFIANTS'}
-            if primary_intent in full_recap_intents:
+            if primary_intent in FULL_RECAP_INTENTS:
                 logger.info(f"🔓 {primary_intent}: bypass ThreadMemory suppressions (point complet dossier)")
             else:
-                # Intentions qui REQUIÈRENT la section statut (ne pas supprimer)
-                statut_intents = {'STATUT_DOSSIER', 'QUESTION_PROCESSUS', 'QUESTION_DOCUMENTS'}
-                # Intentions qui REQUIÈRENT la section dates (ne pas supprimer)
-                dates_intents = {'REPORT_DATE', 'DEMANDE_DATE_PLUS_TOT', 'CONFIRMATION_DATE'}
+                # STATUT_INTENTS / DATES_INTENTS: intents that REQUIRE a section (never suppress)
 
                 if thread_mem.get('suppress_dates') and result.get('show_dates_section'):
-                    if 'show_dates_section' not in context or primary_intent not in dates_intents:
+                    if 'show_dates_section' not in context or primary_intent not in DATES_INTENTS:
                         result['show_dates_section'] = False
                         logger.info("📅 show_dates_section=False (ThreadMemory: déjà communiqué, pas de changement)")
                 if thread_mem.get('suppress_sessions') and 'show_sessions_section' not in context and result.get('show_sessions_section'):
                     result['show_sessions_section'] = False
                     logger.info("📚 show_sessions_section=False (ThreadMemory: déjà communiqué, pas de changement)")
                 if thread_mem.get('suppress_statut') and result.get('show_statut_section'):
-                    if 'show_statut_section' not in context or primary_intent not in statut_intents:
+                    if 'show_statut_section' not in context or primary_intent not in STATUT_INTENTS:
                         result['show_statut_section'] = False
                         logger.info("📋 show_statut_section=False (ThreadMemory: déjà communiqué, pas de changement)")
                 if thread_mem.get('suppress_elearning'):
@@ -1312,8 +1317,7 @@ class TemplateEngine:
             v3_response_mode = ''
 
         primary_intent_v3 = context.get('primary_intent') or context.get('detected_intent', '')
-        full_recap_intents_v3 = {'QUESTION_GENERALE', 'ENVOIE_IDENTIFIANTS'}
-        if primary_intent_v3 in full_recap_intents_v3:
+        if primary_intent_v3 in FULL_RECAP_INTENTS:
             logger.info(f"🔓 {primary_intent_v3}: bypass V3 response_mode suppressions (point complet dossier)")
         elif v3_response_mode == 'brief_confirmation':
             if 'show_dates_section' not in context:  # Rule 11
@@ -1360,14 +1364,9 @@ class TemplateEngine:
         # ================================================================
         evalbox = result.get('evalbox_status', '')
         # "dossier_constitue" = evalbox au moins à Dossier créé
-        result['dossier_constitue'] = evalbox in [
-            'Dossier crée', 'Pret a payer', 'Pret a payer par cheque',
-            'Dossier Synchronisé', 'VALIDE CMA', 'Convoc CMA reçue', 'Refusé CMA'
-        ]
+        result['dossier_constitue'] = evalbox in DOSSIER_CONSTITUE
         # "paiement_effectue" = evalbox au moins à Dossier Synchronisé (CAB a payé les 241€)
-        result['paiement_effectue'] = evalbox in [
-            'Dossier Synchronisé', 'VALIDE CMA', 'Convoc CMA reçue', 'Refusé CMA'
-        ]
+        result['paiement_effectue'] = evalbox in PAID_STATUSES
         # "session_type_display" pour la checklist
         if result.get('session_is_soir'):
             result['session_type_display'] = 'Cours du soir'
@@ -1479,7 +1478,6 @@ class TemplateEngine:
         'REPORT_DATE': 'intention_report_date',
         'FORCE_MAJEURE_REPORT': 'intention_report_date',
         'DEMANDE_DATE_PLUS_TOT': 'intention_demande_date_plus_tot',
-        'DOCUMENT_QUESTION': 'intention_probleme_documents',
         'SIGNALE_PROBLEME_DOCS': 'intention_probleme_documents',
         'ENVOIE_DOCUMENTS': 'intention_probleme_documents',
         'PROBLEME_CONNEXION_EXAMT3P': 'intention_probleme_documents',  # Problème upload/connexion plateforme
@@ -1738,7 +1736,7 @@ class TemplateEngine:
             if not cab_paye_examen:
                 actions['action_surveiller_paiement'] = True
                 actions['has_required_action'] = True
-        elif evalbox in ['Pret a payer', 'Pret a payer par cheque']:
+        elif evalbox in READY_TO_PAY:
             # Uber ELIGIBLE = CAB a déjà payé, pas de paiement attendu
             if not cab_paye_examen:
                 actions['action_surveiller_paiement'] = True
@@ -1876,7 +1874,7 @@ class TemplateEngine:
                         'session_type': session_type,
                     }
 
-        for d in filtered_dates[:5]:  # Limiter à 5 dates (après filtrage des dates passées)
+        for d in filtered_dates[:MAX_DATES_DISPLAYED]:  # Limiter à 5 dates (après filtrage des dates passées)
             date_str = d.get('Date_Examen', '')
             cloture_str = d.get('Date_Cloture_Inscription', '')
             dept = d.get('Departement', '')
@@ -1969,7 +1967,7 @@ class TemplateEngine:
         earlier_options.sort(key=lambda x: x.get('Date_Examen', ''))
 
         # Limiter a 5 alternatives
-        earlier_options = earlier_options[:5]
+        earlier_options = earlier_options[:MAX_DATES_DISPLAYED]
 
         return {
             'has_earlier_options': bool(earlier_options),
@@ -2092,7 +2090,7 @@ class TemplateEngine:
             result['days_until_session_start'] = days_until
             if start_date > today:
                 result['session_upcoming'] = True
-                if days_until <= 3:
+                if days_until <= SESSION_STARTS_SOON_DAYS:
                     result['session_starts_soon'] = True
             elif end_date and today > end_date:
                 result['session_finished'] = True
@@ -2129,7 +2127,7 @@ class TemplateEngine:
             return "<p>Aucune date disponible pour le moment.</p>"
 
         lines = []
-        for i, date_info in enumerate(dates[:5], 1):
+        for i, date_info in enumerate(dates[:MAX_DATES_DISPLAYED], 1):
             date_str = date_info.get('Date_Examen', '')
             formatted = self._format_date(date_str)
             dept = date_info.get('Departement', '')
@@ -2488,7 +2486,7 @@ class TemplateEngine:
 
         return {
             'requires_cma_contact': requires_contact,
-            'cma_contact_urgent': days_until_cloture < 5,
+            'cma_contact_urgent': days_until_cloture < CMA_CONTACT_URGENT_DAYS,
             'is_department_change': context.get('requires_department_change_process', False),
             'is_date_change': primary_intent == 'REPORT_DATE',
         }
@@ -2749,8 +2747,8 @@ class TemplateEngine:
                 'uber_no_docs_yet': True,
                 'uber_eligibility_pending': False,
                 'uber_eligibility_known': False,
-                'days_until_eligibility_check': 4,
-                'days_until_eligibility_text': '4 jours après soumission de vos documents',
+                'days_until_eligibility_check': UBER_VERIFICATION_DELAY_DAYS,
+                'days_until_eligibility_text': f'{UBER_VERIFICATION_DELAY_DAYS} jours après soumission de vos documents',
             }
 
         # Documents soumis — calculer le délai
@@ -2759,7 +2757,7 @@ class TemplateEngine:
             dossier_date = parse_date_flexible(date_dossier_recu)
             today = datetime.now()
             days_since = (today - dossier_date).days
-            days_remaining = max(0, 4 - days_since)
+            days_remaining = max(0, UBER_VERIFICATION_DELAY_DAYS - days_since)
 
             if days_remaining > 0:
                 if days_remaining == 1:
@@ -2794,15 +2792,7 @@ class TemplateEngine:
 
     def _format_statut(self, evalbox: str) -> str:
         """Formate le statut Evalbox pour affichage."""
-        statut_mapping = {
-            'Dossier crée': 'Dossier en cours de création',
-            'Pret a payer': 'Dossier prêt pour paiement CMA',
-            'Dossier Synchronisé': 'Dossier transmis à la CMA (instruction en cours)',
-            'VALIDE CMA': 'Dossier validé par la CMA',
-            'Convoc CMA reçue': 'Convocation disponible',
-            'Refusé CMA': 'Document(s) refusé(s) par la CMA',
-        }
-        return statut_mapping.get(evalbox, evalbox or "Statut inconnu")
+        return STATUT_DISPLAY.get(evalbox, evalbox or "Statut inconnu")
 
     def _get_prochaines_etapes(self, state: DetectedState) -> str:
         """Génère les prochaines étapes selon l'état."""

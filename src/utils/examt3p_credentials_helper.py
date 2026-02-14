@@ -19,6 +19,8 @@ from dotenv import load_dotenv
 project_root = Path(__file__).parent.parent.parent
 load_dotenv(project_root / ".env")
 
+from src.constants.models import MODEL_EXTRACTION
+
 logger = logging.getLogger(__name__)
 
 
@@ -83,7 +85,7 @@ Si tu ne trouves pas d'identifiants, réponds:
 {{"identifiant": null, "mot_de_passe": null, "confidence": 0}}"""
 
         response = client.messages.create(
-            model="claude-3-5-haiku-20241022",  # Modèle rapide pour extraction
+            model=MODEL_EXTRACTION,  # Modèle rapide pour extraction
             max_tokens=200,
             messages=[{"role": "user", "content": prompt}]
         )

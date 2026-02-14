@@ -15,6 +15,7 @@ from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime, date
 
 from .state_detector import DetectedState
+from src.constants.amounts import UBER_OFFER_AMOUNT, CMA_EXAM_FEE, CMA_DOSSIER_FEE
 
 logger = logging.getLogger(__name__)
 
@@ -418,7 +419,7 @@ class ResponseValidator:
     ):
         """Vérifie que les montants sont autorisés."""
         # Montants généralement OK à mentionner
-        default_allowed = [241, 60]  # Frais CMA, frais dossier
+        default_allowed = [CMA_EXAM_FEE, CMA_DOSSIER_FEE]  # Frais CMA, frais dossier
         if allowed_amounts:
             default_allowed.extend(allowed_amounts)
 
@@ -430,7 +431,7 @@ class ResponseValidator:
                 amount = int(re.search(r'\d+', match).group())
 
                 # 20€ est interdit sauf si explicitement autorisé (ex: DEMANDE_ANNULATION)
-                if amount == 20 and 20 not in default_allowed:
+                if amount == UBER_OFFER_AMOUNT and UBER_OFFER_AMOUNT not in default_allowed:
                     result.add_error(ValidationError(
                         'forbidden_amount',
                         "Montant 20€ interdit (ne pas mentionner le prix de l'offre)",

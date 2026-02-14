@@ -40,9 +40,14 @@ class Settings(BaseSettings):
     anthropic_api_key: str
 
     # Agent configuration
-    agent_model: str = "claude-sonnet-4-5-20250929"  # Claude Sonnet 4.5
+    agent_model: str = "claude-sonnet-4-5-20250929"  # Legacy — use src.constants.models instead
     agent_max_tokens: int = 4096
     agent_temperature: float = 0.7
+
+    # Staff & escalation
+    escalation_agent_id: str = "198709000096599317"
+    escalation_agent_name: str = "Lamia Serbouty"
+    rgpd_referent_email: str = "jc@cab-formations.fr"
 
     # Logging
     log_level: str = "INFO"

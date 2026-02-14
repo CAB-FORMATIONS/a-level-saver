@@ -17,6 +17,7 @@ from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime, date
 
 from .state_detector import DetectedState
+from src.constants.models import MODEL_EXTRACTION
 
 logger = logging.getLogger(__name__)
 
@@ -475,7 +476,7 @@ IMPORTANT:
             client = anthropic.Anthropic()
 
             response = client.messages.create(
-                model="claude-3-5-haiku-20241022",
+                model=MODEL_EXTRACTION,
                 max_tokens=256,
                 messages=[{"role": "user", "content": prompt}]
             )

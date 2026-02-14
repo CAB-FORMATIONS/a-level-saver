@@ -43,6 +43,8 @@ import logging
 from datetime import datetime
 from typing import Dict, List, Any, Optional, Tuple
 
+from src.constants.evalbox import BLOCKING_MODIFICATION
+
 logger = logging.getLogger(__name__)
 
 # Mapping ExamT3P "Statut du Dossier" → Evalbox CRM
@@ -64,7 +66,7 @@ EXAMT3P_STATUT_DOSSIER_MAPPING = {
 }
 
 # Statuts qui bloquent la modification de Date_examen_VTC
-BLOCKING_EVALBOX_STATUSES = ['VALIDE CMA', 'Convoc CMA reçue']
+BLOCKING_EVALBOX_STATUSES = BLOCKING_MODIFICATION
 
 
 def is_date_past(date_str: str) -> bool:

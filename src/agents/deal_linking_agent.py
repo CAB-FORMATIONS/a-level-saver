@@ -5,6 +5,7 @@ from typing import Dict, Any, List, Optional
 from .base_agent import BaseAgent
 from src.ticket_deal_linker import TicketDealLinker
 from src.zoho_client import ZohoDeskClient, ZohoCRMClient
+from src.constants.models import MODEL_EXTRACTION
 
 logger = logging.getLogger(__name__)
 
@@ -978,7 +979,7 @@ INSTRUCTIONS:
 Emails alternatifs trouvés:"""
 
             response = client.messages.create(
-                model="claude-3-5-haiku-20241022",
+                model=MODEL_EXTRACTION,
                 max_tokens=200,
                 messages=[{"role": "user", "content": prompt}]
             )

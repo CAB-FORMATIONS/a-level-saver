@@ -14,6 +14,9 @@ Modify the methods below to match your:
 import logging
 from typing import Dict, Any, Optional, List
 
+from src.constants.evalbox import CMA_INVOLVED
+from src.constants.amounts import UBER_OFFER_AMOUNT
+
 logger = logging.getLogger(__name__)
 
 
@@ -237,7 +240,7 @@ class BusinessRules:
             return None
 
         # Étape 1: Filtrer les deals à 20€
-        deals_20 = [d for d in all_deals if d.get("Amount") == 20]
+        deals_20 = [d for d in all_deals if d.get("Amount") == UBER_OFFER_AMOUNT]
 
         # Étape 2: Prioriser GAGNÉ (plus récent)
         deals_20_won = [d for d in deals_20 if d.get("Stage") == "GAGNÉ"]
@@ -350,13 +353,7 @@ class BusinessRules:
             # Si Evalbox = Pret a payer ou moins → la CMA n'a PAS encore le dossier
             # → les documents sont encore chez CAB → rester DOC
             # Exemple: candidat mentionne "passeport" avec Evalbox=Pret a payer → question sur l'upload, pas un refus CMA
-            EVALBOX_CMA_INVOLVED = [
-                "Dossier Synchronisé", "Dossier Synchronise",
-                "VALIDE CMA", "Convoc CMA reçue", "Convoc CMA recue",
-                "Refusé CMA", "Refuse CMA",
-                "Documents refusés", "Documents refuses",
-                "Documents manquants",
-            ]
+            EVALBOX_CMA_INVOLVED = CMA_INVOLVED
             if has_document_keywords:
                 date_dossier_recu = selected_deal.get("Date_Dossier_re_u")
                 if date_dossier_recu and evalbox in EVALBOX_CMA_INVOLVED:
@@ -381,7 +378,7 @@ class BusinessRules:
         # Étape 5: Pas de deal 20€, chercher autre montant
         other_deals_won_or_pending = [
             d for d in all_deals
-            if d.get("Amount") != 20 and d.get("Stage") in ["GAGNÉ", "EN ATTENTE"]
+            if d.get("Amount") != UBER_OFFER_AMOUNT and d.get("Stage") in ["GAGNÉ", "EN ATTENTE"]
         ]
 
         if other_deals_won_or_pending:
@@ -502,21 +499,21 @@ class BusinessRules:
         if department == "DOC":
             return [
                 {
-                    "criteria": f"((Email:equals:{contact_email})and(Deal_Name:contains:Uber)and(Amount:equals:20)and(Stage:equals:Closed Won))",
+                    "criteria": f"((Email:equals:{contact_email})and(Deal_Name:contains:Uber)and(Amount:equals:{UBER_OFFER_AMOUNT})and(Stage:equals:Closed Won))",
                     "description": "Uber €20 deals - WON",
                     "max_results": 1,
                     "sort_by": "Modified_Time",
                     "sort_order": "desc"
                 },
                 {
-                    "criteria": f"((Email:equals:{contact_email})and(Deal_Name:contains:Uber)and(Amount:equals:20)and(Stage:equals:Pending))",
+                    "criteria": f"((Email:equals:{contact_email})and(Deal_Name:contains:Uber)and(Amount:equals:{UBER_OFFER_AMOUNT})and(Stage:equals:Pending))",
                     "description": "Uber €20 deals - PENDING",
                     "max_results": 1,
                     "sort_by": "Modified_Time",
                     "sort_order": "desc"
                 },
                 {
-                    "criteria": f"((Email:equals:{contact_email})and(Deal_Name:contains:Uber)and(Amount:equals:20)and(Stage:equals:Closed Lost))",
+                    "criteria": f"((Email:equals:{contact_email})and(Deal_Name:contains:Uber)and(Amount:equals:{UBER_OFFER_AMOUNT})and(Stage:equals:Closed Lost))",
                     "description": "Uber €20 deals - LOST",
                     "max_results": 1,
                     "sort_by": "Modified_Time",
@@ -658,7 +655,7 @@ class BusinessRules:
         # ===== RÈGLES BASÉES SUR LE DEAL =====
 
         # Uber €20 deals → DOC (formation VTC)
-        if "uber" in deal_name and amount == 20:
+        if "uber" in deal_name and amount == UBER_OFFER_AMOUNT:
             return "DOC"
 
         # CAB / Capacité deals → DOCS CAB

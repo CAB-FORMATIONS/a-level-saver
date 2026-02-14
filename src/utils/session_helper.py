@@ -13,14 +13,8 @@ from typing import Dict, Optional, List, Any, Tuple
 
 logger = logging.getLogger(__name__)
 
-# Constantes
-SESSION_TYPE_JOUR = "cdj"  # Cours Du Jour
-SESSION_TYPE_SOIR = "cds"  # Cours Du Soir
-
-# Délai minimum entre fin de formation et examen (en jours)
-MIN_DAYS_BEFORE_EXAM = 3
-# Délai maximum entre fin de formation et examen (en jours) - au delà, la session est trop éloignée
-MAX_DAYS_BEFORE_EXAM = 60
+from src.constants.sessions import SESSION_TYPE_JOUR, SESSION_TYPE_SOIR, is_uber_visio_session
+from src.constants.thresholds import SESSION_MIN_DAYS_BEFORE_EXAM as MIN_DAYS_BEFORE_EXAM, SESSION_MAX_DAYS_BEFORE_EXAM as MAX_DAYS_BEFORE_EXAM
 
 
 def get_sessions_for_exam_date(
@@ -124,7 +118,7 @@ def get_sessions_for_exam_date(
                 lieu_name = str(lieu)
 
             # Garder uniquement les sessions VISIO Zoom VTC
-            if 'VISIO' in lieu_name.upper() and 'VTC' in lieu_name.upper():
+            if is_uber_visio_session(lieu_name):
                 uber_sessions.append(session)
                 logger.debug(f"  Session Uber: {session.get('Name')} - Lieu: {lieu_name}")
             else:
@@ -894,7 +888,7 @@ def match_sessions_by_date_range(
     for s in all_sessions:
         lieu = s.get('Lieu_de_formation', {})
         lieu_name = lieu.get('name', '') if isinstance(lieu, dict) else str(lieu)
-        if 'visio' in lieu_name.lower() or 'zoom' in lieu_name.lower():
+        if is_uber_visio_session(lieu_name):
             visio_sessions.append(s)
 
     logger.info(f"  {len(visio_sessions)} session(s) VISIO après filtrage lieu")

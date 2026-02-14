@@ -1,0 +1,253 @@
+# Business keywords — single source of truth
+# Loaded at startup by src.constants.keywords
+
+annulation_markers:
+  - "non remboursable"
+  - "non-remboursable"
+  - "plus de 700"
+
+cma_markers:
+  - "241"
+  - "frais d'inscription à la cma"
+  - "frais cma"
+
+annulation_keywords:
+  - annuler
+  - annulation
+  - "résilier"
+  - "résiliation"
+  - remboursement
+  - rembourser
+  - "remboursé"
+  - "rétractation"
+  - retractation
+  - "rétracter"
+  - "arrêter"
+  - abandonner
+  - "désinscrire"
+
+spam_keywords:
+  - viagra
+  - casino
+  - lottery
+  - prince nigerian
+  - bitcoin gratuit
+
+cma_email_domains:
+  - "@cma-"
+  - "@cmar-"
+  - "@cm-"
+  - "@cma."
+
+reply_markers:
+  - " a écrit :"
+  - " a écrit:"
+  - "-----message"
+  - "---------- forwarded"
+  - "from:"
+  - "de : "
+
+batch_exclusion:
+  - "plusieurs dossiers"
+  - "tableau ci-dessous"
+  - "liste des candidats"
+
+salesiq_markers:
+  - "informations sur le visiteur"
+  - "informations sur le visiteurmasquer"
+
+non_uber_registration:
+  # CPF / Compte Formation
+  - cpf
+  - compte cpf
+  - mon compte cpf
+  - compte formation
+  - mon compte formation
+  - moncompteformation
+  # France Travail / KAIROS
+  - france travail
+  - francetravail
+  - pole emploi
+  - "pôle emploi"
+  - kairos
+  - financement kairos
+  - financement france travail
+  - conseiller france travail
+  - mon conseiller
+  # Financement personnel / Tarif complet
+  - "720€"
+  - "720 €"
+  - 720 euros
+  - tarif complet
+  - plein tarif
+  - financement personnel
+  - "payer moi-même"
+  - "payer moi même"
+  - payer de ma poche
+  - "à mes frais"
+  - a mes frais
+  - "paiement échelonné"
+  - paiement en plusieurs fois
+  # Devis / Facture
+  - devis
+  - facture pro forma
+  - proforma
+  # Autres financements
+  - opco
+  - fafcea
+  - agefice
+  - fifpl
+  - fif pl
+  - fonds de formation
+  - prise en charge
+
+duplicate_markers:
+  - "un seul passage"
+  - "ne pouvons pas procéder à une nouvelle inscription"
+  - "déjà bénéficié de l'offre"
+  - "offre uber à 20"
+  - "offre à 20€"
+  - "l'offre uber"
+
+uber_converted:
+  # Étape du parcours Uber
+  - "test de sélection"
+  - "test de selection"
+  - "test d'entrée"
+  - "test d'entree"
+  # Référence directe à l'offre
+  - offre uber
+  - formation uber
+  - "offre à 20"
+  - "offre a 20"
+  # Format spécifique formation Uber
+  - visio 40h
+  - 40h
+  - 40 heures
+  - formation 40h
+  # Mention Uber dans contexte DOC
+  - uber
+
+info_request:
+  # CPF / Compte Formation
+  - cpf
+  - compte cpf
+  - mon compte cpf
+  - compte formation
+  - mon compte formation
+  - formation cpf
+  # Demandes d'information générales
+  - renseignement
+  - renseignements
+  - information sur
+  - informations sur
+  - je souhaite savoir
+  - je voulais savoir
+  - "serait-il possible"
+  - "est-il possible"
+  - "comment s'inscrire"
+  - "comment m'inscrire"
+  - tarif
+  - prix
+  - "coût"
+  - cout
+  - "disponibilité"
+  - disponibilites
+
+out_of_scope:
+  # Formations CACES / Logistique (pas VTC)
+  - caces
+  - nacelle
+  - cariste
+  - "chariot élévateur"
+  - chariot elevateur
+  - engin de chantier
+  - grue
+  - magasinier
+  - "préparateur de commandes"
+  # Permis poids lourd / Transport marchandises
+  - permis poids lourd
+  - poids lourd
+  - permis c
+  - permis d
+  - permis ec
+  - fimo
+  - fco
+  - transport de marchandises
+  - conducteur routier
+  # Formations réglementaires / Sécurité
+  - "habilitation électrique"
+  - habilitation electrique
+  - "habilitations électriques"
+  - sst
+  - sauveteur secouriste
+  - secouriste du travail
+  - travail en hauteur
+  - "échafaudage"
+  - echafaudage
+  - amiante
+  - ss3
+  - ss4
+  - aipr
+  - "autorisation d'intervention"
+  # Prospection commerciale / Pub / Recrutement
+  - devis pour
+  - partenariat
+  - "collaboration commerciale"
+  - offre commerciale
+  - proposition commerciale
+  - "offre d'emploi"
+  - "opportunité"
+  - opportunite
+  - "poste à pourvoir"
+  - recrutement
+  - candidature
+  # Erreur de destinataire évidente
+  - mauvais destinataire
+  - erreur de mail
+  - pas pour vous
+
+uber_keywords:
+  - "20€"
+  - "20 €"
+  - 20 euros
+  - offre uber
+  - "offre à 20"
+  - "offre a 20"
+  - "formation à 20"
+  - "formation a 20"
+  - "vtc à 20"
+  - "vtc a 20"
+
+skip_patterns:
+  - "a évalué la réponse"
+  - "a evalué la reponse"
+  - lisez mon mail
+  - lire mon mail
+  - voir mon message
+  - "mon précédent mail"
+  - "mon precedent mail"
+
+logo_signature_patterns:
+  - logo
+  - signature
+  - image00
+  - banner
+  - icon
+  - footer
+  - header
+
+document_keywords:
+  - document
+  - "pièce"
+  - piece
+  - justificatif
+  - passeport
+  - permis
+  - "identité"
+  - identite
+  - domicile
+  - fournir
+  - attestation
+  - "hébergement"
+  - hebergement

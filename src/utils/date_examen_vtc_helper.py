@@ -26,6 +26,10 @@ from datetime import datetime, date
 from typing import Dict, Optional, List, Any
 
 from src.utils.date_utils import parse_date_flexible
+from src.constants.evalbox import VALIDATED, BLOCKING_RESCHEDULE, READY_TO_PAY
+from src.constants.thresholds import (
+    FORCE_MAJEURE_DEADLINE_DAYS, EXAM_IMMINENT_DAYS, CONVOCATION_DAYS_BEFORE_EXAM,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -712,11 +716,7 @@ def analyze_exam_date_situation(
     # ================================================================
     # Statuts où on NE PEUT PAS changer la date (déjà validé par CMA)
     # Pour tous les autres statuts, si la clôture est passée, on redirige vers la prochaine date
-    BLOCKED_STATUSES_FOR_RESCHEDULE = [
-        'VALIDE CMA',  # Déjà validé par la CMA, trop tard
-        'Convoc CMA reçue',  # Convocation reçue, trop tard
-        'Refusé CMA',  # Géré par CAS 3 séparément
-    ]
+    BLOCKED_STATUSES_FOR_RESCHEDULE = BLOCKING_RESCHEDULE
 
     date_cloture_is_past = is_date_in_past(result['date_cloture']) if result.get('date_cloture') else False
 
@@ -866,10 +866,8 @@ def analyze_exam_date_situation(
     if date_is_past:
         # Statuts validés = dossier vraiment validé par la CMA (candidat a pu passer l'examen)
         # ATTENTION: "Dossier Synchronisé" = en instruction, PAS validé !
-        VALIDATED_STATUSES = ['VALIDE CMA', 'Convoc CMA reçue']
-
         # CAS 7: Date passée + dossier VALIDÉ (examen probablement passé)
-        if evalbox_status in VALIDATED_STATUSES:
+        if evalbox_status in VALIDATED:
             result['case'] = 7
             result['case_description'] = "Date passée + dossier validé - Examen probablement passé"
 
@@ -882,7 +880,7 @@ def analyze_exam_date_situation(
                     days_since_exam = (today - date_obj).days
                     result['days_since_exam'] = days_since_exam
                     # Force majeure possible uniquement si < 14 jours après l'examen
-                    result['force_majeure_possible'] = days_since_exam <= 14
+                    result['force_majeure_possible'] = days_since_exam <= FORCE_MAJEURE_DEADLINE_DAYS
                     logger.info(f"  📅 Jours depuis l'examen: {days_since_exam} → force majeure {'possible' if result['force_majeure_possible'] else 'NON possible (> 14 jours)'}")
                 except Exception as e:
                     logger.warning(f"  ⚠️ Erreur calcul jours depuis examen: {e}")
@@ -966,7 +964,7 @@ def analyze_exam_date_situation(
             # Si examen dans ≤ 7 jours sans convocation → candidat sera décalé
             # Récupérer la prochaine date d'examen disponible
             next_exam_date = None
-            if days_until_exam is not None and days_until_exam <= 7:
+            if days_until_exam is not None and days_until_exam <= EXAM_IMMINENT_DAYS:
                 if crm_client:
                     if departement:
                         next_dates = get_next_exam_dates(crm_client, departement, limit=2)
@@ -1020,7 +1018,7 @@ def analyze_exam_date_situation(
             return result
 
         # CAS 10: Prêt à payer - Paiement en cours, instruction CMA à venir
-        if evalbox_status in ['Pret a payer', 'Pret a payer par cheque']:
+        if evalbox_status in READY_TO_PAY:
             result['case'] = 10
             result['case_description'] = "Prêt à payer - Paiement en cours, surveiller emails pour instruction CMA"
             result['should_include_in_response'] = True
@@ -1082,7 +1080,7 @@ def classify_engagement_level(
     evalbox = (evalbox_status or '').strip()
 
     # Level 4: Validé par la CMA
-    if evalbox in ['VALIDE CMA', 'Convoc CMA reçue']:
+    if evalbox in VALIDATED:
         return {
             'level': 4,
             'can_reposition': False,
@@ -1406,7 +1404,7 @@ def generate_valide_cma_message(date_examen_str: str, next_exam_date: Optional[D
     date_text = f" du {date_formatted}" if date_formatted else ""
 
     # CAS CRITIQUE: Examen dans ≤ 7 jours = report automatique par la CMA
-    if days_until_exam is not None and days_until_exam <= 7:
+    if days_until_exam is not None and days_until_exam <= EXAM_IMMINENT_DAYS:
         # Formater la prochaine date d'examen
         next_date_formatted = ""
         if next_exam_date:
@@ -1435,7 +1433,7 @@ Vous recevrez votre convocation officielle environ 7 à 10 jours avant cette nou
 En attendant, nous vous conseillons de continuer à bien préparer votre examen. N'hésitez pas à nous contacter si vous avez des questions."""
 
     # Examen entre 7 et 10 jours - convocation devrait être arrivée
-    if days_until_exam is not None and days_until_exam <= 10:
+    if days_until_exam is not None and days_until_exam <= CONVOCATION_DAYS_BEFORE_EXAM:
         return f"""Bonne nouvelle ! Votre dossier a été validé par la CMA pour l'examen{date_text}.
 
 **Concernant votre convocation :**
@@ -1691,50 +1689,17 @@ Votre examen est prévu pour le{date_examen_text}. Nous restons à votre disposi
 # FILTRAGE INTELLIGENT DES DATES PAR RÉGION
 # =============================================================================
 
-# Mapping département → région (pour toute la France métropolitaine)
-DEPT_TO_REGION = {
-    # Auvergne-Rhône-Alpes
-    '01': 'Auvergne-Rhône-Alpes', '03': 'Auvergne-Rhône-Alpes', '07': 'Auvergne-Rhône-Alpes',
-    '15': 'Auvergne-Rhône-Alpes', '26': 'Auvergne-Rhône-Alpes', '38': 'Auvergne-Rhône-Alpes',
-    '42': 'Auvergne-Rhône-Alpes', '43': 'Auvergne-Rhône-Alpes', '63': 'Auvergne-Rhône-Alpes',
-    '69': 'Auvergne-Rhône-Alpes', '73': 'Auvergne-Rhône-Alpes', '74': 'Auvergne-Rhône-Alpes',
-    # Bourgogne-Franche-Comté
-    '21': 'Bourgogne-Franche-Comté', '25': 'Bourgogne-Franche-Comté', '39': 'Bourgogne-Franche-Comté',
-    '58': 'Bourgogne-Franche-Comté', '70': 'Bourgogne-Franche-Comté', '71': 'Bourgogne-Franche-Comté',
-    '89': 'Bourgogne-Franche-Comté', '90': 'Bourgogne-Franche-Comté',
-    # Bretagne
-    '22': 'Bretagne', '29': 'Bretagne', '35': 'Bretagne', '56': 'Bretagne',
-    # Centre-Val de Loire
-    '18': 'Centre-Val de Loire', '28': 'Centre-Val de Loire', '36': 'Centre-Val de Loire',
-    '37': 'Centre-Val de Loire', '41': 'Centre-Val de Loire', '45': 'Centre-Val de Loire',
-    # Grand Est
-    '08': 'Grand Est', '10': 'Grand Est', '51': 'Grand Est', '52': 'Grand Est',
-    '54': 'Grand Est', '55': 'Grand Est', '57': 'Grand Est', '67': 'Grand Est',
-    '68': 'Grand Est', '88': 'Grand Est',
-    # Hauts-de-France
-    '02': 'Hauts-de-France', '59': 'Hauts-de-France', '60': 'Hauts-de-France',
-    '62': 'Hauts-de-France', '80': 'Hauts-de-France',
-    # Île-de-France
-    '75': 'Île-de-France', '77': 'Île-de-France', '78': 'Île-de-France',
-    '91': 'Île-de-France', '92': 'Île-de-France', '93': 'Île-de-France',
-    '94': 'Île-de-France', '95': 'Île-de-France',
-    # Normandie
-    '14': 'Normandie', '27': 'Normandie', '50': 'Normandie', '61': 'Normandie', '76': 'Normandie',
-    # Nouvelle-Aquitaine
-    '16': 'Nouvelle-Aquitaine', '17': 'Nouvelle-Aquitaine', '19': 'Nouvelle-Aquitaine',
-    '23': 'Nouvelle-Aquitaine', '24': 'Nouvelle-Aquitaine', '33': 'Nouvelle-Aquitaine',
-    '40': 'Nouvelle-Aquitaine', '47': 'Nouvelle-Aquitaine', '64': 'Nouvelle-Aquitaine',
-    '79': 'Nouvelle-Aquitaine', '86': 'Nouvelle-Aquitaine', '87': 'Nouvelle-Aquitaine',
-    # Occitanie
-    '09': 'Occitanie', '11': 'Occitanie', '12': 'Occitanie', '30': 'Occitanie',
-    '31': 'Occitanie', '32': 'Occitanie', '34': 'Occitanie', '46': 'Occitanie',
-    '48': 'Occitanie', '65': 'Occitanie', '66': 'Occitanie', '81': 'Occitanie', '82': 'Occitanie',
-    # Pays de la Loire
-    '44': 'Pays de la Loire', '49': 'Pays de la Loire', '53': 'Pays de la Loire',
-    '72': 'Pays de la Loire', '85': 'Pays de la Loire',
-    # PACA
-    '04': 'PACA', '05': 'PACA', '06': 'PACA', '13': 'PACA', '83': 'PACA', '84': 'PACA',
-}
+# Geography mappings loaded from data/geography.json
+import json as _json
+from pathlib import Path as _Path
+
+_GEOGRAPHY_FILE = _Path(__file__).parent.parent.parent / 'data' / 'geography.json'
+with open(_GEOGRAPHY_FILE, 'r', encoding='utf-8') as _f:
+    _geo = _json.load(_f)
+
+DEPT_TO_REGION = _geo['dept_to_region']
+CITY_TO_REGION = _geo['city_to_region']
+REGION_ALIASES = _geo['region_aliases']
 
 # Mapping inverse : région → liste de départements
 REGION_TO_DEPTS = {}
@@ -1743,83 +1708,7 @@ for dept, region in DEPT_TO_REGION.items():
         REGION_TO_DEPTS[region] = []
     REGION_TO_DEPTS[region].append(dept)
 
-# Mapping villes principales → région (pour détection dans le texte)
-CITY_TO_REGION = {
-    # Pays de la Loire
-    'nantes': 'Pays de la Loire', 'angers': 'Pays de la Loire', 'le mans': 'Pays de la Loire',
-    'laval': 'Pays de la Loire', 'la roche-sur-yon': 'Pays de la Loire', 'saint-nazaire': 'Pays de la Loire',
-    # Île-de-France
-    'paris': 'Île-de-France', 'versailles': 'Île-de-France', 'boulogne': 'Île-de-France',
-    'montreuil': 'Île-de-France', 'saint-denis': 'Île-de-France', 'argenteuil': 'Île-de-France',
-    'creteil': 'Île-de-France', 'créteil': 'Île-de-France', 'bobigny': 'Île-de-France',
-    # PACA
-    'marseille': 'PACA', 'nice': 'PACA', 'toulon': 'PACA', 'aix-en-provence': 'PACA',
-    'avignon': 'PACA', 'cannes': 'PACA', 'antibes': 'PACA',
-    # Auvergne-Rhône-Alpes
-    'lyon': 'Auvergne-Rhône-Alpes', 'grenoble': 'Auvergne-Rhône-Alpes', 'saint-etienne': 'Auvergne-Rhône-Alpes',
-    'clermont-ferrand': 'Auvergne-Rhône-Alpes', 'annecy': 'Auvergne-Rhône-Alpes', 'valence': 'Auvergne-Rhône-Alpes',
-    # Occitanie
-    'toulouse': 'Occitanie', 'montpellier': 'Occitanie', 'nîmes': 'Occitanie', 'nimes': 'Occitanie',
-    'perpignan': 'Occitanie', 'béziers': 'Occitanie', 'beziers': 'Occitanie',
-    # Nouvelle-Aquitaine
-    'bordeaux': 'Nouvelle-Aquitaine', 'limoges': 'Nouvelle-Aquitaine', 'poitiers': 'Nouvelle-Aquitaine',
-    'pau': 'Nouvelle-Aquitaine', 'la rochelle': 'Nouvelle-Aquitaine', 'angoulême': 'Nouvelle-Aquitaine',
-    # Grand Est
-    'strasbourg': 'Grand Est', 'reims': 'Grand Est', 'metz': 'Grand Est', 'nancy': 'Grand Est',
-    'mulhouse': 'Grand Est', 'colmar': 'Grand Est', 'troyes': 'Grand Est',
-    # Hauts-de-France
-    'lille': 'Hauts-de-France', 'amiens': 'Hauts-de-France', 'roubaix': 'Hauts-de-France',
-    'tourcoing': 'Hauts-de-France', 'dunkerque': 'Hauts-de-France',
-    # Bretagne
-    'rennes': 'Bretagne', 'brest': 'Bretagne', 'quimper': 'Bretagne', 'lorient': 'Bretagne',
-    'vannes': 'Bretagne', 'saint-brieuc': 'Bretagne',
-    # Normandie
-    'rouen': 'Normandie', 'le havre': 'Normandie', 'caen': 'Normandie', 'cherbourg': 'Normandie',
-    # Centre-Val de Loire
-    'orléans': 'Centre-Val de Loire', 'orleans': 'Centre-Val de Loire', 'tours': 'Centre-Val de Loire',
-    'bourges': 'Centre-Val de Loire', 'chartres': 'Centre-Val de Loire',
-    # Bourgogne-Franche-Comté
-    'dijon': 'Bourgogne-Franche-Comté', 'besançon': 'Bourgogne-Franche-Comté', 'besancon': 'Bourgogne-Franche-Comté',
-    'belfort': 'Bourgogne-Franche-Comté', 'auxerre': 'Bourgogne-Franche-Comté',
-}
-
-# Alias de régions (pour détection dans le texte)
-REGION_ALIASES = {
-    'pays de la loire': 'Pays de la Loire',
-    'pays-de-la-loire': 'Pays de la Loire',
-    'pdl': 'Pays de la Loire',
-    'ile de france': 'Île-de-France',
-    'ile-de-france': 'Île-de-France',
-    'idf': 'Île-de-France',
-    'région parisienne': 'Île-de-France',
-    'region parisienne': 'Île-de-France',
-    'paca': 'PACA',
-    'provence': 'PACA',
-    'côte d\'azur': 'PACA',
-    'cote d\'azur': 'PACA',
-    'rhône-alpes': 'Auvergne-Rhône-Alpes',
-    'rhone-alpes': 'Auvergne-Rhône-Alpes',
-    'auvergne': 'Auvergne-Rhône-Alpes',
-    'grand est': 'Grand Est',
-    'alsace': 'Grand Est',
-    'lorraine': 'Grand Est',
-    'champagne': 'Grand Est',
-    'occitanie': 'Occitanie',
-    'languedoc': 'Occitanie',
-    'midi-pyrénées': 'Occitanie',
-    'midi-pyrenees': 'Occitanie',
-    'nouvelle-aquitaine': 'Nouvelle-Aquitaine',
-    'aquitaine': 'Nouvelle-Aquitaine',
-    'bretagne': 'Bretagne',
-    'normandie': 'Normandie',
-    'hauts-de-france': 'Hauts-de-France',
-    'nord': 'Hauts-de-France',
-    'picardie': 'Hauts-de-France',
-    'centre': 'Centre-Val de Loire',
-    'bourgogne': 'Bourgogne-Franche-Comté',
-    'franche-comté': 'Bourgogne-Franche-Comté',
-    'franche-comte': 'Bourgogne-Franche-Comté',
-}
+del _geo, _f
 
 
 def detect_candidate_region(

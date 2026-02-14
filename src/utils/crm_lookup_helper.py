@@ -14,6 +14,8 @@ MODULES DE RÉFÉRENCE:
 from typing import Dict, Any, Optional
 import logging
 
+from src.constants.sessions import SESSION_TYPE_JOUR, SESSION_TYPE_SOIR
+
 logger = logging.getLogger(__name__)
 
 # Mapping des champs lookup vers leurs modules CRM
@@ -140,9 +142,9 @@ def enrich_deal_lookups(
         session_type = session_record.get('session_type')
         if not session_type and result['session_name']:
             name_lower = result['session_name'].lower()
-            if 'cds' in name_lower or 'cours du soir' in name_lower:
+            if SESSION_TYPE_SOIR in name_lower or 'cours du soir' in name_lower:
                 session_type = 'soir'
-            elif 'cdj' in name_lower or 'cours du jour' in name_lower:
+            elif SESSION_TYPE_JOUR in name_lower or 'cours du jour' in name_lower:
                 session_type = 'jour'
         result['session_type'] = session_type
         logger.info(f"  📚 Session: {result['session_name']} ({result['session_type']}) du {result['session_date_debut']} au {result['session_date_fin']}")

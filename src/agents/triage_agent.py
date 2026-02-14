@@ -25,6 +25,7 @@ project_root = Path(__file__).parent.parent.parent
 load_dotenv(project_root / ".env")
 
 from .base_agent import BaseAgent
+from src.constants.models import MODEL_TRIAGE
 
 # Import BusinessRules pour la détection d'envoi de documents
 try:
@@ -800,7 +801,7 @@ EXEMPLE PLAINTE - Message: "J'avais clairement indiqué mon choix pour une forma
 
             client = Anthropic()
             response = client.messages.create(
-                model="claude-sonnet-4-20250514",  # Modèle précis pour ne pas rater les intentions
+                model=MODEL_TRIAGE,  # Modèle précis pour ne pas rater les intentions
                 max_tokens=800,  # Sonnet peut être plus verbeux
                 system=self.SYSTEM_PROMPT,
                 messages=[

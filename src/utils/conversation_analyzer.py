@@ -24,6 +24,7 @@ from typing import Dict, Any, List, Optional
 import anthropic
 
 from src.utils.text_utils import clean_html_content
+from src.constants.models import MODEL_CONVERSATION
 
 logger = logging.getLogger(__name__)
 
@@ -394,7 +395,7 @@ Réponds en JSON avec cette structure exacte :
 }}"""
 
         response = client.messages.create(
-            model="claude-sonnet-4-5-20250929",
+            model=MODEL_CONVERSATION,
             max_tokens=600,
             system=ANALYZER_SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_prompt}],

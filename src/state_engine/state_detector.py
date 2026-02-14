@@ -21,6 +21,9 @@ from typing import Dict, Any, Optional, List, Tuple
 from dataclasses import dataclass, field
 
 from src.utils.training_exam_consistency_helper import detect_session_assignment_error
+from src.constants.thresholds import (
+    EXAM_IMMINENT_DAYS, CONVOCATION_DAYS_BEFORE_EXAM, UBER_VERIFICATION_DELAY_DAYS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -280,8 +283,8 @@ class StateDetector:
                 pass
 
         # Flags temporels pour templates (remplacent les comparateurs Handlebars non supportés)
-        exam_within_7_days = days_until_exam is not None and 0 <= days_until_exam <= 7
-        exam_within_10_days = days_until_exam is not None and 0 <= days_until_exam <= 10
+        exam_within_7_days = days_until_exam is not None and 0 <= days_until_exam <= EXAM_IMMINENT_DAYS
+        exam_within_10_days = days_until_exam is not None and 0 <= days_until_exam <= CONVOCATION_DAYS_BEFORE_EXAM
         examen_pas_encore_passe = days_until_exam is not None and days_until_exam > 0
         examen_imminent = days_until_exam is not None and 0 <= days_until_exam <= 3
 
@@ -580,7 +583,7 @@ class StateDetector:
         try:
             from datetime import timedelta
             dossier_date = datetime.strptime(str(date_dossier)[:10], '%Y-%m-%d').date()
-            verification_date = dossier_date + timedelta(days=4)
+            verification_date = dossier_date + timedelta(days=UBER_VERIFICATION_DELAY_DAYS)
             today = date.today()
 
             if today < verification_date:
@@ -606,7 +609,7 @@ class StateDetector:
         try:
             from datetime import timedelta
             dossier_date = datetime.strptime(str(date_dossier)[:10], '%Y-%m-%d').date()
-            verification_date = dossier_date + timedelta(days=4)
+            verification_date = dossier_date + timedelta(days=UBER_VERIFICATION_DELAY_DAYS)
             today = date.today()
 
             if today < verification_date:

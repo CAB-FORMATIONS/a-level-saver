@@ -52,6 +52,19 @@ from src.utils.crm_lookup_helper import enrich_deal_lookups
 from src.utils.response_humanizer import humanize_response
 from src.utils.intent_parser import IntentParser
 from src.utils.date_filter import DateFilter, apply_final_filter
+from src.constants.models import MODEL_EXTRACTION, MODEL_PERSONALIZATION, MODEL_TRIAGE
+from src.constants.amounts import UBER_OFFER_AMOUNT
+from src.constants.intents import (
+    DATE_CONFIRMATION_INTENTS, DATE_RELATED_INTENTS, NEEDS_NEXT_DATES_INTENTS,
+    SESSION_CHANGE_INTENTS, FULL_RECAP_INTENTS,
+)
+from src.constants.keywords import (
+    ANNULATION_MARKERS, CMA_MARKERS, ANNULATION_KEYWORDS, SPAM_KEYWORDS,
+    CMA_EMAIL_DOMAINS, REPLY_MARKERS, BATCH_EXCLUSION, SALESIQ_MARKERS,
+    NON_UBER_REGISTRATION, DUPLICATE_MARKERS, UBER_CONVERTED, INFO_REQUEST,
+    OUT_OF_SCOPE, UBER_KEYWORDS, SKIP_PATTERNS, LOGO_SIGNATURE_PATTERNS,
+    DOCUMENT_KEYWORDS as DOC_KEYWORDS,
+)
 import anthropic
 
 logger = logging.getLogger(__name__)
@@ -88,7 +101,7 @@ class DOCTicketWorkflow:
         self.state_crm_updater = CRMUpdater(crm_client=self.crm_client)
         # Anthropic client for AI personalization (using Sonnet for best quality)
         self.anthropic_client = anthropic.Anthropic()
-        self.personalization_model = "claude-sonnet-4-5-20250929"
+        self.personalization_model = MODEL_PERSONALIZATION
 
         logger.info("✅ DOCTicketWorkflow initialized (State Engine, shared clients)")
 
@@ -1001,8 +1014,8 @@ Le candidat a un ancien dossier dont les frais CMA (241€) ont déjà été ré
                 candidate_still_wants_annulation = False
                 try:
                     threads = self.desk_client.get_all_threads_with_full_content(ticket_id)
-                    annulation_markers = ['non remboursable', 'non-remboursable', 'plus de 700']
-                    cma_markers = ['241', 'frais d\'inscription à la cma', 'frais cma']
+                    annulation_markers = ANNULATION_MARKERS
+                    cma_markers = CMA_MARKERS
 
                     # 1. Vérifier si on a déjà répondu à une demande d'annulation
                     for thread in threads:
@@ -1017,12 +1030,7 @@ Le candidat a un ancien dossier dont les frais CMA (241€) ont déjà été ré
                     # 2. GARDE-FOU: Vérifier que le dernier message entrant parle
                     # encore d'annulation/remboursement (pas une acceptation)
                     if annulation_already_answered:
-                        annulation_keywords = [
-                            'annuler', 'annulation', 'résilier', 'résiliation',
-                            'remboursement', 'rembourser', 'remboursé',
-                            'rétractation', 'retractation', 'rétracter',
-                            'arrêter', 'abandonner', 'désinscrire',
-                        ]
+                        annulation_keywords = ANNULATION_KEYWORDS
                         last_inbound = next(
                             (t for t in threads if t.get('direction') == 'in'),
                             None
@@ -1063,13 +1071,14 @@ Le candidat a un ancien dossier dont les frais CMA (241€) ont déjà été ré
                             "→ Ticket escaladé en priorité HIGH et assigné à Lamia pour traitement manuel."
                         )
 
-                    # Mettre à jour le ticket: priorité HIGH + assignation Lamia
-                    LAMIA_AGENT_ID = '198709000096599317'
+                    # Mettre à jour le ticket: priorité HIGH + assignation
+                    from config import settings as _cfg
+                    escalation_agent_id = _cfg.escalation_agent_id
                     if auto_update_ticket:
                         try:
                             self.desk_client.update_ticket(ticket_id, {
                                 'priority': 'High',
-                                'assigneeId': LAMIA_AGENT_ID,
+                                'assigneeId': escalation_agent_id,
                             })
                             self.desk_client.add_ticket_comment(
                                 ticket_id,
@@ -1081,7 +1090,7 @@ Le candidat a un ancien dossier dont les frais CMA (241€) ont déjà été ré
                             logger.error(f"  ❌ Erreur mise à jour ticket: {e}")
 
                     result['workflow_stage'] = 'ESCALATED_ANNULATION_INSISTENCE'
-                    result['escalated_to'] = 'Lamia Serbouty'
+                    result['escalated_to'] = _cfg.escalation_agent_name
                     result['cma_payment_at_risk'] = cma_payment_mentioned
                     result['success'] = True
                     return result
@@ -1185,7 +1194,7 @@ Le candidat a un ancien dossier dont les frais CMA (241€) ont déjà été ré
                     if threads_text:
                         client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
                         summary_response = client.messages.create(
-                            model="claude-3-5-haiku-20241022",
+                            model=MODEL_EXTRACTION,
                             max_tokens=300,
                             messages=[{
                                 "role": "user",
@@ -1722,7 +1731,7 @@ La date d'examen dans Zoho CRM est dans le passé. Le workflow a été stoppé p
             # Les deals VTC classiques (Amount != 20€) doivent être transférés
             # vers DOCS CAB après création du draft
             deal_amount = analysis_result.get('deal_data', {}).get('Amount', 0)
-            is_vtc_hors_partenariat = (deal_amount != 0 and deal_amount != 20)
+            is_vtc_hors_partenariat = (deal_amount != 0 and deal_amount != UBER_OFFER_AMOUNT)
 
             if is_vtc_hors_partenariat and result.get('draft_created') and auto_update_ticket:
                 logger.info("\n8️⃣b TRANSFER DOCS CAB - Deal VTC classique (hors partenariat)...")
@@ -1787,15 +1796,7 @@ La date d'examen dans Zoho CRM est dans le passé. Le workflow a été stoppé p
         min_meaningful_length = 80  # Ignore very short messages
 
         # Patterns to skip (feedback, automated, follow-ups asking to read previous)
-        skip_patterns = [
-            "a évalué la réponse",
-            "a evalué la reponse",
-            "lisez mon mail",
-            "lire mon mail",
-            "voir mon message",
-            "mon précédent mail",
-            "mon precedent mail",
-        ]
+        skip_patterns = SKIP_PATTERNS
 
         # Collecter les messages récents du candidat (pour avoir le contexte complet)
         # Ex: candidat envoie "je choisis cours du jour" puis "confirmez les dates svp"
@@ -1862,7 +1863,7 @@ La date d'examen dans Zoho CRM est dans le passé. Le workflow a été stoppé p
         }
 
         # Rule #1: SPAM detection (simple keywords - pas besoin d'IA)
-        spam_keywords = ['viagra', 'casino', 'lottery', 'prince nigerian', 'bitcoin gratuit']
+        spam_keywords = SPAM_KEYWORDS
         combined_content = (subject + ' ' + last_thread_content).lower()
         if any(kw in combined_content for kw in spam_keywords):
             triage_result['action'] = 'SPAM'
@@ -1875,7 +1876,7 @@ La date d'examen dans Zoho CRM est dans le passé. Le workflow a été stoppé p
         # Les CMA envoient des notifications sur l'état des dossiers ExamT3P.
         # On vérifie le FROM du thread le plus récent (pas ticket.email qui peut être
         # un forward client). Si le thread le plus récent est d'un client → pas CMA.
-        cma_email_domains = ['@cma-', '@cmar-', '@cm-', '@cma.']
+        cma_email_domains = CMA_EMAIL_DOMAINS
 
         # Identifier le FROM du thread le plus récent (= premier dans la liste, API newest first)
         most_recent_from = ''
@@ -1895,7 +1896,7 @@ La date d'examen dans Zoho CRM est dans le passé. Le workflow a été stoppé p
             cma_thread = next((_th for _th in threads if _th.get('direction') == 'in' and _th.get('status') != 'DRAFT'), None)
             cleaned_cma_content = get_clean_thread_content(cma_thread).lower() if cma_thread else last_thread_content.lower()
             # Couper au premier marqueur de citation (réponses précédentes)
-            reply_markers = [' a écrit :', ' a écrit:', '-----message', '---------- forwarded', 'from:', 'de : ']
+            reply_markers = REPLY_MARKERS
             for marker in reply_markers:
                 pos = cleaned_cma_content.find(marker)
                 if pos > 50:  # Must be after some real content
@@ -1904,7 +1905,7 @@ La date d'examen dans Zoho CRM est dans le passé. Le workflow a été stoppé p
             cma_combined = (subject + ' ' + cleaned_cma_content).lower()
 
             # Exclusion: emails batch listant PLUSIEURS candidats (pas une notification individuelle)
-            batch_exclusion = ['plusieurs dossiers', 'tableau ci-dessous', 'liste des candidats']
+            batch_exclusion = BATCH_EXCLUSION
             is_batch = any(excl in cma_combined for excl in batch_exclusion)
 
             # Pattern DOSSIER INCOMPLET
@@ -1955,15 +1956,17 @@ La date d'examen dans Zoho CRM est dans le passé. Le workflow a été stoppé p
         detected_intent = triage_result.get('detected_intent', '')
         if detected_intent == 'DEMANDE_SUPPRESSION_DONNEES':
             logger.info("🔒 DEMANDE RGPD DÉTECTÉE → Routage vers Contact + note référent RGPD")
+            from config import settings as _cfg_rgpd
+            rgpd_email = _cfg_rgpd.rgpd_referent_email
             triage_result['action'] = 'ROUTE'
             triage_result['target_department'] = 'Contact'
             triage_result['reason'] = 'Demande RGPD (suppression données) - Transférer au référent RGPD'
-            triage_result['rgpd_referent'] = 'jc@cab-formations.fr'
+            triage_result['rgpd_referent'] = rgpd_email
             # Ajouter une note sur le ticket
             try:
                 self.desk_client.add_ticket_comment(
                     ticket_id,
-                    "⚠️ DEMANDE RGPD - À TRANSFÉRER\n\nCe ticket contient une demande de suppression de données (article 17 RGPD).\n\n👉 Transférer à : jc@cab-formations.fr (Référent RGPD)",
+                    f"⚠️ DEMANDE RGPD - À TRANSFÉRER\n\nCe ticket contient une demande de suppression de données (article 17 RGPD).\n\n👉 Transférer à : {rgpd_email} (Référent RGPD)",
                     is_public=False
                 )
                 logger.info("  ✅ Note RGPD ajoutée sur le ticket")
@@ -1978,31 +1981,13 @@ La date d'examen dans Zoho CRM est dans le passé. Le workflow a été stoppé p
         # on doit router vers Contact SANS appliquer la logique doublon Uber.
         # ================================================================
         # Keywords indiquant une demande d'inscription NON-UBER
-        non_uber_registration_keywords = [
-            # CPF / Compte Formation
-            "cpf", "compte cpf", "mon compte cpf", "compte formation",
-            "mon compte formation", "moncompteformation",
-            # France Travail / KAIROS
-            "france travail", "francetravail", "pole emploi", "pôle emploi",
-            "kairos", "financement kairos", "financement france travail",
-            "conseiller france travail", "mon conseiller",
-            # Financement personnel / Tarif complet
-            "720€", "720 €", "720 euros", "tarif complet", "plein tarif",
-            "financement personnel", "payer moi-même", "payer moi même",
-            "payer de ma poche", "à mes frais", "a mes frais",
-            "paiement échelonné", "paiement en plusieurs fois",
-            # Devis / Facture
-            "devis", "facture pro forma", "proforma",
-            # Autres financements
-            "opco", "fafcea", "agefice", "fifpl", "fif pl",
-            "fonds de formation", "prise en charge",
-        ]
+        non_uber_registration_keywords = NON_UBER_REGISTRATION
 
         # Nettoyer les métadonnées SalesIQ avant le check keywords
         # (les chats SalesIQ incluent "Informations sur le visiteur" suivi de
         # données techniques comme "prise en charge de java" qui causent des faux positifs)
         clean_thread_content = last_thread_content
-        salesiq_markers = ['informations sur le visiteur', 'informations sur le visiteurmasquer']
+        salesiq_markers = SALESIQ_MARKERS
         for marker in salesiq_markers:
             marker_idx = clean_thread_content.lower().find(marker)
             if marker_idx != -1:
@@ -2193,14 +2178,7 @@ La date d'examen dans Zoho CRM est dans le passé. Le workflow a été stoppé p
                 # Vérifier si le doublon a DÉJÀ été communiqué (threads sortants OU contenu cité dans l'entrant)
                 # Si oui, le candidat répond à autre chose → laisser le triage IA gérer
                 duplicate_already_communicated = False
-                duplicate_markers = [
-                    "un seul passage",
-                    "ne pouvons pas procéder à une nouvelle inscription",
-                    "déjà bénéficié de l'offre",
-                    "offre uber à 20",
-                    "offre à 20€",
-                    "l'offre uber",
-                ]
+                duplicate_markers = DUPLICATE_MARKERS
                 for thread in threads:
                     status = thread.get('status', '').upper()
                     direction = thread.get('direction', '')
@@ -2266,16 +2244,7 @@ La date d'examen dans Zoho CRM est dans le passé. Le workflow a été stoppé p
         if linking_result.get('needs_clarification'):
             # Vérifier d'abord si c'est un candidat Uber converti (email différent du CRM)
             # Ces keywords indiquent une connaissance du parcours Uber → pas un prospect random
-            uber_converted_keywords = [
-                # Étape du parcours Uber
-                "test de sélection", "test de selection", "test d'entrée", "test d'entree",
-                # Référence directe à l'offre
-                "offre uber", "formation uber", "offre à 20", "offre a 20",
-                # Format spécifique formation Uber
-                "visio 40h", "40h", "40 heures", "formation 40h",
-                # Mention Uber dans contexte DOC
-                "uber",
-            ]
+            uber_converted_keywords = UBER_CONVERTED
             content_check_uber = (subject + ' ' + last_thread_content).lower()
             is_uber_converted = any(kw in content_check_uber for kw in uber_converted_keywords)
 
@@ -2293,20 +2262,7 @@ La date d'examen dans Zoho CRM est dans le passé. Le workflow a été stoppé p
 
             # Keywords indiquant une demande d'information (pas un candidat existant)
             # Ces personnes doivent être redirigées vers Contact, pas DOC
-            info_request_keywords = [
-                # CPF / Compte Formation
-                "cpf", "compte cpf", "mon compte cpf",
-                "compte formation", "mon compte formation",
-                "formation cpf",
-                # Demandes d'information générales
-                "renseignement", "renseignements",
-                "information sur", "informations sur",
-                "je souhaite savoir", "je voulais savoir",
-                "serait-il possible", "est-il possible",
-                "comment s'inscrire", "comment m'inscrire",
-                "tarif", "prix", "coût", "cout",
-                "disponibilité", "disponibilites",
-            ]
+            info_request_keywords = INFO_REQUEST
 
             # Vérifier si le contenu indique une demande d'info
             # Utiliser clean_thread_content (sans métadonnées SalesIQ) pour éviter les faux positifs
@@ -2347,29 +2303,7 @@ La date d'examen dans Zoho CRM est dans le passé. Le workflow a été stoppé p
             # Rule #2.6b: DEMANDE HORS PÉRIMÈTRE VTC - Router vers Contact
             # Si le contenu indique clairement une demande sans rapport avec la formation VTC,
             # ne pas demander de clarification (inutile) - router vers Contact pour traitement manuel
-            out_of_scope_keywords = [
-                # Formations CACES / Logistique (pas VTC)
-                "caces", "nacelle", "cariste", "chariot élévateur", "chariot elevateur",
-                "engin de chantier", "grue", "magasinier", "préparateur de commandes",
-                # Permis poids lourd / Transport marchandises
-                "permis poids lourd", "poids lourd", "permis c", "permis d", "permis ec",
-                "fimo", "fco", "transport de marchandises", "conducteur routier",
-                # Formations réglementaires / Sécurité
-                "habilitation électrique", "habilitation electrique", "habilitations électriques",
-                "sst", "sauveteur secouriste", "secouriste du travail",
-                "travail en hauteur", "échafaudage", "echafaudage",
-                "amiante", "ss3", "ss4",
-                "aipr", "autorisation d'intervention",
-                # Taxi: retiré - les candidats VTC/Uber mentionnent souvent "taxi" (erreur inscription, examen taxi/vtc)
-                # Le mot "taxi" seul ne justifie pas un routage vers Contact
-                # Prospection commerciale / Pub / Recrutement
-                "devis pour", "partenariat", "collaboration commerciale",
-                "offre commerciale", "proposition commerciale",
-                "offre d'emploi", "opportunité", "opportunite", "poste à pourvoir",
-                "recrutement", "candidature",
-                # Erreur de destinataire évidente
-                "mauvais destinataire", "erreur de mail", "pas pour vous",
-            ]
+            out_of_scope_keywords = OUT_OF_SCOPE
 
             is_out_of_scope = any(kw in content_to_check for kw in out_of_scope_keywords)
 
@@ -2495,7 +2429,7 @@ La date d'examen dans Zoho CRM est dans le passé. Le workflow a été stoppé p
                 if threads_text:
                     client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
                     summary_response = client.messages.create(
-                        model="claude-3-5-haiku-20241022",
+                        model=MODEL_EXTRACTION,
                         max_tokens=200,
                         messages=[{
                             "role": "user",
@@ -2520,7 +2454,7 @@ RÉSUMÉ (2-3 phrases):"""
         real_attachments = []
 
         # Patterns pour identifier les logos/signatures à ignorer
-        logo_signature_patterns = ['logo', 'signature', 'image00', 'banner', 'icon', 'footer', 'header']
+        logo_signature_patterns = LOGO_SIGNATURE_PATTERNS
 
         if threads:
             for t in reversed(threads):
@@ -2557,7 +2491,7 @@ RÉSUMÉ (2-3 phrases):"""
 
         subject_lower = subject.lower() if subject else ''
         content_lower = last_thread_content.lower() if last_thread_content else ''
-        document_keywords = ['document', 'pièce', 'piece', 'justificatif', 'passeport', 'permis', 'identité', 'identite', 'domicile', 'fournir', 'attestation', 'hébergement', 'hebergement']
+        document_keywords = DOC_KEYWORDS
         subject_has_doc_keyword = any(kw in subject_lower for kw in document_keywords)
         content_has_doc_keyword = any(kw in content_lower for kw in document_keywords)
 
@@ -2636,7 +2570,7 @@ RÉSUMÉ (2-3 phrases):"""
         if (ai_triage['action'] == 'ROUTE'
             and ai_triage['target_department'] == 'Contact'
             and selected_deal
-            and selected_deal.get('Amount') == 20):
+            and selected_deal.get('Amount') == UBER_OFFER_AMOUNT):
             content_lower = (last_thread_content or '').lower() + ' ' + (subject or '').lower()
             if 'taxi' in content_lower:
                 logger.info("  🚕 Candidat Uber 20€ + mention 'taxi' → Override IA: rester en DOC (erreur inscription interne)")
@@ -2753,10 +2687,7 @@ RÉSUMÉ (2-3 phrases):"""
                                   all_deals, selected_deal):
         """Classifie le type de contexte de routing pour choisir le bon template de note."""
         content_lower = ((message_content or '') + ' ' + (subject or '')).lower()
-        uber_keywords = [
-            '20€', '20 €', '20 euros', 'offre uber', 'offre à 20', 'offre a 20',
-            'formation à 20', 'formation a 20', 'vtc à 20', 'vtc a 20',
-        ]
+        uber_keywords = UBER_KEYWORDS
 
         if routing_method == 'business_rules_routing':
             if any(kw in content_lower for kw in uber_keywords):
@@ -3466,7 +3397,7 @@ L'équipe CAB Formations"""
         # Pour les deals classiques (1299€, etc.), pas besoin de Date_Dossier_re_u
         dossier_not_received_blocks_dates = False
         deal_amount = deal_data.get('Amount', 0)
-        is_uber_20_deal = (deal_amount == 20)
+        is_uber_20_deal = (deal_amount == UBER_OFFER_AMOUNT)
 
         if is_uber_20_deal:
             date_dossier_recu = deal_data.get('Date_Dossier_re_u')
@@ -3667,7 +3598,7 @@ L'équipe CAB Formations"""
             confirmed_new_exam_date = intent_for_date_check.confirmed_new_exam_date
             detected_intent_for_date = triage_result.get('detected_intent', '')
 
-            if confirmed_new_exam_date and detected_intent_for_date in ['CONFIRMATION_DATE_EXAMEN', 'REPORT_DATE']:
+            if confirmed_new_exam_date and detected_intent_for_date in DATE_CONFIRMATION_INTENTS:
                 logger.info(f"  📅 Date d'examen confirmée par le candidat: {confirmed_new_exam_date}")
 
                 # Trouver le département du candidat
@@ -3703,7 +3634,7 @@ L'équipe CAB Formations"""
             # ENRICHISSEMENT: Si intention date-related avec mois/lieu spécifiques
             # ================================================================
             # Inclut REPORT_DATE, DEMANDE_DATES_FUTURES, DEMANDE_AUTRES_DATES
-            DATE_RELATED_INTENTS = ['REPORT_DATE', 'DEMANDE_DATES_FUTURES', 'DEMANDE_AUTRES_DATES', 'DEMANDE_AUTRES_DEPARTEMENTS', 'CONFIRMATION_DATE_EXAMEN']
+            # DATE_RELATED_INTENTS imported from src.constants.intents
             if triage_result.get('primary_intent') in DATE_RELATED_INTENTS:
                 intent = IntentParser(triage_result)
                 requested_month = intent.requested_month
@@ -4060,7 +3991,7 @@ L'équipe CAB Formations"""
                 # CAS normal: Candidat confirme sa session → utiliser SA date assignée
                 exam_dates_for_session = [date_examen_info]
                 logger.info(f"  📚 CONFIRMATION_SESSION + date assignée ({date_examen_info.get('Date_Examen')}) → sessions pour cette date uniquement")
-        elif detected_intent in ['REPORT_DATE', 'CONFIRMATION_DATE_EXAMEN']:
+        elif detected_intent in DATE_CONFIRMATION_INTENTS:
             # CAS 2: REPORT_DATE ou CONFIRMATION_DATE_EXAMEN
             current_date = date_examen_info.get('Date_Examen') if date_examen_info else None
             current_dept = date_examen_vtc_result.get('current_departement') or date_examen_vtc_result.get('date_examen_info', {}).get('Departement')
@@ -4272,7 +4203,7 @@ L'équipe CAB Formations"""
                 )
                 # Pour changement de session, charger TOUS les types (jour + soir) pour la cascade d'alternatives
                 session_pref_for_loading = None if is_session_change_request else triage_session_pref
-                _is_explicit_change = (detected_intent in ['CONFIRMATION_SESSION', 'DEMANDE_CHANGEMENT_SESSION'] or is_session_change_request)
+                _is_explicit_change = (detected_intent in SESSION_CHANGE_INTENTS or is_session_change_request)
                 session_data = analyze_session_situation(
                     deal_data=deal_data,
                     exam_dates=exam_dates_for_session,
@@ -5926,7 +5857,7 @@ L'équipe CAB Formations"""
         # (CAS 7, 9 et autres cas ne chargent pas next_dates par défaut)
         detected_intent = detected_state.context_data.get('detected_intent', '')
         next_dates = detected_state.context_data.get('next_dates', [])
-        needs_next_dates = detected_intent in ['REPORT_DATE', 'DEMANDE_REINSCRIPTION', 'DEMANDE_ANNULATION']
+        needs_next_dates = detected_intent in NEEDS_NEXT_DATES_INTENTS
         if needs_next_dates and not next_dates:
             from src.utils.date_examen_vtc_helper import get_next_exam_dates
             departement = detected_state.context_data.get('departement')
@@ -6160,7 +6091,7 @@ L'équipe CAB Formations"""
         # ENVOIE_IDENTIFIANTS / QUESTION_GENERALE: force full mode
         # Le candidat envoie ses accès ou pose une question → réponse complète, pas brief
         detected_intent_for_mode = triage_result.get('primary_intent') or triage_result.get('detected_intent', '')
-        if detected_intent_for_mode in ('QUESTION_GENERALE', 'ENVOIE_IDENTIFIANTS') and v3_response_mode != 'full':
+        if detected_intent_for_mode in FULL_RECAP_INTENTS and v3_response_mode != 'full':
             logger.info(f"  🔓 {detected_intent_for_mode}: override response_mode {v3_response_mode} → full (point complet)")
             v3_response_mode = 'full'
 
@@ -7040,7 +6971,7 @@ Réponds UNIQUEMENT avec le format demandé, rien d'autre."""
         try:
             client = anthropic.Anthropic()
             response = client.messages.create(
-                model="claude-sonnet-4-20250514",
+                model=MODEL_TRIAGE,
                 max_tokens=400,
                 messages=[{"role": "user", "content": prompt}]
             )
