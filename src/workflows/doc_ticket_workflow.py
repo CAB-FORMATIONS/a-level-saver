@@ -5809,7 +5809,6 @@ L'équipe CAB Formations"""
                 if report_commit and report_commit.value:
                     detected_state.context_data['tm_report_target_date'] = report_commit.value
             if conv_state.human_is_handling:
-                detected_state.context_data['v3_human_handling'] = True
                 logger.info("  👤 V3: human_is_handling=True (advisory)")
 
         # RECALCULATE cloture_passed et can_modify_exam_date avec date_cloture enrichie

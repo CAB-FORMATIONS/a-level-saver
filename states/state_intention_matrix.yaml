@@ -1546,7 +1546,6 @@ matrix:
     context_flags:
       intention_report_date: true
       evalbox_refus_cma: true
-      report_deja_effectue: true
 
   # --- DOSSIER_SYNCHRONIZED × DEMANDE_CONVOCATION ---
   "DOSSIER_SYNCHRONIZED:DEMANDE_CONVOCATION":
