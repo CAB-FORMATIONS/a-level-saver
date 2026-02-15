@@ -16,6 +16,7 @@ from datetime import datetime, date
 
 from .state_detector import DetectedState
 from src.constants.amounts import UBER_OFFER_AMOUNT, CMA_EXAM_FEE, CMA_DOSSIER_FEE
+from src.utils.date_utils import parse_date_flexible
 
 logger = logging.getLogger(__name__)
 
@@ -586,7 +587,4 @@ class ResponseValidator:
 
     def _parse_date(self, date_str: str) -> Optional[date]:
         """Parse une date en objet date."""
-        normalized = self._normalize_date(date_str)
-        if normalized:
-            return datetime.strptime(normalized, '%Y-%m-%d').date()
-        return None
+        return parse_date_flexible(date_str, "response_date")

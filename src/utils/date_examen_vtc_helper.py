@@ -110,23 +110,17 @@ def get_next_exam_dates(
         for session in all_sessions:
             date_cloture_str = session.get('Date_Cloture_Inscription')
             if date_cloture_str:
-                try:
-                    # Parser la date (format ISO ou datetime)
-                    if 'T' in str(date_cloture_str):
-                        date_cloture = datetime.fromisoformat(date_cloture_str.replace('Z', '+00:00'))
-                        date_cloture = date_cloture.replace(tzinfo=None).date()
-                    else:
-                        date_cloture = datetime.strptime(str(date_cloture_str), "%Y-%m-%d").date()
-
-                    # Calculer le nombre de jours jusqu'à la clôture
-                    days_until_cloture = (date_cloture - today_date).days
-
-                    # Inclure seulement si clôture dans au moins min_days_before_cloture jours
-                    if days_until_cloture >= min_days_before_cloture:
-                        valid_sessions.append(session)
-                except Exception as e:
-                    logger.warning(f"Erreur parsing date clôture {date_cloture_str}: {e}")
+                date_cloture = parse_date_flexible(str(date_cloture_str), "date_cloture")
+                if not date_cloture:
+                    logger.warning(f"Erreur parsing date clôture {date_cloture_str}")
                     continue
+
+                # Calculer le nombre de jours jusqu'à la clôture
+                days_until_cloture = (date_cloture - today_date).days
+
+                # Inclure seulement si clôture dans au moins min_days_before_cloture jours
+                if days_until_cloture >= min_days_before_cloture:
+                    valid_sessions.append(session)
 
         # Trier par date d'examen et prendre les N premières
         valid_sessions.sort(key=lambda x: x.get('Date_Examen', '9999-99-99'))
@@ -238,18 +232,13 @@ def get_earlier_dates_other_departments(
             # Vérifier la date de clôture (doit être dans au moins 2 jours)
             date_cloture_str = session.get('Date_Cloture_Inscription')
             if date_cloture_str:
-                try:
-                    if 'T' in str(date_cloture_str):
-                        date_cloture = datetime.fromisoformat(date_cloture_str.replace('Z', '+00:00'))
-                        date_cloture = date_cloture.replace(tzinfo=None).date()
-                    else:
-                        date_cloture = datetime.strptime(str(date_cloture_str), "%Y-%m-%d").date()
-
-                    days_until_cloture = (date_cloture - today_date).days
-                    if days_until_cloture < min_days_before_cloture:
-                        continue  # Clôture trop proche ou passée
-                except Exception as e:
+                date_cloture = parse_date_flexible(str(date_cloture_str), "date_cloture")
+                if not date_cloture:
                     continue
+
+                days_until_cloture = (date_cloture - today_date).days
+                if days_until_cloture < min_days_before_cloture:
+                    continue  # Clôture trop proche ou passée
             else:
                 continue  # Pas de date de clôture = invalide
 
@@ -337,23 +326,18 @@ def get_next_exam_dates_any_department(
         for session in all_sessions:
             date_cloture_str = session.get('Date_Cloture_Inscription')
             if date_cloture_str:
-                try:
-                    if 'T' in str(date_cloture_str):
-                        date_cloture = datetime.fromisoformat(date_cloture_str.replace('Z', '+00:00'))
-                        date_cloture = date_cloture.replace(tzinfo=None).date()
-                    else:
-                        date_cloture = datetime.strptime(str(date_cloture_str), "%Y-%m-%d").date()
-
-                    # Calculer le nombre de jours jusqu'à la clôture
-                    days_until_cloture = (date_cloture - today_date).days
-
-                    # Inclure seulement si clôture dans au moins min_days_before_cloture jours
-                    if days_until_cloture >= min_days_before_cloture:
-                        valid_sessions.append(session)
-                    else:
-                        logger.debug(f"  Session exclue: clôture {date_cloture} dans {days_until_cloture} jours (min: {min_days_before_cloture})")
-                except Exception as e:
+                date_cloture = parse_date_flexible(str(date_cloture_str), "date_cloture")
+                if not date_cloture:
                     continue
+
+                # Calculer le nombre de jours jusqu'à la clôture
+                days_until_cloture = (date_cloture - today_date).days
+
+                # Inclure seulement si clôture dans au moins min_days_before_cloture jours
+                if days_until_cloture >= min_days_before_cloture:
+                    valid_sessions.append(session)
+                else:
+                    logger.debug(f"  Session exclue: clôture {date_cloture} dans {days_until_cloture} jours (min: {min_days_before_cloture})")
 
         valid_sessions.sort(key=lambda x: x.get('Date_Examen', '9999-99-99'))
         result = valid_sessions[:limit]
@@ -478,7 +462,6 @@ def analyze_exam_date_situation(
             'date_examen_info': Dict or None,
             'evalbox_status': str or None,
             'should_include_in_response': bool,
-            'response_message': str or None,
             'next_dates': List[Dict],
             'pieces_refusees': List[str] (pour cas 3),
             'date_cloture': str or None,
@@ -500,7 +483,6 @@ def analyze_exam_date_situation(
         'date_examen_info': None,
         'evalbox_status': None,
         'should_include_in_response': False,
-        'response_message': None,
         'next_dates': [],
         'pieces_refusees': [],
         'date_cloture': None,
@@ -595,14 +577,14 @@ def analyze_exam_date_situation(
                     all_dates = get_next_exam_dates_any_department(crm_client, limit=15)
 
                 # Filtrer: date examen > session_date_fin
-                try:
-                    session_end = datetime.strptime(session_date_fin, "%Y-%m-%d").date()
+                session_end = parse_date_flexible(session_date_fin, "session_date_fin")
+                if session_end:
                     valid_dates = []
                     for d in all_dates:
                         exam_date_str = d.get('Date_Examen', '')
                         if exam_date_str:
-                            exam_date = datetime.strptime(exam_date_str, "%Y-%m-%d").date()
-                            if exam_date > session_end:
+                            exam_date = parse_date_flexible(exam_date_str, "exam_date")
+                            if exam_date and exam_date > session_end:
                                 valid_dates.append(d)
 
                     if valid_dates:
@@ -624,8 +606,8 @@ def analyze_exam_date_situation(
                         logger.warning(f"  ⚠️ Aucune date d'examen trouvée après la fin de session ({session_date_fin})")
                         result['next_dates'] = all_dates
                         result['case_description'] = "Date vide + session confirmée - Pas de date après session"
-                except Exception as e:
-                    logger.error(f"  ❌ Erreur parsing session_date_fin: {e}")
+                else:
+                    logger.error(f"  ❌ Erreur parsing session_date_fin: {session_date_fin}")
                     result['next_dates'] = all_dates
 
             # ================================================================
@@ -699,7 +681,6 @@ def analyze_exam_date_situation(
                         if result['alternative_department_dates']:
                             logger.info(f"  📅 {len(result['alternative_department_dates'])} date(s) plus tôt dans d'autres départements")
 
-        result['response_message'] = generate_propose_dates_message(result['next_dates'], departement)
         logger.info(f"  ➡️ CAS 1: Date vide (auto_assigned={result['auto_assigned']})")
         return result
 
@@ -794,12 +775,6 @@ def analyze_exam_date_situation(
                         crm_client, departement, first_date, limit=3
                     )
 
-        result['response_message'] = generate_deadline_missed_message(
-            date_examen_str,
-            result['date_cloture'],
-            evalbox_status,
-            result['next_dates']
-        )
         logger.info(f"  ➡️ CAS 8: Deadline passée + {evalbox_status} → Report automatique")
         return result
 
@@ -824,9 +799,6 @@ def analyze_exam_date_situation(
             result['case'] = 5
             result['case_description'] = "Faux Refusé CMA (0 pièce refusée) - En attente validation CMA"
             result['should_include_in_response'] = True
-            result['response_message'] = generate_dossier_synchronise_message(
-                date_examen_str, result.get('date_cloture', ''), result.get('next_dates', [])
-            )
             logger.info(f"  ➡️ CAS 5 (faux refus): Traitement comme Dossier Synchronisé")
             return result
 
@@ -864,12 +836,6 @@ def analyze_exam_date_situation(
 
             result['next_dates'] = next_dates
 
-        result['response_message'] = generate_refus_cma_message(
-            result['pieces_refusees'],
-            next_date_cloture,  # Date clôture de la PROCHAINE session
-            result['next_dates'],
-            pieces_details=result.get('pieces_refusees_details', [])
-        )
         logger.info(f"  ➡️ CAS 3: Refusé CMA - {len(result.get('pieces_refusees', []))} pièce(s) refusée(s)")
         return result
 
@@ -903,10 +869,8 @@ def analyze_exam_date_situation(
 
             if has_indices_not_passed:
                 result['should_include_in_response'] = True
-                result['response_message'] = generate_clarification_exam_message()
             else:
                 result['should_include_in_response'] = False
-                result['response_message'] = None
 
             logger.info(f"  ➡️ CAS 7: Date passée + validé (indices non passé: {has_indices_not_passed})")
             return result
@@ -950,7 +914,6 @@ def analyze_exam_date_situation(
                         if result['alternative_department_dates']:
                             logger.info(f"  📅 {len(result['alternative_department_dates'])} date(s) plus tôt dans d'autres départements")
 
-            result['response_message'] = generate_propose_dates_past_message(result['next_dates'], departement)
             logger.info(f"  ➡️ CAS 2: Date passée + non validé → auto-report")
             return result
 
@@ -990,10 +953,6 @@ def analyze_exam_date_situation(
                         next_exam_date = next_dates[0]
                     result['next_dates'] = next_dates
 
-            result['response_message'] = generate_valide_cma_message(
-                date_examen_str,
-                next_exam_date=next_exam_date
-            )
             logger.info(f"  ➡️ CAS 4: Date future + VALIDE CMA (jours restants: {days_until_exam})")
             return result
 
@@ -1002,11 +961,6 @@ def analyze_exam_date_situation(
             result['case'] = 5
             result['case_description'] = "Date future + Dossier Synchronisé - Instruction en cours"
             result['should_include_in_response'] = True
-            result['response_message'] = generate_dossier_synchronise_message(
-                date_examen_str,
-                result['date_cloture'],
-                result['next_dates']
-            )
             logger.info(f"  ➡️ CAS 5: Date future + Dossier Synchronisé")
             return result
 
@@ -1020,11 +974,6 @@ def analyze_exam_date_situation(
             identifiant = deal_data.get('IDENTIFIANT_EVALBOX', '')
             mot_de_passe = deal_data.get('MDP_EVALBOX', '')
 
-            result['response_message'] = generate_convocation_message(
-                date_examen_str,
-                identifiant,
-                mot_de_passe
-            )
             logger.info(f"  ➡️ CAS 9: Convocation CMA reçue")
             return result
 
@@ -1033,10 +982,6 @@ def analyze_exam_date_situation(
             result['case'] = 10
             result['case_description'] = "Prêt à payer - Paiement en cours, surveiller emails pour instruction CMA"
             result['should_include_in_response'] = True
-            result['response_message'] = generate_pret_a_payer_message(
-                date_examen_str,
-                result['date_cloture']
-            )
             logger.info(f"  ➡️ CAS 10: Prêt à payer ({evalbox_status})")
             return result
 
@@ -1050,7 +995,6 @@ def analyze_exam_date_situation(
         result['case'] = 6
         result['case_description'] = "Date future + autre statut - En attente"
         result['should_include_in_response'] = False  # Date déjà assignée, rien à proposer par défaut
-        result['response_message'] = None
 
         # NOTE: Si le candidat demande explicitement une date plus tôt (intent = WANTS_EARLIER_DATE),
         # le workflow peut appeler get_earlier_dates_other_departments() séparément.
@@ -1235,465 +1179,8 @@ def check_threads_for_exam_not_passed(threads: List[Dict]) -> bool:
     return False
 
 
-# ================================================================
-# GÉNÉRATEURS DE MESSAGES
-# ================================================================
-
-def generate_propose_dates_message(next_dates: List[Dict], departement: str) -> str:
-    """
-    Génère le message proposant les prochaines dates d'examen (CAS 1).
-    """
-    if not next_dates:
-        return """Concernant votre inscription à l'examen VTC, nous n'avons pas encore de date d'examen enregistrée pour votre dossier.
-
-Merci de nous indiquer vos disponibilités afin que nous puissions vous proposer les prochaines dates d'examen disponibles dans votre région."""
-
-    dates_formatted = "\n".join([format_exam_date_for_display(d) for d in next_dates])
-
-    return f"""Concernant votre inscription à l'examen VTC, nous n'avons pas encore de date d'examen enregistrée pour votre dossier.
-
-Voici les prochaines dates d'examen disponibles :
-
-{dates_formatted}
-
-Merci de nous confirmer la date qui vous convient le mieux afin que nous puissions procéder à votre inscription."""
-
-
-def generate_propose_dates_past_message(next_dates: List[Dict], departement: str) -> str:
-    """
-    Génère le message proposant les prochaines dates quand la date précédente est passée (CAS 2).
-    """
-    if not next_dates:
-        return """Nous constatons que la date d'examen initialement prévue est maintenant passée et votre dossier n'a pas été validé à temps.
-
-Merci de nous contacter pour que nous puissions vous proposer les prochaines dates d'examen disponibles."""
-
-    dates_formatted = "\n".join([format_exam_date_for_display(d) for d in next_dates])
-
-    return f"""Nous constatons que la date d'examen initialement prévue est maintenant passée.
-
-Pour vous permettre de passer votre examen, voici les prochaines dates disponibles :
-
-{dates_formatted}
-
-Merci de nous confirmer la date qui vous convient afin que nous puissions mettre à jour votre inscription."""
-
-
-def generate_refus_cma_message(
-    pieces_refusees: List[str],
-    date_cloture: str,
-    next_dates: List[Dict],
-    pieces_details: List[Dict] = None
-) -> str:
-    """
-    Génère le message pour informer d'un refus CMA (CAS 3 / statut Incomplet).
-
-    Args:
-        pieces_refusees: Liste des noms de pièces refusées
-        date_cloture: Date de clôture de la PROCHAINE session d'examen
-        next_dates: Prochaine date d'examen (1 seule - positionnement automatique)
-        pieces_details: Détails des pièces (nom, motif, solution)
-
-    Le message doit:
-    1. Expliquer pourquoi le candidat n'est pas convoqué sur l'examen prévu
-    2. Indiquer qu'il est automatiquement repositionné sur la prochaine date
-    3. Lister les pièces refusées avec le motif de refus et la solution
-    4. Indiquer la date limite pour corriger (clôture de la prochaine session)
-    """
-    # Formater la date de clôture de la PROCHAINE session
-    date_cloture_formatted = ""
-    if date_cloture:
-        try:
-            if 'T' in str(date_cloture):
-                date_obj = datetime.fromisoformat(str(date_cloture).replace('Z', '+00:00'))
-            else:
-                date_obj = datetime.strptime(str(date_cloture), "%Y-%m-%d")
-            date_cloture_formatted = date_obj.strftime("%d/%m/%Y")
-        except Exception as e:
-            date_cloture_formatted = str(date_cloture)
-
-    # Formater la prochaine date d'examen (UNE SEULE - positionnement automatique)
-    next_exam_text = ""
-    next_exam_date_formatted = ""
-    if next_dates and len(next_dates) > 0:
-        next_exam = next_dates[0]
-        date_examen = next_exam.get('Date_Examen', '')
-        if date_examen:
-            try:
-                date_obj = datetime.strptime(str(date_examen), "%Y-%m-%d")
-                next_exam_date_formatted = date_obj.strftime("%d/%m/%Y")
-            except Exception as e:
-                next_exam_date_formatted = str(date_examen)
-
-    # Formater les pièces refusées avec détails
-    pieces_text = ""
-    if pieces_details and len(pieces_details) > 0:
-        # Utiliser les détails complets (motif + solution)
-        pieces_lines = []
-        for piece in pieces_details:
-            nom = piece.get('nom', 'Document')
-            motif = piece.get('motif', 'Motif non précisé')
-            solution = piece.get('solution', 'Veuillez fournir un nouveau document conforme.')
-
-            pieces_lines.append(f"""**📄 {nom}**
-   ❌ **Motif du refus** : {motif}
-   ✅ **Solution** : {solution}""")
-
-        pieces_list = "\n\n".join(pieces_lines)
-        pieces_text = f"""**🔴 Pièce(s) refusée(s) par la CMA :**
-
-{pieces_list}
-
-"""
-    elif pieces_refusees and len(pieces_refusees) > 0:
-        # Fallback: juste les noms (ancien format)
-        pieces_list = "\n".join([f"• {piece}" for piece in pieces_refusees])
-        pieces_text = f"""**🔴 Pièce(s) refusée(s) par la CMA :**
-
-{pieces_list}
-
-"""
-    else:
-        # Aucune pièce identifiée - demander vérification sur ExamT3P
-        pieces_text = """**🔴 Des pièces de votre dossier ont été refusées par la CMA.**
-
-Pour connaître les pièces concernées, connectez-vous sur votre espace ExamT3P et consultez la section "Mes Documents".
-
-"""
-
-    # Construire le message selon les informations disponibles
-    date_cloture_text = f"**avant le {date_cloture_formatted}**" if date_cloture_formatted else "**dans les plus brefs délais**"
-    next_exam_info = f" du **{next_exam_date_formatted}**" if next_exam_date_formatted else ""
-
-    return f"""**⚠️ Information importante concernant votre inscription à l'examen VTC**
-
-Nous vous informons que la CMA (Chambre des Métiers et de l'Artisanat) a refusé certaines pièces de votre dossier. **C'est pour cette raison que vous n'avez pas reçu de convocation** pour l'examen initialement prévu.
-
-{pieces_text}**📅 Votre nouvelle date d'examen :**
-
-Votre inscription a été **automatiquement reportée** sur la prochaine session d'examen{next_exam_info}.
-
-**⏰ Que devez-vous faire maintenant ?**
-
-Pour être convoqué sur cette nouvelle date, vous devez nous transmettre vos documents corrigés {date_cloture_text} (date de clôture des inscriptions).
-
-📧 Vous pouvez :
-• Nous envoyer vos documents par **retour de mail**
-• Ou les télécharger directement sur votre **espace ExamT3P**
-
-⚠️ **Important** : Si les documents corrigés ne sont pas reçus avant la date de clôture, votre inscription sera à nouveau reportée sur la session suivante.
-
-Nous restons à votre disposition pour toute question."""
-
-
-def generate_valide_cma_message(date_examen_str: str, next_exam_date: Optional[Dict] = None) -> str:
-    """
-    Génère le message pour un dossier validé CMA (CAS 4).
-
-    Adapte le message selon la proximité de l'examen:
-    - > 10 jours: "vous recevrez la convocation ~10j avant"
-    - 7-10 jours: "la convocation devrait être arrivée, vérifiez vos spams"
-    - ≤ 7 jours sans convocation: "report automatique sur prochaine date"
-
-    Args:
-        date_examen_str: Date d'examen actuelle
-        next_exam_date: Prochaine date d'examen si report nécessaire
-    """
-    date_formatted = ""
-    days_until_exam = None
-
-    if date_examen_str:
-        try:
-            date_obj = datetime.strptime(str(date_examen_str), "%Y-%m-%d")
-            date_formatted = date_obj.strftime("%d/%m/%Y")
-            # Calculer le nombre de jours jusqu'à l'examen
-            today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-            days_until_exam = (date_obj - today).days
-        except Exception as e:
-            date_formatted = str(date_examen_str)
-
-    date_text = f" du {date_formatted}" if date_formatted else ""
-
-    # CAS CRITIQUE: Examen dans ≤ 7 jours = report automatique par la CMA
-    if days_until_exam is not None and days_until_exam <= EXAM_IMMINENT_DAYS:
-        # Formater la prochaine date d'examen
-        next_date_formatted = ""
-        if next_exam_date:
-            try:
-                next_date_str = next_exam_date.get('Date_Examen', '')
-                if next_date_str:
-                    next_date_obj = datetime.strptime(str(next_date_str), "%Y-%m-%d")
-                    next_date_formatted = next_date_obj.strftime("%d/%m/%Y")
-            except Exception as e:
-                pass
-
-        next_date_text = f" du **{next_date_formatted}**" if next_date_formatted else " (date à confirmer)"
-
-        return f"""Votre dossier a été validé par la CMA.
-
-**Information importante concernant votre examen :**
-
-La CMA envoie les convocations au minimum **7 jours avant** la date d'examen. Or, l'examen initialement prévu{date_text} est dans moins de 7 jours et vous n'avez pas encore reçu de convocation.
-
-Cela signifie que la CMA, en raison de ses **délais de traitement importants**, n'a pas pu finaliser votre convocation à temps pour cette session.
-
-**Ne vous inquiétez pas !** Votre dossier reste validé et vous serez **automatiquement convoqué(e) pour la prochaine session d'examen**{next_date_text}.
-
-Vous recevrez votre convocation officielle environ 7 à 10 jours avant cette nouvelle date. Pensez à vérifier régulièrement vos spams.
-
-En attendant, nous vous conseillons de continuer à bien préparer votre examen. N'hésitez pas à nous contacter si vous avez des questions."""
-
-    # Examen entre 7 et 10 jours - convocation devrait être arrivée
-    if days_until_exam is not None and days_until_exam <= CONVOCATION_DAYS_BEFORE_EXAM:
-        return f"""Bonne nouvelle ! Votre dossier a été validé par la CMA pour l'examen{date_text}.
-
-**Concernant votre convocation :**
-La convocation officielle est généralement envoyée par la CMA environ 7 à 10 jours avant l'examen. Elle devrait donc **déjà être arrivée** dans votre boîte mail.
-
-📧 **Vérifiez impérativement vos spams et courriers indésirables**, car il arrive fréquemment que les emails de la CMA s'y retrouvent.
-
-Si vous n'avez toujours pas reçu votre convocation après avoir vérifié vos spams, merci de nous le signaler rapidement afin que nous puissions contacter la CMA.
-
-En attendant, nous vous conseillons de bien préparer votre examen. N'hésitez pas à nous contacter si vous avez des questions."""
-    else:
-        # Examen dans plus de 10 jours
-        return f"""Bonne nouvelle ! Votre dossier a été validé par la CMA pour l'examen{date_text}.
-
-Vous recevrez votre convocation officielle environ 10 jours avant la date de l'examen. Cette convocation vous sera envoyée directement par la CMA à l'adresse email que vous avez renseignée.
-
-📧 **Pensez à vérifier régulièrement vos spams et courriers indésirables**, car il arrive que les emails de la CMA s'y retrouvent.
-
-En attendant, nous vous conseillons de bien préparer votre examen. N'hésitez pas à nous contacter si vous avez des questions."""
-
-
-def generate_dossier_synchronise_message(
-    date_examen_str: str,
-    date_cloture: str,
-    next_dates: List[Dict]
-) -> str:
-    """
-    Génère le message pour un dossier synchronisé (en cours d'instruction) (CAS 5).
-    """
-    date_formatted = ""
-    if date_examen_str:
-        try:
-            date_obj = datetime.strptime(str(date_examen_str), "%Y-%m-%d")
-            date_formatted = date_obj.strftime("%d/%m/%Y")
-        except Exception as e:
-            date_formatted = str(date_examen_str)
-
-    date_cloture_formatted = ""
-    if date_cloture:
-        try:
-            if 'T' in str(date_cloture):
-                date_obj = datetime.fromisoformat(str(date_cloture).replace('Z', '+00:00'))
-            else:
-                date_obj = datetime.strptime(str(date_cloture), "%Y-%m-%d")
-            date_cloture_formatted = date_obj.strftime("%d/%m/%Y")
-        except Exception as e:
-            date_cloture_formatted = str(date_cloture)
-
-    date_text = f" du {date_formatted}" if date_formatted else ""
-    cloture_text = f" avant le {date_cloture_formatted}" if date_cloture_formatted else " rapidement"
-
-    return f"""Votre dossier a bien été transmis à la CMA pour l'examen{date_text} et est actuellement en cours d'instruction.
-
-**Important :** Pendant cette période, la CMA peut vous demander des corrections ou des pièces complémentaires. Nous vous conseillons de surveiller attentivement vos emails (y compris les spams).
-
-Si la CMA refuse certains documents, vous devrez nous transmettre les corrections{cloture_text} pour que votre inscription soit maintenue sur cette date d'examen. Dans le cas contraire, votre dossier sera automatiquement décalé sur la prochaine session disponible.
-
-N'hésitez pas à nous contacter si vous recevez une demande de la CMA."""
-
-
-def generate_clarification_exam_message() -> str:
-    """
-    Génère le message demandant clarification sur le passage de l'examen (CAS 7).
-    """
-    return """Nous constatons que la date de votre examen est passée. Votre dossier avait été validé par la CMA.
-
-Pourriez-vous nous confirmer si vous avez bien pu passer votre examen ?
-
-Si ce n'est pas le cas, merci de nous en informer afin que nous puissions vous proposer une nouvelle date d'inscription."""
-
-
-def generate_deadline_missed_message(
-    date_examen_str: str,
-    date_cloture: str,
-    evalbox_status: str,
-    next_dates: List[Dict]
-) -> str:
-    """
-    Génère le message informant que la deadline est passée et le candidat sera reporté (CAS 8).
-
-    Ce cas se produit quand:
-    - La date d'examen est dans le futur
-    - MAIS la date de clôture des inscriptions est passée
-    - ET le dossier n'a pas été validé (Evalbox ≠ VALIDE CMA/Dossier Synchronisé)
-
-    Conséquence: Le candidat a raté la deadline et sera automatiquement reporté
-    sur la prochaine session disponible.
-    """
-    # Formater la date d'examen
-    date_examen_formatted = ""
-    if date_examen_str:
-        try:
-            date_obj = datetime.strptime(str(date_examen_str), "%Y-%m-%d")
-            date_examen_formatted = date_obj.strftime("%d/%m/%Y")
-        except Exception as e:
-            date_examen_formatted = str(date_examen_str)
-
-    # Formater la date de clôture
-    date_cloture_formatted = ""
-    if date_cloture:
-        try:
-            if 'T' in str(date_cloture):
-                date_obj = datetime.fromisoformat(str(date_cloture).replace('Z', '+00:00'))
-            else:
-                date_obj = datetime.strptime(str(date_cloture), "%Y-%m-%d")
-            date_cloture_formatted = date_obj.strftime("%d/%m/%Y")
-        except Exception as e:
-            date_cloture_formatted = str(date_cloture)
-
-    date_examen_text = f" du {date_examen_formatted}" if date_examen_formatted else ""
-    date_cloture_text = f" (clôturées le {date_cloture_formatted})" if date_cloture_formatted else ""
-
-    # Formater les prochaines dates
-    next_dates_text = ""
-    if next_dates:
-        dates_formatted = "\n".join([format_exam_date_for_display(d) for d in next_dates])
-        next_dates_text = f"""
-
-Voici les prochaines dates d'examen disponibles :
-
-{dates_formatted}
-
-Merci de nous confirmer la date qui vous convient afin que nous puissions vous inscrire sur cette nouvelle session."""
-    else:
-        next_dates_text = """
-
-Nous allons vous recontacter rapidement pour vous proposer les prochaines dates disponibles."""
-
-    return f"""Nous vous informons que les inscriptions pour l'examen{date_examen_text} sont maintenant clôturées{date_cloture_text}.
-
-Votre dossier n'ayant pas été validé avant cette date limite, vous ne pourrez malheureusement pas passer l'examen sur cette session. Votre inscription sera automatiquement reportée sur la prochaine session disponible.{next_dates_text}"""
-
-
-def generate_convocation_message(
-    date_examen_str: str,
-    identifiant: str,
-    mot_de_passe: str
-) -> str:
-    """
-    Génère le message pour informer que la convocation est disponible (CAS 9).
-
-    Contenu:
-    - Convocation disponible sur ExamT3P
-    - Lien vers la plateforme
-    - Identifiants de connexion
-    - Instructions: télécharger, imprimer, pièce d'identité
-    - Souhait de bonne chance
-    """
-    # Formater la date d'examen
-    date_formatted = ""
-    if date_examen_str:
-        try:
-            date_obj = datetime.strptime(str(date_examen_str), "%Y-%m-%d")
-            date_formatted = date_obj.strftime("%d/%m/%Y")
-        except Exception as e:
-            date_formatted = str(date_examen_str)
-
-    date_text = f" du **{date_formatted}**" if date_formatted else ""
-
-    # Construire la section identifiants
-    identifiants_text = ""
-    if identifiant and mot_de_passe:
-        identifiants_text = f"""
-**Vos identifiants de connexion :**
-- Identifiant : **{identifiant}**
-- Mot de passe : **{mot_de_passe}**
-"""
-    elif identifiant:
-        identifiants_text = f"""
-**Votre identifiant de connexion :** {identifiant}
-(Si vous avez oublié votre mot de passe, utilisez la fonction "Mot de passe oublié" sur la plateforme)
-"""
-    else:
-        identifiants_text = """
-(Vos identifiants vous ont été communiqués lors de la création de votre compte. Si vous les avez oubliés, utilisez la fonction "Mot de passe oublié" sur la plateforme)
-"""
-
-    return f"""Excellente nouvelle ! Votre convocation pour l'examen VTC{date_text} est maintenant disponible !
-
-**Pour récupérer votre convocation :**
-
-1. Connectez-vous sur la plateforme ExamT3P : **https://www.exament3p.fr**
-{identifiants_text}
-2. Une fois connecté, téléchargez votre convocation officielle
-
-3. **Imprimez votre convocation** - elle est obligatoire le jour de l'examen
-
-**Le jour de l'examen, présentez-vous avec :**
-- Votre convocation imprimée
-- Une pièce d'identité en cours de validité (carte d'identité ou passeport)
-
-Nous vous souhaitons bonne chance pour votre examen ! Nous restons à votre disposition si vous avez des questions."""
-
-
-def generate_pret_a_payer_message(
-    date_examen_str: str,
-    date_cloture: str
-) -> str:
-    """
-    Génère le message pour informer que le paiement est en cours (CAS 10).
-
-    Contenu:
-    - Paiement des frais d'examen en cours (prochaines heures/jours)
-    - Une fois payé, la CMA va instruire les pièces
-    - Surveiller emails + spams pour notifications CMA
-    - Si refus de pièces → corriger avant date clôture
-    - Sinon → décalage date examen
-    """
-    # Formater la date d'examen
-    date_examen_formatted = ""
-    if date_examen_str:
-        try:
-            date_obj = datetime.strptime(str(date_examen_str), "%Y-%m-%d")
-            date_examen_formatted = date_obj.strftime("%d/%m/%Y")
-        except Exception as e:
-            date_examen_formatted = str(date_examen_str)
-
-    # Formater la date de clôture
-    date_cloture_formatted = ""
-    if date_cloture:
-        try:
-            if 'T' in str(date_cloture):
-                date_obj = datetime.fromisoformat(str(date_cloture).replace('Z', '+00:00'))
-            else:
-                date_obj = datetime.strptime(str(date_cloture), "%Y-%m-%d")
-            date_cloture_formatted = date_obj.strftime("%d/%m/%Y")
-        except Exception as e:
-            date_cloture_formatted = str(date_cloture)
-
-    date_examen_text = f" du **{date_examen_formatted}**" if date_examen_formatted else ""
-    date_cloture_text = f"**{date_cloture_formatted}**" if date_cloture_formatted else "la date de clôture des inscriptions"
-
-    return f"""Votre dossier est complet et prêt pour le paiement des frais d'examen !
-
-Nous allons procéder au règlement des frais d'inscription dans les **prochaines heures/jours**.
-
-**Ce qui va se passer ensuite :**
-
-1. Une fois le paiement effectué, votre dossier sera transmis à la **CMA (Chambre des Métiers et de l'Artisanat)** pour instruction
-
-2. La CMA va examiner vos pièces justificatives
-
-3. **Important - Surveillez vos emails (et vos spams !)** : Si la CMA refuse certaines pièces, vous recevrez une notification par email vous demandant de les corriger
-
-4. En cas de demande de correction, vous devrez nous transmettre les documents corrigés **avant le {date_cloture_text}**
-
-**Attention :** Si les corrections ne sont pas apportées avant la date de clôture, votre inscription sera automatiquement reportée sur la prochaine session d'examen.
-
-Votre examen est prévu pour le{date_examen_text}. Nous restons à votre disposition pour toute question."""
+# NOTE: Legacy generate_*_message() functions (CAS 1-10) removed.
+# Responses are now generated by the template engine (response_master.html + partials).
 
 
 # =============================================================================

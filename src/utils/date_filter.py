@@ -24,6 +24,8 @@ import logging
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 
+from src.utils.date_utils import parse_date_flexible
+
 logger = logging.getLogger(__name__)
 
 
@@ -160,12 +162,12 @@ class DateFilter:
         for date_info in self._dates:
             deadline_str = date_info.get('Date_Cloture') or date_info.get('date_cloture')
             if deadline_str:
-                try:
-                    deadline = datetime.strptime(str(deadline_str)[:10], '%Y-%m-%d').date()
+                deadline = parse_date_flexible(str(deadline_str)[:10], "deadline")
+                if deadline is not None:
                     if deadline >= min_deadline:
                         filtered.append(date_info)
-                except ValueError:
-                    # En cas d'erreur, garder la date
+                else:
+                    # En cas d'erreur de parsing, garder la date
                     filtered.append(date_info)
             else:
                 # Pas de deadline connue, garder la date

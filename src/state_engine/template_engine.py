@@ -40,6 +40,7 @@ from src.constants.amounts import (
     CMA_EXAM_FEE, CMA_DOSSIER_FEE, CMA_ADMISSION_RETAKE_FEE, CMA_MOBILITE_PRO_FEE,
 )
 from src.constants.emails import COMPANY_SIGNATURE
+from src.utils.date_utils import parse_date_flexible
 
 # Détecteur de genre par prénom (singleton)
 _gender_detector = gender_detector.Detector()
@@ -1911,14 +1912,13 @@ class TemplateEngine:
         for d in dates:
             exam_str = d.get('Date_Examen', '')
             if exam_str:
-                try:
-                    exam_date = datetime.strptime(str(exam_str)[:10], '%Y-%m-%d').date()
-                    if exam_date >= today:
-                        filtered_dates.append(d)
-                    else:
-                        logger.debug(f"Date examen passée exclue: {exam_str}")
-                except (ValueError, TypeError):
+                exam_date = parse_date_flexible(exam_str)
+                if exam_date is None:
                     filtered_dates.append(d)  # En cas d'erreur de parsing, garder la date
+                elif exam_date >= today:
+                    filtered_dates.append(d)
+                else:
+                    logger.debug(f"Date examen passée exclue: {exam_str}")
             else:
                 filtered_dates.append(d)
 
@@ -2154,11 +2154,8 @@ class TemplateEngine:
         """Vérifie si une date est passée (avant aujourd'hui)."""
         if not date_str:
             return False
-        try:
-            date_obj = datetime.strptime(str(date_str)[:10], '%Y-%m-%d').date()
-            return date_obj < datetime.now().date()
-        except Exception:
-            return False
+        date_obj = parse_date_flexible(date_str)
+        return date_obj < datetime.now().date() if date_obj else False
 
     def _compute_session_temporal_flags(self, session_start_str: str, session_end_str: str) -> Dict[str, Any]:
         """Calcule les flags temporels pour la session assignée (vs aujourd'hui).
@@ -2173,14 +2170,8 @@ class TemplateEngine:
         if not session_start_str and not session_end_str:
             return result
         today = datetime.now().date()
-        try:
-            start_date = datetime.strptime(str(session_start_str)[:10], '%Y-%m-%d').date()
-        except Exception:
-            start_date = None
-        try:
-            end_date = datetime.strptime(str(session_end_str)[:10], '%Y-%m-%d').date()
-        except Exception:
-            end_date = None
+        start_date = parse_date_flexible(session_start_str)
+        end_date = parse_date_flexible(session_end_str)
         if start_date:
             days_until = (start_date - today).days
             result['days_until_session_start'] = days_until
@@ -2302,14 +2293,11 @@ class TemplateEngine:
         """Vérifie si une session se termine AVANT la date d'examen."""
         if not session or not exam_date:
             return True  # Pas de contrainte → garder
-        try:
-            end_str = session.get('Date_fin', '') or ''
-            if not end_str:
-                return True
-            session_end = datetime.strptime(str(end_str)[:10], '%Y-%m-%d').date()
-            return session_end < exam_date
-        except (ValueError, TypeError):
-            return True  # En cas d'erreur, garder par prudence
+        end_str = session.get('Date_fin', '') or ''
+        if not end_str:
+            return True
+        session_end = parse_date_flexible(end_str)
+        return session_end < exam_date if session_end else True
 
     def _filter_closest_sessions_by_exam(self, context: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -2333,10 +2321,7 @@ class TemplateEngine:
         date_examen_raw = enriched_lookups.get('date_examen') or context.get('date_examen_raw', '')
         exam_date = None
         if is_session_change and date_examen_raw:
-            try:
-                exam_date = datetime.strptime(str(date_examen_raw)[:10], '%Y-%m-%d').date()
-            except (ValueError, TypeError):
-                pass
+            exam_date = parse_date_flexible(date_examen_raw)
 
         result = {}
         for key in keys:
@@ -2436,15 +2421,11 @@ class TemplateEngine:
 
                 # Filtrer les sessions dont la date de début est passée
                 if date_debut:
-                    try:
-                        from datetime import datetime
-                        today = datetime.now().date()
-                        debut_date = datetime.strptime(str(date_debut)[:10], '%Y-%m-%d').date()
-                        if debut_date < today:
-                            logger.debug(f"Session passée exclue: {session.get('Name', '')} (début: {date_debut})")
-                            continue
-                    except (ValueError, TypeError):
-                        pass  # En cas d'erreur de parsing, garder la session
+                    today = datetime.now().date()
+                    debut_date = parse_date_flexible(date_debut)
+                    if debut_date and debut_date < today:
+                        logger.debug(f"Session passée exclue: {session.get('Name', '')} (début: {date_debut})")
+                        continue
 
                 date_debut_formatted = self._format_date(date_debut) if date_debut else ''
                 date_fin_formatted = self._format_date(date_fin) if date_fin else ''
@@ -2739,25 +2720,16 @@ class TemplateEngine:
             date_examen_raw = enriched_lookups.get('date_examen') or context.get('date_examen_raw', '')
 
             if date_examen_raw:
-                try:
-                    exam_date = datetime.strptime(str(date_examen_raw)[:10], '%Y-%m-%d').date()
+                exam_date = parse_date_flexible(date_examen_raw)
+                if exam_date:
                     filtered_by_exam = []
                     for s in all_sessions:
                         # Récupérer la date de fin de session (format DD/MM/YYYY ou YYYY-MM-DD)
                         session_end_str = s.get('date_fin', '') or s.get('fin', '')
                         if session_end_str:
-                            try:
-                                # Essayer format DD/MM/YYYY
-                                if '/' in session_end_str:
-                                    session_end = datetime.strptime(session_end_str, '%d/%m/%Y').date()
-                                else:
-                                    session_end = datetime.strptime(str(session_end_str)[:10], '%Y-%m-%d').date()
-
-                                # Garder seulement si la session se termine AVANT l'examen
-                                if session_end < exam_date:
-                                    filtered_by_exam.append(s)
-                            except (ValueError, TypeError):
-                                # En cas d'erreur de parsing, garder la session par prudence
+                            session_end = parse_date_flexible(session_end_str)
+                            # Garder seulement si la session se termine AVANT l'examen
+                            if session_end is None or session_end < exam_date:
                                 filtered_by_exam.append(s)
                         else:
                             # Pas de date de fin, garder par prudence
@@ -2768,8 +2740,8 @@ class TemplateEngine:
                         all_sessions = filtered_by_exam
                     else:
                         logger.warning(f"⚠️ Aucune session se terminant avant l'examen du {self._format_date(date_examen_raw)}")
-                except (ValueError, TypeError) as e:
-                    logger.warning(f"⚠️ Impossible de parser la date d'examen '{date_examen_raw}': {e}")
+                else:
+                    logger.warning(f"⚠️ Impossible de parser la date d'examen '{date_examen_raw}'")
 
         # FILTRE 3: Préférence jour/soir pour CONFIRMATION_SESSION
         secondary_intents = context.get('secondary_intents', [])
@@ -2849,7 +2821,6 @@ class TemplateEngine:
 
         # Documents soumis — calculer le délai
         try:
-            from src.utils.date_utils import parse_date_flexible
             dossier_date = parse_date_flexible(date_dossier_recu)
             today = datetime.now().date()
             days_since = (today - dossier_date).days

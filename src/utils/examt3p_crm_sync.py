@@ -385,39 +385,6 @@ def sync_examt3p_to_crm(
     return result
 
 
-def get_sync_status_message(
-    evalbox_status: str,
-    date_cloture: str,
-    is_report_request: bool = False
-) -> Optional[str]:
-    """
-    Génère un message approprié pour le candidat selon le statut de sync.
-
-    Utilisé quand le candidat demande un report mais qu'on ne peut pas le faire.
-
-    IMPORTANT: Ne jamais dire "nous contacter" - communication par EMAIL uniquement.
-    """
-    can_modify, reason = can_modify_exam_date(evalbox_status, date_cloture)
-
-    if not can_modify and is_report_request:
-        # Formater la date de clôture
-        date_formatted = format_date_for_display(date_cloture) or str(date_cloture or '')
-
-        return f"""Votre inscription à l'examen VTC a été validée par la CMA et les inscriptions sont maintenant clôturées.
-
-**Un report n'est possible qu'avec un justificatif de force majeure** (certificat médical ou autre document attestant de l'impossibilité de vous présenter à l'examen).
-
-**Pour demander un report, merci de nous transmettre par email :**
-1. Votre justificatif de force majeure (certificat médical, etc.)
-2. Une brève explication de votre situation
-
-Nous soumettrons votre demande à la CMA pour validation.
-
-**Important :** Sans justificatif valide, des frais de réinscription de {CMA_EXAM_FEE}€ seront à prévoir pour une nouvelle inscription."""
-
-    return None
-
-
 def find_exam_session_by_date_and_dept(
     crm_client,
     exam_date: str,

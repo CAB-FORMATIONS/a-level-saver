@@ -21,6 +21,7 @@ from typing import Dict, Any, Optional, List, Tuple
 from dataclasses import dataclass, field
 
 from src.utils.training_exam_consistency_helper import detect_session_assignment_error
+from src.utils.date_utils import parse_date_flexible
 from src.constants.thresholds import (
     EXAM_IMMINENT_DAYS, CONVOCATION_DAYS_BEFORE_EXAM, UBER_VERIFICATION_DELAY_DAYS,
 )
@@ -267,20 +268,16 @@ class StateDetector:
         # Calculer les jours jusqu'à l'examen
         days_until_exam = None
         if date_examen:
-            try:
-                exam_date_obj = datetime.strptime(date_examen, '%Y-%m-%d').date()
+            exam_date_obj = parse_date_flexible(date_examen, "date_examen")
+            if exam_date_obj:
                 days_until_exam = (exam_date_obj - today).days
-            except Exception as e:
-                pass
 
         # Vérifier si la clôture est passée
         cloture_passed = False
         if date_cloture:
-            try:
-                cloture_date_obj = datetime.strptime(date_cloture, '%Y-%m-%d').date()
+            cloture_date_obj = parse_date_flexible(date_cloture, "date_cloture")
+            if cloture_date_obj:
                 cloture_passed = cloture_date_obj < today
-            except Exception as e:
-                pass
 
         # Flags temporels pour templates (remplacent les comparateurs Handlebars non supportés)
         exam_within_7_days = days_until_exam is not None and 0 <= days_until_exam <= EXAM_IMMINENT_DAYS
@@ -580,16 +577,15 @@ class StateDetector:
             return False
 
         # Vérification faite si J+4 passé (délai pour laisser le temps à la vérification manuelle)
-        try:
-            from datetime import timedelta
-            dossier_date = datetime.strptime(str(date_dossier)[:10], '%Y-%m-%d').date()
-            verification_date = dossier_date + timedelta(days=UBER_VERIFICATION_DELAY_DAYS)
-            today = date.today()
-
-            if today < verification_date:
-                return False  # Vérification pas encore faite
-        except Exception as e:
+        from datetime import timedelta
+        dossier_date = parse_date_flexible(str(date_dossier)[:10], "date_dossier_recu")
+        if not dossier_date:
             return False
+        verification_date = dossier_date + timedelta(days=UBER_VERIFICATION_DELAY_DAYS)
+        today = date.today()
+
+        if today < verification_date:
+            return False  # Vérification pas encore faite
 
         return not context.get('compte_uber', False)
 
@@ -606,15 +602,14 @@ class StateDetector:
             return False
 
         # Vérification faite si J+4 passé (délai pour laisser le temps à la vérification manuelle)
-        try:
-            from datetime import timedelta
-            dossier_date = datetime.strptime(str(date_dossier)[:10], '%Y-%m-%d').date()
-            verification_date = dossier_date + timedelta(days=UBER_VERIFICATION_DELAY_DAYS)
-            today = date.today()
+        from datetime import timedelta
+        dossier_date = parse_date_flexible(str(date_dossier)[:10], "date_dossier_recu")
+        if not dossier_date:
+            return False
+        verification_date = dossier_date + timedelta(days=UBER_VERIFICATION_DELAY_DAYS)
+        today = date.today()
 
-            if today < verification_date:
-                return False
-        except Exception as e:
+        if today < verification_date:
             return False
 
         return not context.get('eligible_uber', False)
@@ -821,13 +816,11 @@ class StateDetector:
             # Vérifier si test obligatoire (dossier après 19/05/2025)
             date_dossier = context.get('date_dossier_recu')
             if date_dossier:
-                try:
-                    dossier_date = datetime.strptime(str(date_dossier)[:10], '%Y-%m-%d').date()
+                dossier_date = parse_date_flexible(str(date_dossier)[:10], "date_dossier_recu")
+                if dossier_date:
                     test_mandatory_from = date(2025, 5, 19)
                     if dossier_date > test_mandatory_from:
                         return 'B'
-                except Exception as e:
-                    pass
 
         return 'ELIGIBLE'
 

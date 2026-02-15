@@ -7,6 +7,7 @@ import logging
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 
+from .date_utils import parse_date_flexible
 from .date_examen_vtc_helper import (
     DEPT_TO_REGION,
     REGION_TO_DEPTS,
@@ -91,13 +92,13 @@ def get_cross_department_alternatives(
         }
 
         # Calculer comparison_text
-        try:
-            ref_date = datetime.strptime(reference_date, '%Y-%m-%d').date()
-            exam_date = datetime.strptime(date_info.get('Date_Examen', '')[:10], '%Y-%m-%d').date()
+        ref_date = parse_date_flexible(reference_date, "reference_date")
+        exam_date = parse_date_flexible(date_info.get('Date_Examen', '')[:10], "Date_Examen")
+        if ref_date and exam_date:
             days_earlier = (ref_date - exam_date).days
             enriched['days_earlier'] = days_earlier
             enriched['comparison_text'] = f"{days_earlier} jours plus tot"
-        except Exception:
+        else:
             enriched['days_earlier'] = 0
             enriched['comparison_text'] = ''
 
@@ -159,11 +160,10 @@ def _calc_days_until(date_str: str, today) -> int:
     """Calcule le nombre de jours jusqu'a une date."""
     if not date_str:
         return 999
-    try:
-        date_obj = datetime.strptime(str(date_str)[:10], '%Y-%m-%d').date()
+    date_obj = parse_date_flexible(str(date_str)[:10], "date_str")
+    if date_obj:
         return (date_obj - today).days
-    except Exception:
-        return 999
+    return 999
 
 
 def _format_date(date_str: str) -> str:
@@ -258,9 +258,8 @@ def get_dates_for_month_other_departments(
         if not exam_date_str:
             continue
 
-        try:
-            exam_date = datetime.strptime(str(exam_date_str)[:10], '%Y-%m-%d').date()
-        except Exception:
+        exam_date = parse_date_flexible(str(exam_date_str)[:10], "exam_date")
+        if not exam_date:
             continue
 
         # Filtrer par mois et annee

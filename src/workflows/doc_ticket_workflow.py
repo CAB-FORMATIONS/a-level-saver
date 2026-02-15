@@ -45,6 +45,7 @@ from src.utils.crm_lookup_helper import enrich_deal_lookups
 from src.utils.response_humanizer import humanize_response
 from src.utils.intent_parser import IntentParser
 from src.utils.date_filter import apply_final_filter
+from src.utils.date_utils import parse_date_flexible
 from src.constants.models import MODEL_EXTRACTION, MODEL_PERSONALIZATION, MODEL_TRIAGE
 from src.constants.amounts import UBER_OFFER_AMOUNT, CMA_EXAM_FEE, CMA_DOSSIER_FEE
 from src.constants.departments import DEPT_DOC, DEPT_CONTACT, DEPT_DOCS_CAB, DEPT_REFUS_CMA, DEPT_COMPTABILITE
@@ -160,6 +161,40 @@ class DOCTicketWorkflow:
             logger.debug(f"  ✅ BROUILLON AUTO coché pour ticket {ticket_id}")
         except Exception as e:
             logger.warning(f"  ⚠️ Erreur marquage BROUILLON AUTO: {e}")
+
+    def _add_internal_note(self, ticket_id: str, content: str) -> bool:
+        """Add an internal (non-public) note to a ticket. Returns True on success."""
+        try:
+            self.desk_client.add_ticket_comment(ticket_id, content, is_public=False)
+            return True
+        except Exception as e:
+            logger.warning(f"  ⚠️ Erreur ajout note interne: {e}")
+            return False
+
+    def _move_ticket(self, ticket_id: str, department: str) -> bool:
+        """Move a ticket to another department. Returns True on success."""
+        try:
+            self.desk_client.move_ticket_to_department(ticket_id, department)
+            logger.info(f"  ✅ Ticket transféré vers {department}")
+            return True
+        except Exception as e:
+            logger.warning(f"  ⚠️ Impossible de transférer vers {department}: {e}")
+            return False
+
+    def _escalate_to_agent(self, ticket_id: str, note: str, auto_update_ticket: bool = True) -> None:
+        """Escalate ticket: set priority HIGH, assign to escalation agent, add note."""
+        if not auto_update_ticket:
+            return
+        from config import settings as _cfg
+        try:
+            self.desk_client.update_ticket(ticket_id, {
+                'priority': 'High',
+                'assigneeId': _cfg.escalation_agent_id,
+            })
+            self.desk_client.add_ticket_comment(ticket_id, note, is_public=False)
+            logger.info("  ✅ Ticket mis à jour: priorité HIGH + assigné à Lamia")
+        except Exception as e:
+            logger.error(f"  ❌ Erreur mise à jour ticket: {e}")
 
     def _check_pending_duplicate_clarification(self, ticket_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -615,12 +650,8 @@ Cordialement,<br>
 
                                 # Transférer le ticket vers Refus CMA
                                 if auto_update_ticket:
-                                    try:
-                                        self.desk_client.move_ticket_to_department(ticket_id, DEPT_REFUS_CMA)
-                                        logger.info(f"  ✅ Ticket transféré vers {DEPT_REFUS_CMA}")
+                                    if self._move_ticket(ticket_id, DEPT_REFUS_CMA):
                                         result['transferred_to'] = DEPT_REFUS_CMA
-                                    except Exception as transfer_error:
-                                        logger.error(f"  ❌ Erreur transfert: {transfer_error}")
                             else:
                                 logger.warning("  ⚠️ Échec création brouillon")
                                 result['draft_created'] = False
@@ -652,11 +683,8 @@ Cordialement,<br>
                 logger.warning(f"🏛️ CMA NOTIFICATION ({cma_type}) → Clôture automatique")
 
                 # Note interne pour traçabilité
-                try:
-                    note = f"🏛️ Email CMA - {cma_type}\nClôturé automatiquement (notification CMA, pas d'action requise)."
-                    self.desk_client.add_ticket_comment(ticket_id, note, is_public=False)
-                except Exception as e:
-                    logger.warning(f"Erreur ajout note CMA: {e}")
+                note = f"🏛️ Email CMA - {cma_type}\nClôturé automatiquement (notification CMA, pas d'action requise)."
+                self._add_internal_note(ticket_id, note)
 
                 result['workflow_stage'] = f'CLOSED_CMA_{cma_type}'
                 if auto_update_ticket:
@@ -1069,24 +1097,9 @@ Le candidat a un ancien dossier dont les frais CMA ({CMA_EXAM_FEE}€) ont déj�
                             "→ Ticket escaladé en priorité HIGH et assigné à Lamia pour traitement manuel."
                         )
 
-                    # Mettre à jour le ticket: priorité HIGH + assignation
-                    from config import settings as _cfg
-                    escalation_agent_id = _cfg.escalation_agent_id
-                    if auto_update_ticket:
-                        try:
-                            self.desk_client.update_ticket(ticket_id, {
-                                'priority': 'High',
-                                'assigneeId': escalation_agent_id,
-                            })
-                            self.desk_client.add_ticket_comment(
-                                ticket_id,
-                                escalation_note,
-                                is_public=False
-                            )
-                            logger.info("  ✅ Ticket mis à jour: priorité HIGH + assigné à Lamia")
-                        except Exception as e:
-                            logger.error(f"  ❌ Erreur mise à jour ticket: {e}")
+                    self._escalate_to_agent(ticket_id, escalation_note, auto_update_ticket)
 
+                    from config import settings as _cfg
                     result['workflow_stage'] = 'ESCALATED_ANNULATION_INSISTENCE'
                     result['escalated_to'] = _cfg.escalation_agent_name
                     result['cma_payment_at_risk'] = cma_payment_mentioned
@@ -1203,21 +1216,9 @@ Le candidat a un ancien dossier dont les frais CMA ({CMA_EXAM_FEE}€) ont déj�
                                     "→ Ticket escaladé en priorité HIGH et assigné à Lamia pour traitement manuel."
                                 )
 
-                            from config import settings as _cfg
-                            escalation_agent_id = _cfg.escalation_agent_id
-                            if auto_update_ticket:
-                                try:
-                                    self.desk_client.update_ticket(ticket_id, {
-                                        'priority': 'High',
-                                        'assigneeId': escalation_agent_id,
-                                    })
-                                    self.desk_client.add_ticket_comment(
-                                        ticket_id, escalation_note, is_public=False
-                                    )
-                                    logger.info("  ✅ Ticket mis à jour: priorité HIGH + assigné à Lamia")
-                                except Exception as e:
-                                    logger.error(f"  ❌ Erreur mise à jour ticket: {e}")
+                            self._escalate_to_agent(ticket_id, escalation_note, auto_update_ticket)
 
+                            from config import settings as _cfg
                             result['workflow_stage'] = 'ESCALATED_ANNULATION_INSISTENCE'
                             result['escalated_to'] = _cfg.escalation_agent_name
                             result['cma_payment_at_risk'] = cma_payment_at_risk
@@ -1606,11 +1607,7 @@ Le candidat a un ancien dossier dont les frais CMA ({CMA_EXAM_FEE}€) ont déj�
                         f"→ Mot de passe: {mdp}\n"
                         f"Supprimer les pièces qui étaient en refus pour ajuster le dossier."
                     )
-                    try:
-                        self.desk_client.add_ticket_comment(ticket_id, faux_refus_note, is_public=False)
-                        logger.info("  📝 Note interne ajoutée: faux Refusé CMA")
-                    except Exception as e:
-                        logger.warning(f"  ⚠️ Erreur ajout note faux refus: {e}")
+                    self._add_internal_note(ticket_id, faux_refus_note)
             else:
                 logger.info("✅ REPLY DELIVERY → Préparé (pas d'auto-create/send)")
 
@@ -1649,13 +1646,8 @@ Le candidat a un ancien dossier dont les frais CMA ({CMA_EXAM_FEE}€) ont déj�
 
             if is_vtc_hors_partenariat and result.get('draft_created') and auto_update_ticket:
                 logger.info("\n8️⃣b TRANSFER DOCS CAB - Deal VTC classique (hors partenariat)...")
-                try:
-                    self.desk_client.move_ticket_to_department(ticket_id, DEPT_DOCS_CAB)
-                    logger.info(f"✅ TRANSFER → Ticket transféré vers {DEPT_DOCS_CAB}")
+                if self._move_ticket(ticket_id, DEPT_DOCS_CAB):
                     result['transferred_to'] = DEPT_DOCS_CAB
-                except Exception as transfer_error:
-                    logger.warning(f"⚠️ Impossible de transférer vers {DEPT_DOCS_CAB}: {transfer_error}")
-                    result['transfer_error'] = str(transfer_error)
             elif is_vtc_hors_partenariat and not auto_update_ticket:
                 logger.info(f"\n8️⃣b TRANSFER {DEPT_DOCS_CAB} → Préparé (pas d'auto-update)")
                 result['transfer_prepared'] = DEPT_DOCS_CAB
@@ -1932,11 +1924,7 @@ Le candidat a un ancien dossier dont les frais CMA ({CMA_EXAM_FEE}€) ont déj�
                 f"Sa demande actuelle concerne un autre financement (CPF / France Travail / fi perso).\n"
                 f"Le dossier Uber 20€ n'est pas concerné → à traiter comme un nouveau prospect."
             )
-            try:
-                self.desk_client.add_ticket_comment(ticket_id, internal_note, is_public=False)
-                logger.info("  📝 Note interne ajoutée (demande non-Uber)")
-            except Exception as e:
-                logger.warning(f"  ⚠️ Erreur ajout note interne: {e}")
+            self._add_internal_note(ticket_id, internal_note)
 
             # Auto-transfer vers Contact
             if auto_transfer:
@@ -1966,11 +1954,7 @@ Le candidat a un ancien dossier dont les frais CMA ({CMA_EXAM_FEE}€) ont déj�
                 "Demande de formation via autre financement (CPF / France Travail / fi perso).\n"
                 "À traiter comme un nouveau prospect."
             )
-            try:
-                self.desk_client.add_ticket_comment(ticket_id, internal_note, is_public=False)
-                logger.info("  📝 Note interne ajoutée (prospect non-Uber)")
-            except Exception as e:
-                logger.warning(f"  ⚠️ Erreur ajout note interne: {e}")
+            self._add_internal_note(ticket_id, internal_note)
 
             if auto_transfer:
                 try:
@@ -2136,11 +2120,7 @@ Le candidat a un ancien dossier dont les frais CMA ({CMA_EXAM_FEE}€) ont déj�
                             "On lui a expliqué qu'il ne pouvait pas s'inscrire une seconde fois gratuitement.\n"
                             "Il revient pour être recontacté par un conseiller → prospect pour offre fi perso ou CPF."
                         )
-                        try:
-                            self.desk_client.add_ticket_comment(ticket_id, internal_note, is_public=False)
-                            logger.info("  📝 Note interne ajoutée (upsell)")
-                        except Exception as e:
-                            logger.warning(f"  ⚠️ Erreur ajout note interne: {e}")
+                        self._add_internal_note(ticket_id, internal_note)
 
                         # Transférer vers Contact si auto_transfer
                         if auto_transfer:
@@ -2796,11 +2776,7 @@ RÉSUMÉ (2-3 phrases):"""
                 f"Deals trouvés ({len(all_deals)}) : {deals_summary}"
             )
 
-            try:
-                self.desk_client.add_ticket_comment(ticket_id, note, is_public=False)
-                logger.info("  ✅ Note interne ajoutée sur le ticket")
-            except Exception as e:
-                logger.warning(f"  ⚠️ Impossible d'ajouter la note: {e}")
+            self._add_internal_note(ticket_id, note)
 
             logger.warning("🛑 STOP WORKFLOW — Pas de deal GAGNÉ → investigation manuelle")
             return {
@@ -3269,12 +3245,7 @@ Cordialement,<br>
                             self._mark_brouillon_auto(ticket_id)
 
                             # Transférer le ticket vers DOCS CAB
-                            try:
-                                self.desk_client.move_ticket_to_department(ticket_id, DEPT_DOCS_CAB)
-                                logger.info(f"  ✅ Ticket transféré vers {DEPT_DOCS_CAB}")
-                                transferred = True
-                            except Exception as transfer_error:
-                                logger.warning(f"  ⚠️ Impossible de transférer vers {DEPT_DOCS_CAB}: {transfer_error}")
+                            transferred = self._move_ticket(ticket_id, DEPT_DOCS_CAB)
                     except Exception as e:
                         logger.error(f"  ❌ Erreur création brouillon {DEPT_DOCS_CAB}: {e}")
 
@@ -3296,13 +3267,7 @@ Cordialement,<br>
                 else:
                     logger.info(f"  → Demande d'information ({detected_intent}) → Contact sans brouillon")
 
-                    transferred = False
-                    try:
-                        self.desk_client.move_ticket_to_department(ticket_id, DEPT_CONTACT)
-                        logger.info(f"  ✅ Ticket transféré vers {DEPT_CONTACT}")
-                        transferred = True
-                    except Exception as transfer_error:
-                        logger.warning(f"  ⚠️ Impossible de transférer vers {DEPT_CONTACT}: {transfer_error}")
+                    transferred = self._move_ticket(ticket_id, DEPT_CONTACT)
 
                     return {
                         'success': True,
@@ -4241,7 +4206,6 @@ Cordialement,<br>
 
                 if all_sessions and wrong_month and session_type:
                     logger.info(f"  🔍 Recherche session corrigée: mois={wrong_month}, type={session_type}")
-                    from src.utils.date_utils import parse_date_flexible
 
                     # Chercher la session qui correspond au même mois
                     best_match = None
@@ -4361,7 +4325,6 @@ Cordialement,<br>
                 end = requested_dates.get('end_date', '')
                 if start and end:
                     # Convertir du format YYYY-MM-DD au format DD/MM/YYYY-DD/MM/YYYY
-                    from src.utils.date_utils import parse_date_flexible
                     start_dt = parse_date_flexible(start)
                     end_dt = parse_date_flexible(end)
                     if start_dt and end_dt:
@@ -4540,8 +4503,6 @@ Cordialement,<br>
         Returns:
             Dict avec id, name, session_type si trouvé, None sinon
         """
-        from src.utils.date_utils import parse_date_flexible
-
         try:
             # Déterminer si c'est une date unique ou un range
             parts = confirmed_dates.split('-')
@@ -4803,8 +4764,6 @@ Cordialement,<br>
         Returns:
             Dict avec id, name, session_type si trouvé, None sinon
         """
-        from src.utils.date_utils import parse_date_flexible
-
         try:
             # Déterminer si c'est une date unique ou un range
             parts = confirmed_dates.split('-')
@@ -5484,18 +5443,14 @@ Bien cordialement,
                             logger.warning(f"  ⚠️ Erreur mise à jour email contact CRM: {e}")
 
                     # Note interne pour l'équipe : vérification manuelle requise
-                    try:
-                        internal_note = (
-                            f"📧 EMAIL ALTERNATIF UBER — Le candidat a fourni une adresse email différente "
-                            f"pour son compte Uber Driver : {uber_alternative_email}\n"
-                            f"Email du contact CRM mis à jour ({_old_email} → {uber_alternative_email}).\n"
-                            f"Action requise : Vérifier avec Uber si cette adresse est liée à un compte Driver actif "
-                            f"et mettre à jour le champ Compte_Uber si confirmé."
-                        )
-                        self.desk_client.add_ticket_comment(ticket_id, internal_note, is_public=False)
-                        logger.info("  📝 Note interne ajoutée (email alternatif Uber)")
-                    except Exception as e:
-                        logger.warning(f"  ⚠️ Erreur ajout note interne CAS D email: {e}")
+                    internal_note = (
+                        f"📧 EMAIL ALTERNATIF UBER — Le candidat a fourni une adresse email différente "
+                        f"pour son compte Uber Driver : {uber_alternative_email}\n"
+                        f"Email du contact CRM mis à jour ({_old_email} → {uber_alternative_email}).\n"
+                        f"Action requise : Vérifier avec Uber si cette adresse est liée à un compte Driver actif "
+                        f"et mettre à jour le champ Compte_Uber si confirmé."
+                    )
+                    self._add_internal_note(ticket_id, internal_note)
 
         # ================================================================
         # STEP 2: Generate Response from Template
@@ -5818,12 +5773,8 @@ Bien cordialement,
         # (le StateDetector n'a pas accès à date_cloture lors de la détection)
         date_cloture = date_examen_vtc_result.get('date_cloture')
         if date_cloture:
-            from datetime import datetime
-            try:
-                if 'T' in str(date_cloture):
-                    cloture_date = datetime.fromisoformat(str(date_cloture).replace('Z', '+00:00')).date()
-                else:
-                    cloture_date = datetime.strptime(str(date_cloture)[:10], '%Y-%m-%d').date()
+            cloture_date = parse_date_flexible(date_cloture)
+            if cloture_date is not None:
                 today = datetime.now().date()
                 cloture_passed = cloture_date < today
 
@@ -5836,8 +5787,8 @@ Bien cordialement,
                 if evalbox in BLOCKING_MODIFICATION and cloture_passed:
                     detected_state.context_data['can_modify_exam_date'] = False
                     logger.info(f"  ⚠️ can_modify_exam_date recalculé: False (clôture {date_cloture} passée)")
-            except Exception as e:
-                logger.warning(f"  ⚠️ Erreur parsing date_cloture: {e}")
+            else:
+                logger.warning(f"  ⚠️ Erreur parsing date_cloture: {date_cloture}")
 
         # LOAD next_dates si intention nécessite des dates alternatives mais dates vides
         # (CAS 7, 9 et autres cas ne chargent pas next_dates par défaut)
@@ -5990,14 +5941,9 @@ Bien cordialement,
                     cloture_str = d.get('Date_Cloture_Inscription', '')
                     # Calculer jours jusqu'à clôture
                     days_until = 999
-                    try:
-                        if 'T' in str(cloture_str):
-                            cloture_dt = datetime.fromisoformat(str(cloture_str).replace('Z', '+00:00')).date()
-                        else:
-                            cloture_dt = datetime.strptime(str(cloture_str)[:10], '%Y-%m-%d').date()
+                    cloture_dt = parse_date_flexible(cloture_str)
+                    if cloture_dt is not None:
                         days_until = (cloture_dt - today).days
-                    except Exception:
-                        pass
                     if days_until < 7:
                         continue  # Pas assez de temps
 

@@ -73,21 +73,3 @@ def get_clean_thread_content(thread: dict) -> str:
 
     # No content available
     return "N/A"
-
-
-def truncate_text(text: str, max_length: int = 1000, suffix: str = "...") -> str:
-    """
-    Truncate text to maximum length.
-
-    Args:
-        text: Text to truncate
-        max_length: Maximum length
-        suffix: Suffix to add if truncated
-
-    Returns:
-        Truncated text
-    """
-    if len(text) <= max_length:
-        return text
-
-    return text[:max_length - len(suffix)] + suffix

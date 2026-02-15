@@ -13,6 +13,8 @@ import logging
 import yaml
 from datetime import datetime, date
 from pathlib import Path
+
+from src.utils.date_utils import parse_date_flexible
 from typing import Dict, List, Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -102,21 +104,21 @@ def get_active_alerts(
         # Vérifier date de début
         start_date_str = alert.get('start_date')
         if start_date_str:
-            try:
-                start_date = datetime.strptime(start_date_str, "%Y-%m-%d").date()
+            start_date = parse_date_flexible(start_date_str, f"alert_{alert.get('id')}_start_date")
+            if start_date:
                 if reference_date < start_date:
                     continue
-            except ValueError:
+            else:
                 logger.warning(f"Format date invalide pour alerte {alert.get('id')}: {start_date_str}")
 
         # Vérifier date de fin
         end_date_str = alert.get('end_date')
         if end_date_str:
-            try:
-                end_date = datetime.strptime(end_date_str, "%Y-%m-%d").date()
+            end_date = parse_date_flexible(end_date_str, f"alert_{alert.get('id')}_end_date")
+            if end_date:
                 if reference_date > end_date:
                     continue
-            except ValueError:
+            else:
                 logger.warning(f"Format date invalide pour alerte {alert.get('id')}: {end_date_str}")
 
         # === LOGIQUE DE DÉCLENCHEMENT ===
