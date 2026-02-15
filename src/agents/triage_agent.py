@@ -26,6 +26,7 @@ load_dotenv(project_root / ".env")
 
 from .base_agent import BaseAgent
 from src.constants.models import MODEL_TRIAGE
+from src.constants.departments import DEPT_DOC, DEPT_REFUS_CMA, DEPT_COMPTABILITE
 
 # Import BusinessRules pour la détection d'envoi de documents
 try:
@@ -609,7 +610,7 @@ EXEMPLE PLAINTE - Message: "J'avais clairement indiqué mon choix pour une forma
             ticket_subject=data.get('ticket_subject', ''),
             thread_content=data.get('thread_content', ''),
             deal_data=data.get('deal_data'),
-            current_department=data.get('current_department', 'DOC')
+            current_department=data.get('current_department', DEPT_DOC)
         )
 
     def triage_ticket(
@@ -617,7 +618,7 @@ EXEMPLE PLAINTE - Message: "J'avais clairement indiqué mon choix pour une forma
         ticket_subject: str,
         thread_content: str,
         deal_data: Optional[Dict[str, Any]] = None,
-        current_department: str = "DOC",
+        current_department: str = DEPT_DOC,
         conversation_summary: Optional[str] = None
     ) -> Dict[str, Any]:
         """
@@ -754,7 +755,7 @@ EXEMPLE PLAINTE - Message: "J'avais clairement indiqué mon choix pour une forma
                         logger.info(f"  🔍 Evalbox = '{evalbox}' ET envoi de documents → Route vers Refus CMA")
                         return {
                             'action': 'ROUTE',
-                            'target_department': 'Refus CMA',
+                            'target_department': DEPT_REFUS_CMA,
                             'reason': f"Evalbox = '{evalbox}' et le candidat envoie des documents",
                             'confidence': 1.0,
                             'method': 'rule_evalbox_with_documents',
@@ -785,7 +786,7 @@ EXEMPLE PLAINTE - Message: "J'avais clairement indiqué mon choix pour une forma
                 logger.info(f"  🔍 Demande d'attestation France Travail détectée → Route vers Comptabilité")
                 return {
                     'action': 'ROUTE',
-                    'target_department': 'Comptabilité',
+                    'target_department': DEPT_COMPTABILITE,
                     'reason': "Demande d'attestation/certificat de formation pour France Travail - Comptabilité génère les attestations",
                     'confidence': 1.0,
                     'method': 'rule_attestation_france_travail',

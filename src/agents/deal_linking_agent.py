@@ -6,23 +6,16 @@ from .base_agent import BaseAgent
 from src.ticket_deal_linker import TicketDealLinker
 from src.zoho_client import ZohoDeskClient, ZohoCRMClient
 from src.constants.models import MODEL_EXTRACTION
+from src.constants.emails import SYSTEM_EMAILS, INTERNAL_DOMAINS as CONST_INTERNAL_DOMAINS
+from src.constants.deal_stages import STAGE_WON
 
 logger = logging.getLogger(__name__)
 
 # Emails système à ignorer lors de l'extraction de l'email candidat
-SYSTEM_EMAILS_TO_IGNORE = [
-    'contact@evalbox.com',
-    'noreply@evalbox.com',
-    'doc@cab-formations.fr',
-    'contact@cab-formations.fr',
-    'admin@cab-formations.fr',
-]
+SYSTEM_EMAILS_TO_IGNORE = list(SYSTEM_EMAILS)
 
 # Domaines internes CAB - si l'expéditeur est de ce domaine, c'est peut-être un forward
-INTERNAL_DOMAINS = [
-    '@cab-formations.fr',
-    '@formalogistics.fr',
-]
+INTERNAL_DOMAINS = list(CONST_INTERNAL_DOMAINS)
 
 # Patterns pour détecter un message transféré
 FORWARD_PATTERNS = [
@@ -105,7 +98,7 @@ def _check_has_paid_formation_after_uber(all_deals: List[Dict], deals_20_won: Li
     # Chercher un deal avec montant > 20€ et GAGNÉ, plus récent que le deal 20€
     deals_paid_formation = [
         d for d in all_deals
-        if d.get('Stage') == 'GAGNÉ'
+        if d.get('Stage') == STAGE_WON
         and d.get('Amount') is not None
         and float(d.get('Amount', 0)) > 25  # Plus de 25€ pour éviter les variations de l'offre 20€
         and (d.get('Closing_Date', '') or '') > date_20_recent
@@ -642,7 +635,7 @@ Always respond in JSON format with the following structure:
                 # Vérifier Stage et Amount
                 stage = deal.get('Stage', '')
                 amount = deal.get('Amount')
-                if stage != 'GAGNÉ' or amount != 20:
+                if stage != STAGE_WON or amount != 20:
                     continue
 
                 # Vérifier identité: Numero_Permis (fort) puis CMA_de_depot (fallback)

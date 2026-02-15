@@ -21,6 +21,8 @@ import re
 from datetime import datetime, timedelta
 from typing import Dict, Optional, List
 
+from src.constants.emails import COMPANY_SIGNATURE
+
 logger = logging.getLogger(__name__)
 
 
@@ -498,7 +500,7 @@ En cas de report accepté par la CMA, vous serez repositionné(e) sur {next_exam
 **Merci de nous indiquer votre choix** afin que nous puissions vous accompagner au mieux.
 
 Cordialement,
-L'équipe Cab Formations"""
+{COMPANY_SIGNATURE}"""
 
     return message
 

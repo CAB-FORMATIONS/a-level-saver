@@ -12,6 +12,7 @@ This module provides multiple strategies to link tickets to deals:
 import logging
 from typing import Dict, Any, Optional, List
 from src.zoho_client import ZohoDeskClient, ZohoCRMClient
+from src.constants.deal_stages import STAGE_CLOSED_WON, STAGE_CLOSED_LOST
 
 logger = logging.getLogger(__name__)
 
@@ -268,7 +269,7 @@ class TicketDealLinker:
 
             # Step 3: Return the most appropriate deal
             # Prioritize: Open deals > Recent deals > Any deal
-            open_deals = [d for d in deals if d.get('Stage') not in ['Closed Won', 'Closed Lost']]
+            open_deals = [d for d in deals if d.get('Stage') not in [STAGE_CLOSED_WON, STAGE_CLOSED_LOST]]
 
             if open_deals:
                 deal = open_deals[0]  # Most recent open deal

@@ -44,6 +44,7 @@ from datetime import datetime
 from typing import Dict, List, Any, Optional, Tuple
 
 from src.constants.evalbox import BLOCKING_MODIFICATION
+from src.constants.amounts import CMA_EXAM_FEE
 from src.utils.date_utils import parse_date_flexible, format_date_for_display
 
 logger = logging.getLogger(__name__)
@@ -412,7 +413,7 @@ def get_sync_status_message(
 
 Nous soumettrons votre demande à la CMA pour validation.
 
-**Important :** Sans justificatif valide, des frais de réinscription de 241€ seront à prévoir pour une nouvelle inscription."""
+**Important :** Sans justificatif valide, des frais de réinscription de {CMA_EXAM_FEE}€ seront à prévoir pour une nouvelle inscription."""
 
     return None
 

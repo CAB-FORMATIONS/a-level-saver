@@ -38,6 +38,8 @@ import logging
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 
+from src.constants.amounts import CMA_EXAM_FEE
+
 logger = logging.getLogger(__name__)
 
 # Emojis par type de note
@@ -330,7 +332,7 @@ def log_exam_date_blocked(
         "",
         "ACTION REQUISE:",
         "• Demander justificatif de force majeure par EMAIL",
-        "• OU frais de réinscription 241€",
+        f"• OU frais de réinscription {CMA_EXAM_FEE}€",
     ]
 
     if ticket_id:

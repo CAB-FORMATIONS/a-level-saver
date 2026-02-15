@@ -46,7 +46,12 @@ from src.utils.response_humanizer import humanize_response
 from src.utils.intent_parser import IntentParser
 from src.utils.date_filter import apply_final_filter
 from src.constants.models import MODEL_EXTRACTION, MODEL_PERSONALIZATION, MODEL_TRIAGE
-from src.constants.amounts import UBER_OFFER_AMOUNT
+from src.constants.amounts import UBER_OFFER_AMOUNT, CMA_EXAM_FEE, CMA_DOSSIER_FEE
+from src.constants.departments import DEPT_DOC, DEPT_CONTACT, DEPT_DOCS_CAB, DEPT_REFUS_CMA, DEPT_COMPTABILITE
+from src.constants.emails import COMPANY_SIGNATURE
+from src.constants.thresholds import ANCIEN_DOSSIER_CUTOFF_DATE
+from src.constants.urls import ZOHO_CRM_DEAL_URL, ZOHO_DESK_TICKET_URL
+from src.constants.deal_stages import STAGE_WON
 from src.constants.intents import (
     DATE_CONFIRMATION_INTENTS, DATE_RELATED_INTENTS, NEEDS_NEXT_DATES_INTENTS,
     SESSION_CHANGE_INTENTS, FULL_RECAP_INTENTS,
@@ -459,7 +464,7 @@ class DOCTicketWorkflow:
                             duplicate_deal = self.crm_client.get_deal(pending_deal_id)
                             if duplicate_deal:
                                 # 2. Mettre à jour cf_opportunite vers le deal doublon
-                                deal_url = f"https://crm.zoho.com/crm/org123/tab/Potentials/{pending_deal_id}"
+                                deal_url = ZOHO_CRM_DEAL_URL.format(org_id='', deal_id=pending_deal_id)
                                 try:
                                     self.desk_client.update_ticket(ticket_id, {
                                         'cf': {'cf_opportunite': deal_url}
@@ -551,7 +556,7 @@ ACTION: Traitement comme nouveau dossier (homonyme probable)
                 logger.warning(f"⚠️  TRIAGE → ROUTE to {target_dept}")
 
                 # CAS SPÉCIAL: TRANSMET_DOCUMENTS vers Refus CMA → créer un brouillon d'accusé réception
-                if target_dept == 'Refus CMA' and detected_intent == 'TRANSMET_DOCUMENTS':
+                if target_dept == DEPT_REFUS_CMA and detected_intent == 'TRANSMET_DOCUMENTS':
                     logger.info("  📝 Création d'un brouillon d'accusé réception avant transfert...")
 
                     # Récupérer le prénom du candidat depuis le deal
@@ -576,7 +581,7 @@ Nous avons bien reçu votre document et nous vous en remercions.<br>
 Notre équipe va le traiter dans les plus brefs délais. Si des informations complémentaires sont nécessaires, nous reviendrons vers vous.<br>
 <br>
 Cordialement,<br>
-L'équipe CAB Formations"""
+{COMPANY_SIGNATURE}"""
 
                     result['response_result'] = {
                         'response_text': acknowledgment_html,
@@ -611,9 +616,9 @@ L'équipe CAB Formations"""
                                 # Transférer le ticket vers Refus CMA
                                 if auto_update_ticket:
                                     try:
-                                        self.desk_client.move_ticket_to_department(ticket_id, "Refus CMA")
-                                        logger.info("  ✅ Ticket transféré vers Refus CMA")
-                                        result['transferred_to'] = "Refus CMA"
+                                        self.desk_client.move_ticket_to_department(ticket_id, DEPT_REFUS_CMA)
+                                        logger.info(f"  ✅ Ticket transféré vers {DEPT_REFUS_CMA}")
+                                        result['transferred_to'] = DEPT_REFUS_CMA
                                     except Exception as transfer_error:
                                         logger.error(f"  ❌ Erreur transfert: {transfer_error}")
                             else:
@@ -845,7 +850,7 @@ ACTION REQUISE: Attendre réponse candidat pour confirmer s'il s'agit bien du m�
 
 Ce candidat a un dossier déjà payé à la CMA (Dossier Synchronisé ou Refusé CMA).
 
-👉 NE PAS REPAYER LES 241€ DE FRAIS D'EXAMEN
+👉 NE PAS REPAYER LES {CMA_EXAM_FEE}€ DE FRAIS D'EXAMEN
 
 Le dossier peut être repris sans frais supplémentaires auprès de la CMA."""
 
@@ -967,19 +972,19 @@ Le dossier peut être repris sans frais supplémentaires auprès de la CMA."""
                     old_deal_name = old_paid_deal.get('Deal_Name', '')
                     old_evalbox = old_paid_deal.get('Evalbox', 'N/A')
                     old_dup_type = triage_result.get('duplicate_type', '')
-                    crm_link = f"https://crm.zoho.com/crm/tab/Potentials/{old_deal_id}"
+                    crm_link = ZOHO_CRM_DEAL_URL.format(org_id='', deal_id=old_deal_id)
 
                     note_content = f"""⚠️ ANCIEN DOSSIER CMA DÉJÀ PAYÉ
 
 Doublon détecté (type: {old_dup_type})
-Le candidat a un ancien dossier dont les frais CMA (241€) ont déjà été réglés.
+Le candidat a un ancien dossier dont les frais CMA ({CMA_EXAM_FEE}€) ont déjà été réglés.
 
 📋 Ancien deal: {old_deal_name}
 🔗 Lien: {crm_link}
 📊 Evalbox ancien dossier: {old_evalbox}
 
 👉 ACTION REQUISE: Payer le dossier CMA par chèque en indiquant l'ancien numéro de dossier Evalbox ({old_evalbox}).
-⚠️ NE PAS REPAYER en ligne les 241€ de frais d'examen."""
+⚠️ NE PAS REPAYER en ligne les {CMA_EXAM_FEE}€ de frais d'examen."""
 
                     self.desk_client.add_ticket_comment(
                         ticket_id,
@@ -1051,7 +1056,7 @@ Le candidat a un ancien dossier dont les frais CMA (241€) ont déjà été ré
                     if cma_payment_mentioned:
                         escalation_note = (
                             "⚠️ INSISTANCE ANNULATION — CMA DÉJÀ PAYÉE\n\n"
-                            "Le candidat a déjà reçu une réponse mentionnant le paiement CMA (241€) "
+                            f"Le candidat a déjà reçu une réponse mentionnant le paiement CMA ({CMA_EXAM_FEE}€) "
                             "et insiste pour annuler/être remboursé.\n\n"
                             "→ ANNULATION DE L'EXAMEN : demander remboursement à la CMA en urgence.\n"
                             "→ Ticket escaladé en priorité HIGH et assigné à Lamia pour traitement manuel."
@@ -1185,7 +1190,7 @@ Le candidat a un ancien dossier dont les frais CMA (241€) ont déjà été ré
                             if cma_payment_at_risk:
                                 escalation_note = (
                                     "⚠️ INSISTANCE ANNULATION CROSS-TICKET — CMA DÉJÀ PAYÉE\n\n"
-                                    "Le candidat a déjà reçu une réponse sur un ticket précédent mentionnant le paiement CMA (241€) "
+                                    f"Le candidat a déjà reçu une réponse sur un ticket précédent mentionnant le paiement CMA ({CMA_EXAM_FEE}€) "
                                     "et revient avec un nouveau ticket pour annuler/être remboursé.\n\n"
                                     "→ ANNULATION DE L'EXAMEN : demander remboursement à la CMA en urgence.\n"
                                     "→ Ticket escaladé en priorité HIGH et assigné à Lamia pour traitement manuel."
@@ -1476,9 +1481,9 @@ Le candidat a un ancien dossier dont les frais CMA (241€) ont déjà été ré
 
                     # Mapping département → email expéditeur
                     dept_email_map = {
-                        'DOC': settings.zoho_desk_email_doc,
-                        'Contact': settings.zoho_desk_email_contact,
-                        'Comptabilité': settings.zoho_desk_email_compta,
+                        DEPT_DOC: settings.zoho_desk_email_doc,
+                        DEPT_CONTACT: settings.zoho_desk_email_contact,
+                        DEPT_COMPTABILITE: settings.zoho_desk_email_compta,
                     }
 
                     # Déterminer l'email selon le département
@@ -1645,15 +1650,15 @@ Le candidat a un ancien dossier dont les frais CMA (241€) ont déjà été ré
             if is_vtc_hors_partenariat and result.get('draft_created') and auto_update_ticket:
                 logger.info("\n8️⃣b TRANSFER DOCS CAB - Deal VTC classique (hors partenariat)...")
                 try:
-                    self.desk_client.move_ticket_to_department(ticket_id, "DOCS CAB")
-                    logger.info("✅ TRANSFER → Ticket transféré vers DOCS CAB")
-                    result['transferred_to'] = "DOCS CAB"
+                    self.desk_client.move_ticket_to_department(ticket_id, DEPT_DOCS_CAB)
+                    logger.info(f"✅ TRANSFER → Ticket transféré vers {DEPT_DOCS_CAB}")
+                    result['transferred_to'] = DEPT_DOCS_CAB
                 except Exception as transfer_error:
-                    logger.warning(f"⚠️ Impossible de transférer vers DOCS CAB: {transfer_error}")
+                    logger.warning(f"⚠️ Impossible de transférer vers {DEPT_DOCS_CAB}: {transfer_error}")
                     result['transfer_error'] = str(transfer_error)
             elif is_vtc_hors_partenariat and not auto_update_ticket:
-                logger.info("\n8️⃣b TRANSFER DOCS CAB → Préparé (pas d'auto-update)")
-                result['transfer_prepared'] = "DOCS CAB"
+                logger.info(f"\n8️⃣b TRANSFER {DEPT_DOCS_CAB} → Préparé (pas d'auto-update)")
+                result['transfer_prepared'] = DEPT_DOCS_CAB
 
             result['success'] = True
             logger.info("\n" + "=" * 80)
@@ -1696,7 +1701,7 @@ Le candidat a un ancien dossier dont les frais CMA (241€) ont déjà été ré
         # Get ticket details
         ticket = self.desk_client.get_ticket(ticket_id)
         subject = ticket.get('subject', '')
-        current_department = ticket.get('departmentId') or ticket.get('department', {}).get('name', 'DOC')
+        current_department = ticket.get('departmentId') or ticket.get('department', {}).get('name', DEPT_DOC)
 
         # Get threads for content analysis
         # API returns newest first, but we want the most MEANINGFUL customer message
@@ -1761,7 +1766,7 @@ Le candidat a un ancien dossier dont les frais CMA (241€) ont déjà été ré
         # Default result
         triage_result = {
             'action': 'GO',
-            'target_department': 'DOC',
+            'target_department': DEPT_DOC,
             'reason': 'Ticket reste dans DOC',
             'transferred': False,
             'current_department': current_department,
@@ -1868,7 +1873,7 @@ Le candidat a un ancien dossier dont les frais CMA (241€) ont déjà été ré
             from config import settings as _cfg_rgpd
             rgpd_email = _cfg_rgpd.rgpd_referent_email
             triage_result['action'] = 'ROUTE'
-            triage_result['target_department'] = 'Contact'
+            triage_result['target_department'] = DEPT_CONTACT
             triage_result['reason'] = 'Demande RGPD (suppression données) - Transférer au référent RGPD'
             triage_result['rgpd_referent'] = rgpd_email
             # Ajouter une note sur le ticket
@@ -1914,7 +1919,7 @@ Le candidat a un ancien dossier dont les frais CMA (241€) ont déjà été ré
             logger.info(f"📋 DEMANDE NON-UBER détectée (CPF/France Travail/etc.) + doublon existant → Router vers Contact")
             logger.info(f"   → Ignorer logique doublon Uber car intention différente")
             triage_result['action'] = 'ROUTE'
-            triage_result['target_department'] = 'Contact'
+            triage_result['target_department'] = DEPT_CONTACT
             triage_result['reason'] = "Candidat avec dossier Uber existant mais demande formation non-Uber (CPF/France Travail/autre financement)"
             triage_result['method'] = 'non_uber_registration_routing'
             triage_result['has_existing_uber_deal'] = True
@@ -1937,7 +1942,7 @@ Le candidat a un ancien dossier dont les frais CMA (241€) ont déjà été ré
             if auto_transfer:
                 try:
                     logger.info(f"🔄 Transfert automatique vers Contact...")
-                    transfer_success = self.dispatcher._reassign_ticket(ticket_id, 'Contact')
+                    transfer_success = self.dispatcher._reassign_ticket(ticket_id, DEPT_CONTACT)
                     if transfer_success:
                         logger.info(f"✅ Ticket transféré vers Contact")
                         triage_result['transferred'] = True
@@ -1951,7 +1956,7 @@ Le candidat a un ancien dossier dont les frais CMA (241€) ont déjà été ré
         if is_non_uber_registration and not all_deals:
             logger.info(f"📋 DEMANDE NON-UBER détectée + pas de dossier → Router vers Contact (prospect)")
             triage_result['action'] = 'ROUTE'
-            triage_result['target_department'] = 'Contact'
+            triage_result['target_department'] = DEPT_CONTACT
             triage_result['reason'] = "Demande formation non-Uber (CPF/France Travail/autre) - prospect à traiter manuellement"
             triage_result['method'] = 'non_uber_prospect_routing'
 
@@ -1969,7 +1974,7 @@ Le candidat a un ancien dossier dont les frais CMA (241€) ont déjà été ré
 
             if auto_transfer:
                 try:
-                    transfer_success = self.dispatcher._reassign_ticket(ticket_id, 'Contact')
+                    transfer_success = self.dispatcher._reassign_ticket(ticket_id, DEPT_CONTACT)
                     if transfer_success:
                         logger.info(f"✅ Ticket transféré vers Contact")
                         triage_result['transferred'] = True
@@ -2016,23 +2021,23 @@ Le candidat a un ancien dossier dont les frais CMA (241€) ont déjà été ré
         if linking_result.get('has_duplicate_uber_offer'):
             # Vérifier si le département recalculé indique un service hors-scope (Contact)
             recalc_dept = linking_result.get('recommended_department', '')
-            if recalc_dept == 'Contact':
+            if recalc_dept == DEPT_CONTACT:
                 logger.info(f"📋 DOUBLON UBER détecté MAIS département recalculé vers Contact → Router vers Contact")
                 triage_result['action'] = 'ROUTE'
-                triage_result['target_department'] = 'Contact'
+                triage_result['target_department'] = DEPT_CONTACT
                 triage_result['reason'] = f"Doublon Uber mais demande hors-scope détectée (département recalculé: Contact)"
                 triage_result['method'] = 'duplicate_with_other_service'
 
                 # Note de contexte routing
                 self._generate_routing_context_note(
-                    ticket_id, 'Contact', last_thread_content, subject,
+                    ticket_id, DEPT_CONTACT, last_thread_content, subject,
                     all_deals, selected_deal, routing_method='duplicate_with_other_service'
                 )
 
                 if auto_transfer:
                     try:
                         logger.info(f"🔄 Transfert automatique vers Contact...")
-                        transfer_success = self.dispatcher._reassign_ticket(ticket_id, 'Contact')
+                        transfer_success = self.dispatcher._reassign_ticket(ticket_id, DEPT_CONTACT)
                         if transfer_success:
                             logger.info(f"✅ Ticket transféré vers Contact")
                             triage_result['transferred'] = True
@@ -2121,7 +2126,7 @@ Le candidat a un ancien dossier dont les frais CMA (241€) ont déjà été ré
                         # → Router vers Contact pour upsell (offre fi perso ou CPF)
                         logger.info("🔄 DOUBLON UBER déjà communiqué → Route vers Contact pour upsell")
                         triage_result['action'] = 'ROUTE'
-                        triage_result['target_department'] = 'Contact'
+                        triage_result['target_department'] = DEPT_CONTACT
                         triage_result['reason'] = "Doublon Uber déjà communiqué - candidat revient (upsell fi perso/CPF)"
                         triage_result['method'] = 'duplicate_already_communicated_upsell'
 
@@ -2140,7 +2145,7 @@ Le candidat a un ancien dossier dont les frais CMA (241€) ont déjà été ré
                         # Transférer vers Contact si auto_transfer
                         if auto_transfer:
                             try:
-                                transfer_success = self.dispatcher._reassign_ticket(ticket_id, 'Contact')
+                                transfer_success = self.dispatcher._reassign_ticket(ticket_id, DEPT_CONTACT)
                                 if transfer_success:
                                     logger.info("  ✅ Ticket transféré vers Contact")
                                     triage_result['transferred'] = True
@@ -2195,14 +2200,14 @@ Le candidat a un ancien dossier dont les frais CMA (241€) ont déjà été ré
                 # C'est une demande d'information → Router vers Contact
                 logger.info(f"📋 Candidat non trouvé MAIS demande d'information détectée → Contact")
                 triage_result['action'] = 'ROUTE'
-                triage_result['target_department'] = 'Contact'
+                triage_result['target_department'] = DEPT_CONTACT
                 triage_result['reason'] = "Demande d'information (CPF/renseignement) - candidat non inscrit"
                 triage_result['method'] = 'info_request_routing'
                 triage_result['email_searched'] = linking_result.get('email')
 
                 # Note de contexte routing
                 self._generate_routing_context_note(
-                    ticket_id, 'Contact', clean_thread_content, subject,
+                    ticket_id, DEPT_CONTACT, clean_thread_content, subject,
                     all_deals, None, routing_method='info_request_routing'
                 )
 
@@ -2210,7 +2215,7 @@ Le candidat a un ancien dossier dont les frais CMA (241€) ont déjà été ré
                 if auto_transfer:
                     try:
                         logger.info(f"🔄 Transfert automatique vers Contact...")
-                        transfer_success = self.dispatcher._reassign_ticket(ticket_id, 'Contact')
+                        transfer_success = self.dispatcher._reassign_ticket(ticket_id, DEPT_CONTACT)
                         if transfer_success:
                             logger.info(f"✅ Ticket transféré vers Contact")
                             triage_result['transferred'] = True
@@ -2233,14 +2238,14 @@ Le candidat a un ancien dossier dont les frais CMA (241€) ont déjà été ré
                 # Demande hors périmètre VTC → Router vers Contact (un humain décidera)
                 logger.info(f"🚫 Candidat non trouvé ET demande HORS PÉRIMÈTRE VTC détectée → Contact")
                 triage_result['action'] = 'ROUTE'
-                triage_result['target_department'] = 'Contact'
+                triage_result['target_department'] = DEPT_CONTACT
                 triage_result['reason'] = "Demande hors périmètre VTC (CACES/taxi/autre) - pas un candidat"
                 triage_result['method'] = 'out_of_scope_routing'
                 triage_result['email_searched'] = linking_result.get('email')
 
                 # Note de contexte routing
                 self._generate_routing_context_note(
-                    ticket_id, 'Contact', clean_thread_content, subject,
+                    ticket_id, DEPT_CONTACT, clean_thread_content, subject,
                     all_deals, None, routing_method='out_of_scope_routing'
                 )
 
@@ -2248,7 +2253,7 @@ Le candidat a un ancien dossier dont les frais CMA (241€) ont déjà été ré
                 if auto_transfer:
                     try:
                         logger.info(f"🔄 Transfert automatique vers Contact...")
-                        transfer_success = self.dispatcher._reassign_ticket(ticket_id, 'Contact')
+                        transfer_success = self.dispatcher._reassign_ticket(ticket_id, DEPT_CONTACT)
                         if transfer_success:
                             logger.info(f"✅ Ticket transféré vers Contact")
                             triage_result['transferred'] = True
@@ -2273,8 +2278,8 @@ Le candidat a un ancien dossier dont les frais CMA (241€) ont déjà été ré
 
         # Rule #2.7: ROUTAGE AUTOMATIQUE SI DÉPARTEMENT DIFFÉRENT DE DOC
         # BusinessRules a déterminé que ce ticket devrait aller ailleurs (ex: "examen pratique" → Contact)
-        suggested_department = linking_result.get('recommended_department') or linking_result.get('department', 'DOC')
-        if suggested_department and suggested_department.upper() not in ['DOC', 'DOCUMENTS']:
+        suggested_department = linking_result.get('recommended_department') or linking_result.get('department', DEPT_DOC)
+        if suggested_department and suggested_department.upper() not in [DEPT_DOC, 'DOCUMENTS']:
             logger.warning(f"⚠️ ROUTAGE AUTOMATIQUE → {suggested_department} (règle métier)")
             triage_result['action'] = 'ROUTE'
             triage_result['target_department'] = suggested_department
@@ -2421,7 +2426,7 @@ RÉSUMÉ (2-3 phrases):"""
             logger.info(f"  🔍 Pièces jointes détectées ({attachment_count}) + sujet document → Route vers Refus CMA")
             ai_triage = {
                 'action': 'ROUTE',
-                'target_department': 'Refus CMA',
+                'target_department': DEPT_REFUS_CMA,
                 'reason': f"Candidat envoie {attachment_count} document(s) en pièce jointe - à uploader sur ExamT3P",
                 'confidence': 1.0,
                 'method': 'rule_transmet_documents',
@@ -2436,7 +2441,7 @@ RÉSUMÉ (2-3 phrases):"""
                 ticket_subject=subject,
                 thread_content=last_thread_content,
                 deal_data=selected_deal,
-                current_department='DOC',
+                current_department=DEPT_DOC,
                 conversation_summary=conversation_summary  # Nouveau: contexte historique
             )
 
@@ -2471,14 +2476,14 @@ RÉSUMÉ (2-3 phrases):"""
         # on reste dans DOC pour traiter. On ne route vers Refus CMA que si c'est une correction.
         # ================================================================
         if (ai_triage['action'] == 'ROUTE'
-            and ai_triage['target_department'] == 'Refus CMA'
+            and ai_triage['target_department'] == DEPT_REFUS_CMA
             and ai_triage.get('primary_intent') == 'TRANSMET_DOCUMENTS'):
 
             date_dossier_recu = selected_deal.get('Date_Dossier_re_u') if selected_deal else None
             if not date_dossier_recu:
                 logger.info("  📋 TRANSMET_DOCUMENTS + Date_Dossier_reçu VIDE → Envoi initial, on reste dans DOC")
                 ai_triage['action'] = 'GO'
-                ai_triage['target_department'] = 'DOC'
+                ai_triage['target_department'] = DEPT_DOC
                 ai_triage['reason'] = 'Envoi initial de documents (Date_Dossier_reçu vide) - traitement dans DOC'
             else:
                 logger.info(f"  📋 TRANSMET_DOCUMENTS + Date_Dossier_reçu={date_dossier_recu} → Correction, route vers Refus CMA")
@@ -2490,21 +2495,21 @@ RÉSUMÉ (2-3 phrases):"""
         # Si le candidat a un deal Uber 20€, c'est une erreur interne → DOC gère.
         # ================================================================
         if (ai_triage['action'] == 'ROUTE'
-            and ai_triage['target_department'] == 'Contact'
+            and ai_triage['target_department'] == DEPT_CONTACT
             and selected_deal
             and selected_deal.get('Amount') == UBER_OFFER_AMOUNT):
             content_lower = (last_thread_content or '').lower() + ' ' + (subject or '').lower()
             if 'taxi' in content_lower:
                 logger.info("  🚕 Candidat Uber 20€ + mention 'taxi' → Override IA: rester en DOC (erreur inscription interne)")
                 ai_triage['action'] = 'GO'
-                ai_triage['target_department'] = 'DOC'
+                ai_triage['target_department'] = DEPT_DOC
                 ai_triage['reason'] = 'Candidat Uber 20€ mentionne taxi (erreur inscription) - traitement interne DOC'
                 triage_result['action'] = 'GO'
-                triage_result['target_department'] = 'DOC'
+                triage_result['target_department'] = DEPT_DOC
                 triage_result['reason'] = ai_triage['reason']
 
         # Determine action based on AI recommendation
-        if ai_triage['action'] == 'ROUTE' and ai_triage['target_department'] != 'DOC':
+        if ai_triage['action'] == 'ROUTE' and ai_triage['target_department'] != DEPT_DOC:
             # Note de contexte routing
             self._generate_routing_context_note(
                 ticket_id, ai_triage['target_department'], last_thread_content, subject,
@@ -2528,7 +2533,7 @@ RÉSUMÉ (2-3 phrases):"""
         else:
             # Stay in DOC
             triage_result['action'] = 'GO'
-            triage_result['target_department'] = 'DOC'
+            triage_result['target_department'] = DEPT_DOC
             triage_result['reason'] = 'Ticket DOC valide - continuer workflow'
 
         return triage_result
@@ -2885,7 +2890,7 @@ Deux comptes ExamenT3P fonctionnels ont été détectés pour ce candidat, et le
 3. Si double paiement confirmé, demander remboursement
 4. Mettre à jour le CRM avec le bon compte
 
-⚠️ Risque: Paiement en double des frais CMA (60€)"""
+⚠️ Risque: Paiement en double des frais CMA ({CMA_DOSSIER_FEE}€)"""
 
                 self.crm_client.add_deal_note(
                     deal_id=deal_id,
@@ -3205,7 +3210,7 @@ Deux comptes ExamenT3P fonctionnels ont été détectés pour ce candidat, et le
             # - TRANSMET_DOCUMENTS → DOCS CAB + brouillon accusé réception
             # - Autre intention → Contact sans brouillon (traitement manuel)
             deal_stage = deal_data.get('Stage', '')
-            if deal_stage == 'GAGNÉ':
+            if deal_stage == STAGE_WON:
                 detected_intent = triage_result.get('detected_intent', '')
 
                 logger.info("\n🚦 SORTIE ANTICIPÉE - Deal VTC classique détecté")
@@ -3235,7 +3240,7 @@ Nous avons bien reçu votre message et nous vous en remercions.<br>
 Notre équipe va le traiter dans les plus brefs délais. Si des informations complémentaires sont nécessaires, nous reviendrons vers vous.<br>
 <br>
 Cordialement,<br>
-L'équipe CAB Formations"""
+{COMPANY_SIGNATURE}"""
 
                     draft_created = False
                     transferred = False
@@ -3265,23 +3270,23 @@ L'équipe CAB Formations"""
 
                             # Transférer le ticket vers DOCS CAB
                             try:
-                                self.desk_client.move_ticket_to_department(ticket_id, "DOCS CAB")
-                                logger.info("  ✅ Ticket transféré vers DOCS CAB")
+                                self.desk_client.move_ticket_to_department(ticket_id, DEPT_DOCS_CAB)
+                                logger.info(f"  ✅ Ticket transféré vers {DEPT_DOCS_CAB}")
                                 transferred = True
                             except Exception as transfer_error:
-                                logger.warning(f"  ⚠️ Impossible de transférer vers DOCS CAB: {transfer_error}")
+                                logger.warning(f"  ⚠️ Impossible de transférer vers {DEPT_DOCS_CAB}: {transfer_error}")
                     except Exception as e:
-                        logger.error(f"  ❌ Erreur création brouillon DOCS CAB: {e}")
+                        logger.error(f"  ❌ Erreur création brouillon {DEPT_DOCS_CAB}: {e}")
 
                     return {
                         'success': True,
                         'workflow_stage': 'STOPPED_DOCS_CAB',
-                        'reason': 'Deal VTC classique (non-Uber) + envoi documents - Transféré vers DOCS CAB',
+                        'reason': f'Deal VTC classique (non-Uber) + envoi documents - Transféré vers {DEPT_DOCS_CAB}',
                         'ticket_id': ticket_id,
                         'deal_id': deal_id,
                         'deal_name': deal_data.get('Deal_Name', 'N/A'),
                         'deal_amount': deal_data.get('Amount', 0),
-                        'transferred_to': 'DOCS CAB' if transferred else None,
+                        'transferred_to': DEPT_DOCS_CAB if transferred else None,
                         'draft_created': draft_created,
                         'draft_content': acknowledgment_html if draft_created else None,
                         'crm_updated': False
@@ -3293,21 +3298,21 @@ L'équipe CAB Formations"""
 
                     transferred = False
                     try:
-                        self.desk_client.move_ticket_to_department(ticket_id, "Contact")
-                        logger.info("  ✅ Ticket transféré vers Contact")
+                        self.desk_client.move_ticket_to_department(ticket_id, DEPT_CONTACT)
+                        logger.info(f"  ✅ Ticket transféré vers {DEPT_CONTACT}")
                         transferred = True
                     except Exception as transfer_error:
-                        logger.warning(f"  ⚠️ Impossible de transférer vers Contact: {transfer_error}")
+                        logger.warning(f"  ⚠️ Impossible de transférer vers {DEPT_CONTACT}: {transfer_error}")
 
                     return {
                         'success': True,
                         'workflow_stage': 'STOPPED_CONTACT',
-                        'reason': f'Deal VTC classique (non-Uber) + demande info ({detected_intent}) - Transféré vers Contact',
+                        'reason': f'Deal VTC classique (non-Uber) + demande info ({detected_intent}) - Transféré vers {DEPT_CONTACT}',
                         'ticket_id': ticket_id,
                         'deal_id': deal_id,
                         'deal_name': deal_data.get('Deal_Name', 'N/A'),
                         'deal_amount': deal_data.get('Amount', 0),
-                        'transferred_to': 'Contact' if transferred else None,
+                        'transferred_to': DEPT_CONTACT if transferred else None,
                         'draft_created': False,
                         'crm_updated': False
                     }
@@ -3326,10 +3331,8 @@ L'équipe CAB Formations"""
             evalbox_status = deal_data.get('Evalbox', '')
 
             # Statuts Evalbox qui prouvent que le dossier a été traité
-            ADVANCED_EVALBOX_STATUSES = {
-                "VALIDE CMA", "Convoc CMA reçue", "Dossier Synchronisé",
-                "Pret a payer", "Refusé CMA"
-            }
+            from src.constants.evalbox import PAID_STATUSES, READY_TO_PAY
+            ADVANCED_EVALBOX_STATUSES = PAID_STATUSES | READY_TO_PAY
 
             if not date_dossier_recu:
                 if evalbox_status in ADVANCED_EVALBOX_STATUSES:
@@ -4317,7 +4320,7 @@ L'équipe CAB Formations"""
         ancien_dossier = False
         if deal_data.get('Date_de_depot_CMA'):
             date_depot = deal_data['Date_de_depot_CMA']
-            if date_depot < '2025-11-01':
+            if date_depot < ANCIEN_DOSSIER_CUTOFF_DATE:
                 ancien_dossier = True
                 logger.info("ℹ️  Ancien dossier (avant 01/11/2025) - traitement normal")
 
@@ -4937,7 +4940,7 @@ L'équipe CAB Formations"""
 
         L'offre Uber 20€ n'est valable qu'UNE SEULE FOIS.
         Si le candidat souhaite se réinscrire, il devra :
-        - Payer lui-même les frais d'examen (241€)
+        - Payer lui-même les frais d'examen
         - Gérer son inscription sur ExamT3P
         - Nous pouvons lui proposer la formation (VISIO ou présentiel)
         """
@@ -5003,7 +5006,7 @@ Je vous remercie pour votre message.
 
 Je constate que vous avez une inscription récente{recent_ref}. Cependant, nous ne sommes pas en mesure de prendre en charge une seconde inscription dans le cadre de l'offre Uber à 20€.
 
-Pour cette inscription, les frais d'examen (241€) restent à votre charge et doivent être réglés en autonomie auprès de la CMA via le site ExamT3P : https://www.exament3p.fr
+Pour cette inscription, les frais d'examen ({CMA_EXAM_FEE}€) restent à votre charge et doivent être réglés en autonomie auprès de la CMA via le site ExamT3P : https://www.exament3p.fr
 
 Si vous avez besoin d'une formation de préparation à l'examen VTC, nous pouvons vous proposer :
 
@@ -5015,7 +5018,7 @@ Ces formations sont finançables via votre CPF (Compte Personnel de Formation).
 
 Bien cordialement,
 
-L'équipe Cab Formations"""
+{COMPANY_SIGNATURE}"""
         else:
             # CAS A: Candidat avec uniquement un ancien deal (pas d'inscription récente)
             response_text = f"""Bonjour,
@@ -5029,7 +5032,7 @@ Si vous souhaitez vous réinscrire à l'examen VTC, voici vos options :
 OPTION 1 : Inscription autonome
 
 • Vous pouvez vous inscrire vous-même sur le site de la CMA (ExamT3P)
-• Les frais d'inscription à l'examen s'élèvent à 241€, à votre charge
+• Les frais d'inscription à l'examen s'élèvent à {CMA_EXAM_FEE}€, à votre charge
 • Site d'inscription : https://www.exament3p.fr
 
 OPTION 2 : Formation avec CAB Formations
@@ -5045,7 +5048,7 @@ Merci de me préciser si vous êtes intéressé(e) par l'une de ces options, et 
 
 Bien cordialement,
 
-L'équipe Cab Formations"""
+{COMPANY_SIGNATURE}"""
 
         logger.info(f"✅ Réponse DOUBLON générée ({len(response_text)} caractères)")
 
@@ -5124,7 +5127,7 @@ Dans l'attente de votre retour, je reste à votre disposition.
 
 Bien cordialement,
 
-L'équipe Cab Formations"""
+{COMPANY_SIGNATURE}"""
 
         logger.info(f"✅ Réponse CLARIFICATION DOUBLON générée ({len(response_text)} caractères)")
         logger.info(f"   Intention adaptée: {detected_intent or 'générique'}")
@@ -5194,7 +5197,7 @@ Si vous avez des questions sur la démarche, n'hésitez pas à me contacter.
 
 Bien cordialement,
 
-L'équipe Cab Formations"""
+{COMPANY_SIGNATURE}"""
 
         logger.info(f"✅ Réponse DOUBLON RÉCUPÉRABLE générée ({len(response_text)} caractères)")
 
@@ -5261,7 +5264,7 @@ Dès réception de ces informations, nous reviendrons vers vous rapidement.
 
 Bien cordialement,
 
-L'équipe CAB Formations"""
+{COMPANY_SIGNATURE}"""
 
         logger.info(f"✅ Réponse CLARIFICATION générée ({len(response_text)} caractères), intent={primary_intent}")
 
@@ -5829,8 +5832,8 @@ L'équipe CAB Formations"""
 
                 # Recalculer can_modify_exam_date selon règle B1
                 evalbox = detected_state.context_data.get('evalbox', '')
-                blocking_statuses = {'VALIDE CMA', 'Convoc CMA reçue'}
-                if evalbox in blocking_statuses and cloture_passed:
+                from src.constants.evalbox import BLOCKING_MODIFICATION
+                if evalbox in BLOCKING_MODIFICATION and cloture_passed:
                     detected_state.context_data['can_modify_exam_date'] = False
                     logger.info(f"  ⚠️ can_modify_exam_date recalculé: False (clôture {date_cloture} passée)")
             except Exception as e:
@@ -6127,7 +6130,7 @@ L'équipe CAB Formations"""
         # Montants autorisés selon l'intention
         allowed_amounts = None
         if detected_intent == 'DEMANDE_ANNULATION':
-            allowed_amounts = [20]  # Template mentionne le prix de l'offre Uber 20€
+            allowed_amounts = [UBER_OFFER_AMOUNT]  # Template mentionne le prix de l'offre Uber 20€
 
         validation_result = self.response_validator.validate(
             response_text=response_text,
@@ -6675,7 +6678,7 @@ Génère maintenant la personnalisation (1-3 phrases):"""
 
         # === EN-TÊTE avec lien ticket ===
         lines.append(f"Ticket #{ticket_id}")
-        lines.append(f"https://desk.zoho.com/agent/cabformations/cab-formations/tickets/{ticket_id}")
+        lines.append(ZOHO_DESK_TICKET_URL.format(ticket_id=ticket_id))
         lines.append("")
 
         # === MISES À JOUR CRM ===

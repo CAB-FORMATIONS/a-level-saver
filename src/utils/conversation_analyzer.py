@@ -25,6 +25,7 @@ import anthropic
 
 from src.utils.text_utils import clean_html_content
 from src.constants.models import MODEL_CONVERSATION
+from src.constants.emails import INTERNAL_DOMAIN_MARKERS
 
 logger = logging.getLogger(__name__)
 
@@ -241,7 +242,7 @@ def _count_incoming_threads(threads: list) -> int:
         elif not direction:
             # Fallback: check fromEmailAddress
             from_email = thread.get('fromEmailAddress', '')
-            if from_email and '@cabformation' not in from_email.lower() and '@cab-formation' not in from_email.lower():
+            if from_email and not any(m in from_email.lower() for m in INTERNAL_DOMAIN_MARKERS):
                 count += 1
     return count
 
@@ -269,7 +270,7 @@ def _format_threads_for_analyzer(threads: list) -> str:
             dir_label = 'SORTANT'
         else:
             from_email = thread.get('fromEmailAddress', '')
-            if from_email and '@cabformation' not in from_email.lower() and '@cab-formation' not in from_email.lower():
+            if from_email and not any(m in from_email.lower() for m in INTERNAL_DOMAIN_MARKERS):
                 dir_label = 'ENTRANT'
             else:
                 dir_label = 'SORTANT'

@@ -8,6 +8,7 @@ import logging
 from typing import Dict, Any, Optional
 from .base_agent import BaseAgent
 from src.zoho_client import ZohoDeskClient
+from src.constants.departments import DEPT_DOC
 
 logger = logging.getLogger(__name__)
 
@@ -396,9 +397,9 @@ SIGNALS: [comma-separated keywords/patterns that influenced your decision]
 
         # Common keywords
         keyword_map = {
-            "uber": "DOC",
-            "a-level": "DOC",
-            "student": "DOC",
+            "uber": DEPT_DOC,
+            "a-level": DEPT_DOC,
+            "student": DEPT_DOC,
             "pricing": "Sales",
             "quote": "Sales",
             "demo": "Sales",

@@ -56,6 +56,7 @@ from datetime import datetime, timedelta
 from typing import Dict, Optional, Any
 
 from src.utils.date_utils import parse_date_flexible, format_date_for_display
+from src.constants.amounts import CMA_EXAM_FEE
 
 logger = logging.getLogger(__name__)
 
@@ -274,7 +275,7 @@ def generate_prospect_message() -> str:
 
     Répond aux questions générales et encourage à finaliser le paiement.
     """
-    return """Merci pour votre intérêt pour notre formation VTC en partenariat avec Uber !
+    return f"""Merci pour votre intérêt pour notre formation VTC en partenariat avec Uber !
 
 **Concernant votre question sur les formations :**
 
@@ -288,7 +289,7 @@ Nos formations de 40 heures en visio-conférence se déroulent à **horaires fix
 
 **Ce que comprend l'offre à 20€ :**
 
-✅ **Paiement des frais d'examen de 241€** à la CMA - entièrement pris en charge par CAB Formations
+✅ **Paiement des frais d'examen de {CMA_EXAM_FEE}€** à la CMA - entièrement pris en charge par CAB Formations
 ✅ **Formation en visio-conférence de 40 heures** avec un formateur professionnel
 ✅ **Accès illimité au e-learning** pour réviser à votre rythme
 ✅ **Accompagnement personnalisé** jusqu'à l'obtention de votre carte VTC
@@ -310,11 +311,11 @@ def generate_documents_missing_message() -> str:
 
     Explique l'offre et demande de finaliser l'inscription.
     """
-    return """Nous avons bien reçu votre paiement de 20€ pour l'offre VTC en partenariat avec Uber. Merci pour votre confiance !
+    return f"""Nous avons bien reçu votre paiement de 20€ pour l'offre VTC en partenariat avec Uber. Merci pour votre confiance !
 
 **Ce que comprend votre offre :**
 
-- **Inscription à l'examen VTC** incluant le paiement des frais d'examen de 241€ (pris en charge par CAB Formations)
+- **Inscription à l'examen VTC** incluant le paiement des frais d'examen de {CMA_EXAM_FEE}€ (pris en charge par CAB Formations)
 - **Accès à notre plateforme e-learning** pour réviser à votre rythme
 - **Formation en visio** avec un formateur professionnel (cours du jour OU cours du soir selon votre disponibilité)
 

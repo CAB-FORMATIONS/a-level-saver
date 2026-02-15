@@ -39,6 +39,7 @@ from src.constants.intents import FULL_RECAP_INTENTS, STATUT_INTENTS, DATES_INTE
 from src.constants.amounts import (
     CMA_EXAM_FEE, CMA_DOSSIER_FEE, CMA_ADMISSION_RETAKE_FEE, CMA_MOBILITE_PRO_FEE,
 )
+from src.constants.emails import COMPANY_SIGNATURE
 
 # Détecteur de genre par prénom (singleton)
 _gender_detector = gender_detector.Detector()
@@ -3173,7 +3174,7 @@ class TemplateEngine:
 <p>{{{{personnalisation}}}}</p>
 
 <p>Bien cordialement,<br>
-L'équipe CAB Formations</p>"""
+{COMPANY_SIGNATURE}</p>"""
 
         response_text = fallback_template
         ai_sections = []

@@ -29,6 +29,7 @@ import re
 import logging
 from datetime import datetime
 from typing import Dict, List, Any, Optional, Tuple
+from src.constants.amounts import CMA_EXAM_FEE
 
 logger = logging.getLogger(__name__)
 
@@ -312,7 +313,7 @@ Pour demander un report, merci de nous transmettre **par email** :
 
 Nous soumettrons votre demande à la CMA pour validation du report.
 
-**Sans justificatif valide**, des frais de réinscription de 241€ seront nécessaires pour une nouvelle inscription."""
+**Sans justificatif valide**, des frais de réinscription de {CMA_EXAM_FEE}€ seront nécessaires pour une nouvelle inscription."""
 
 
 def apply_ticket_confirmations_to_crm(

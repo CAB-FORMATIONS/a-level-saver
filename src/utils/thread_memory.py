@@ -30,6 +30,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
+from src.constants.emails import INTERNAL_DOMAIN_MARKERS
+
 logger = logging.getLogger(__name__)
 
 # Intents that explicitly ask about a section → never suppress that section
@@ -721,7 +723,7 @@ def _detect_relance(records: List[MetaRecord], ticket_threads: list = None) -> d
                 is_forward = thread.get('isForward', False)
                 from_email = thread.get('fromEmailAddress', '')
                 # If it has a fromEmailAddress and is not a forward, likely incoming
-                if from_email and not is_forward and '@cabformation' not in from_email.lower():
+                if from_email and not is_forward and not any(m in from_email.lower() for m in INTERNAL_DOMAIN_MARKERS):
                     is_incoming = True
 
             if not is_incoming:
