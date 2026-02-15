@@ -143,15 +143,22 @@ Merci de nous indiquer si l'une de ces alternatives vous convient, ou si vous av
 <!-- CAS 2: Pas de dates spécifiques - Comportement standard -->
 {{#if session_choisie}}
 {{#if session_in_progress}}
+{{#if has_sessions_proposees}}
+Votre session actuelle (<b>{{session_choisie}}</b>{{#if session_date_debut}} du {{session_date_debut}} au {{session_date_fin}}{{/if}}) est <b>en cours</b>, mais un changement reste possible. Voici les alternatives disponibles :<br>
+{{#each sessions_proposees}}
+<b>{{this.session_type_label}}</b> : du {{this.date_debut}} au {{this.date_fin}}<br>
+{{/each}}
+<br>
+<b>Merci de nous confirmer si vous souhaitez changer pour l'une de ces sessions.</b><br>
+{{else}}
 Votre session actuelle (<b>{{session_choisie}}</b>{{#if session_date_debut}} du {{session_date_debut}} au {{session_date_fin}}{{/if}}) est <b>en cours</b>. Un changement de session n'est plus possible à ce stade.<br>
 <br>
+{{/if}}
 {{else}}
 {{#unless session_dates_passed}}
 Votre session actuelle est : <b>{{session_choisie}}</b>{{#if session_date_debut}} (du {{session_date_debut}} au {{session_date_fin}}){{/if}}.<br>
 <br>
 {{/unless}}
-{{/if}}
-{{#unless session_in_progress}}
 {{#if has_sessions_proposees}}
 Voici les alternatives disponibles :<br>
 {{#each sessions_proposees}}
@@ -167,7 +174,7 @@ Pour modifier votre session, merci de nous préciser :<br>
 </ul>
 Nous vous proposerons alors les sessions disponibles.<br>
 {{/if}}
-{{/unless}}
+{{/if}}
 {{else}}
 Vous n'avez pas encore de session de formation assignée.<br>
 <br>

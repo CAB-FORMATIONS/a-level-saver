@@ -26,7 +26,7 @@ from datetime import datetime, date
 from typing import Dict, Optional, List, Any
 
 from src.utils.date_utils import parse_date_flexible
-from src.constants.evalbox import VALIDATED, BLOCKING_RESCHEDULE, READY_TO_PAY
+from src.constants.evalbox import VALIDATED, BLOCKING_RESCHEDULE, READY_TO_PAY, PAID_STATUSES
 from src.constants.thresholds import (
     FORCE_MAJEURE_DEADLINE_DAYS, EXAM_IMMINENT_DAYS, CONVOCATION_DAYS_BEFORE_EXAM,
 )
@@ -743,6 +743,17 @@ def analyze_exam_date_situation(
                         logger.info(f"  ⚠️ Paiement CMA fait le {date_paiement_str} (APRÈS clôture {result['date_cloture']}) → Report nécessaire")
             except Exception as e:
                 logger.warning(f"  ⚠️ Erreur parsing dates paiement/clôture: {e}")
+
+    # GUARD RAIL: Dossier Synchronisé sans accès ExamT3P → présumer paiement valide
+    # "Dossier Synchronisé" = paiement 241€ effectué par CAB. Si on n'a pas accès à ExamT3P
+    # pour vérifier la date de paiement, on ne peut PAS savoir si c'était avant ou après clôture.
+    # Par sécurité, on présume que le paiement est valide (avant clôture) et on NE touche PAS
+    # la date d'examen dans le CRM. Modifier la date serait dangereux (Mbappé Moudiki incident).
+    if evalbox_status in PAID_STATUSES and date_cloture_is_past and not paiement_avant_cloture:
+        compte_existe = examt3p_data.get('compte_existe', False) if examt3p_data else False
+        if not compte_existe:
+            paiement_avant_cloture = True
+            logger.info(f"  🛡️ GUARD RAIL: Evalbox={evalbox_status} (paiement fait) + pas d'accès ExamT3P → présume paiement avant clôture, CAS 8 BLOQUÉ")
 
     # CAS 8: Seulement si paiement fait APRÈS clôture (ou pas de paiement trouvé)
     if evalbox_status not in BLOCKED_STATUSES_FOR_RESCHEDULE and date_cloture_is_past and not date_is_past and not paiement_avant_cloture:

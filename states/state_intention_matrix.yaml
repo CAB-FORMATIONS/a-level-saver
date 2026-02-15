@@ -2157,7 +2157,7 @@ matrix:
       intention_demande_changement_session: true
       show_sessions_section: false  # Le partial gère déjà les sessions proposées
       show_dates_section: false     # Le partial gère déjà les dates
-      show_statut_section: true
+      show_statut_section: false    # Pas besoin du statut pour un simple changement de session
 
   "*:SIGNALE_PAS_RECU_EMAIL":
     template: "pas_recu_email.html"

@@ -64,13 +64,11 @@ def get_sessions_for_exam_date(
         url = f"{settings.zoho_crm_api_url}/Sessions1/search"
 
         # Critère:
-        # - Statut = PLANIFIÉ (ou null)
         # - Date_fin dans la plage (proche de l'examen)
         # - Date_debut >= (aujourd'hui - 3 jours) pour inclure sessions récemment commencées
         # Note: Filtrage Lieu_de_formation = VISIO Zoom VTC fait en Python après récupération
         criteria = (
-            f"(((Statut:equals:PLANIFIÉ)or(Statut:equals:null))"
-            f"and(Date_fin:greater_equal:{min_end_date.strftime('%Y-%m-%d')})"
+            f"((Date_fin:greater_equal:{min_end_date.strftime('%Y-%m-%d')})"
             f"and(Date_fin:less_equal:{max_end_date.strftime('%Y-%m-%d')})"
             f"and(Date_d_but:greater_equal:{three_days_ago_str}))"
         )
@@ -851,10 +849,9 @@ def match_sessions_by_date_range(
     try:
         url = f"{settings.zoho_crm_api_url}/Sessions1/search"
 
-        # Critères: sessions planifiées, dans la période de recherche
+        # Critères: sessions dans la période de recherche
         criteria = (
-            f"(((Statut:equals:PLANIFIÉ)or(Statut:equals:null))"
-            f"and(Date_d_but:greater_equal:{three_days_ago_str})"
+            f"((Date_d_but:greater_equal:{three_days_ago_str})"
             f"and(Date_d_but:less_equal:{search_end})"
             f"and(Date_fin:greater_equal:{search_start}))"
         )
@@ -921,7 +918,14 @@ def match_sessions_by_date_range(
         session['date_fin'] = session_end.strftime('%d/%m/%Y')
 
         # Vérifier correspondance exacte
-        if session_start.date() == start_date.date() and session_end.date() == end_date.date():
+        # Cas 1: Dates début ET fin correspondent exactement
+        # Cas 2: La session est CONTENUE dans la plage demandée (ex: "semaine du 16/02" = 7j,
+        #         session 16-20/02 = 5j → la session tombe exactement dans la semaine demandée)
+        # Cas 3: Candidat n'a donné qu'une date de début → session commence à cette date
+        session_contained_in_range = (session_start.date() >= start_date.date() and session_end.date() <= end_date.date())
+        no_explicit_end = (end_date_str is None) or (start_date.date() == end_date.date())
+        starts_on_date = session_start.date() == start_date.date()
+        if session_contained_in_range or (starts_on_date and no_explicit_end):
             result['exact_matches'].append(session)
             logger.info(f"  ✅ EXACT MATCH: {session.get('Name')} ({session_start_str} - {session_end_str})")
 
