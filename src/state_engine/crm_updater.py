@@ -17,6 +17,7 @@ from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime, date
 
 from .state_detector import DetectedState
+from src.utils.date_utils import parse_date_flexible
 from src.constants.models import MODEL_EXTRACTION
 
 logger = logging.getLogger(__name__)
@@ -351,20 +352,9 @@ IMPORTANT:
 
     def _normalize_date(self, date_str: str) -> Optional[str]:
         """Normalise une date en YYYY-MM-DD."""
-        try:
-            # Essayer DD/MM/YYYY
-            dt = datetime.strptime(date_str, '%d/%m/%Y')
-            return dt.strftime('%Y-%m-%d')
-        except Exception:
-            pass
-
-        try:
-            # Essayer YYYY-MM-DD
-            dt = datetime.strptime(date_str[:10], '%Y-%m-%d')
-            return dt.strftime('%Y-%m-%d')
-        except Exception:
-            pass
-
+        parsed = parse_date_flexible(date_str, "normalize_date")
+        if parsed is not None:
+            return parsed.strftime('%Y-%m-%d')
         return None
 
     def _try_simple_extraction(

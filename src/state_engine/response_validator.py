@@ -12,7 +12,7 @@ Ce module valide que les réponses générées respectent:
 import logging
 import re
 from typing import Dict, Any, List, Optional, Tuple
-from datetime import datetime, date
+from datetime import date
 
 from .state_detector import DetectedState
 from src.constants.amounts import UBER_OFFER_AMOUNT, CMA_EXAM_FEE, CMA_DOSSIER_FEE
@@ -334,7 +334,8 @@ class ResponseValidator:
 
             # Vérifier chaque date trouvée
             for date_found in dates_found:
-                normalized = self._normalize_date(date_found)
+                parsed_found = parse_date_flexible(date_found, 'response_date_check')
+                normalized = parsed_found.strftime('%Y-%m-%d') if parsed_found else None
                 if normalized and normalized not in valid_dates:
                     # Vérifier si c'est une date du contexte (date examen assignée, etc.)
                     context = state.context_data
@@ -360,17 +361,14 @@ class ResponseValidator:
         # Vérifier que les dates ne sont pas dans le passé (sauf contexte spécifique)
         today = date.today()
         for date_found in dates_found:
-            try:
-                dt = self._parse_date(date_found)
-                if dt and dt < today:
-                    # C'est peut-être une date passée mentionnée volontairement
-                    result.add_error(ValidationError(
-                        'past_date',
-                        f"Date passée mentionnée: '{date_found}'",
-                        severity='warning'
-                    ))
-            except Exception as e:
-                pass
+            dt = parse_date_flexible(date_found, 'response_past_date_check')
+            if dt and dt < today:
+                # C'est peut-être une date passée mentionnée volontairement
+                result.add_error(ValidationError(
+                    'past_date',
+                    f"Date passée mentionnée: '{date_found}'",
+                    severity='warning'
+                ))
 
         if not any(e.error_type in ['invented_date', 'past_date'] for e in result.errors):
             result.add_passed('dates_coherence')
@@ -567,24 +565,3 @@ class ResponseValidator:
 
         return f"...{context}..."
 
-    def _normalize_date(self, date_str: str) -> Optional[str]:
-        """Normalise une date en YYYY-MM-DD."""
-        try:
-            # Essayer DD/MM/YYYY
-            dt = datetime.strptime(date_str, '%d/%m/%Y')
-            return dt.strftime('%Y-%m-%d')
-        except Exception as e:
-            pass
-
-        try:
-            # Essayer YYYY-MM-DD
-            dt = datetime.strptime(date_str[:10], '%Y-%m-%d')
-            return dt.strftime('%Y-%m-%d')
-        except Exception as e:
-            pass
-
-        return None
-
-    def _parse_date(self, date_str: str) -> Optional[date]:
-        """Parse une date en objet date."""
-        return parse_date_flexible(date_str, "response_date")

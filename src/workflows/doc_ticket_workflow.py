@@ -48,7 +48,7 @@ from src.utils.crm_lookup_helper import enrich_deal_lookups
 from src.utils.response_humanizer import humanize_response
 from src.utils.intent_parser import IntentParser
 from src.utils.date_filter import apply_final_filter
-from src.utils.date_utils import parse_date_flexible
+from src.utils.date_utils import parse_date_flexible, parse_datetime_flexible
 from src.constants.models import MODEL_EXTRACTION, MODEL_PERSONALIZATION, MODEL_TRIAGE
 from src.constants.amounts import UBER_OFFER_AMOUNT, CMA_EXAM_FEE, CMA_DOSSIER_FEE
 from src.constants.departments import DEPT_DOC, DEPT_CONTACT, DEPT_DOCS_CAB, DEPT_REFUS_CMA, DEPT_COMPTABILITE
@@ -3662,12 +3662,9 @@ Cordialement,<br>
                         # Filtrer pour le mois demandé
                         target_dates = []
                         for d in dept_dates:
-                            try:
-                                d_date = datetime.strptime(str(d.get('Date_Examen', ''))[:10], '%Y-%m-%d')
-                                if d_date.month == requested_month:
-                                    target_dates.append(d)
-                            except Exception:
-                                continue
+                            d_date = parse_date_flexible(d.get('Date_Examen', ''), 'repositioning_date')
+                            if d_date and d_date.month == requested_month:
+                                target_dates.append(d)
                         if target_dates:
                             # Stocker la date cible pour CRM update (STEP 5) et sessions
                             target = target_dates[0]
@@ -3692,17 +3689,18 @@ Cordialement,<br>
                 _requested_month = _intent_ctx.get('requested_month')
                 _current_date_str = date_examen_vtc_result.get('date_examen_info', {}).get('Date_Examen', '') if date_examen_vtc_result.get('date_examen_info') else ''
                 if _requested_month and _current_date_str:
-                    try:
-                        _current_date = datetime.strptime(str(_current_date_str)[:10], '%Y-%m-%d')
-                        _requested_month_int = int(_requested_month)
-                        if 1 <= _requested_month_int <= 12 and _requested_month_int < _current_date.month:
-                            logger.info(f"  🔄 GARDE-FOU: REPORT_DATE → DEMANDE_DATE_PLUS_TOT (mois demandé {_requested_month_int} < date actuelle {_current_date.month}/{_current_date.year})")
-                            triage_result['detected_intent'] = 'DEMANDE_DATE_PLUS_TOT'
-                            triage_result['primary_intent'] = 'DEMANDE_DATE_PLUS_TOT'
-                            _intent_ctx['wants_earlier_date'] = True
-                            triage_result['intent_context'] = _intent_ctx
-                    except (ValueError, TypeError) as e:
-                        logger.debug(f"  ⚠️ Garde-fou REPORT_DATE: erreur parsing date: {e}")
+                    _current_date = parse_date_flexible(_current_date_str, 'garde_fou_report_date')
+                    if _current_date:
+                        try:
+                            _requested_month_int = int(_requested_month)
+                            if 1 <= _requested_month_int <= 12 and _requested_month_int < _current_date.month:
+                                logger.info(f"  🔄 GARDE-FOU: REPORT_DATE → DEMANDE_DATE_PLUS_TOT (mois demandé {_requested_month_int} < date actuelle {_current_date.month}/{_current_date.year})")
+                                triage_result['detected_intent'] = 'DEMANDE_DATE_PLUS_TOT'
+                                triage_result['primary_intent'] = 'DEMANDE_DATE_PLUS_TOT'
+                                _intent_ctx['wants_earlier_date'] = True
+                                triage_result['intent_context'] = _intent_ctx
+                        except (ValueError, TypeError) as e:
+                            logger.debug(f"  ⚠️ Garde-fou REPORT_DATE: erreur parsing mois: {e}")
 
             # ================================================================
             # ENRICHISSEMENT: Dates alternatives si candidat demande date plus tôt
@@ -4006,16 +4004,13 @@ Cordialement,<br>
         # Détecte le cas où deal_data['Session'] est null mais les dates viennent du lookup Session1
         # Ce cas n'est pas détecté par training_exam_consistency car il regarde deal_data['Session']
         if not exam_dates_for_session and has_assigned_date and enriched_lookups.get('session_date_fin'):
-            try:
-                session_end = datetime.strptime(enriched_lookups['session_date_fin'], '%Y-%m-%d').date()
-                exam_date_str = date_examen_info.get('Date_Examen', '') if date_examen_info else ''
-                exam_date_parsed = datetime.strptime(exam_date_str, '%Y-%m-%d').date() if exam_date_str else None
-                today_local = datetime.now().date()
-                if session_end < today_local and exam_date_parsed and exam_date_parsed > today_local:
-                    exam_dates_for_session = [date_examen_info]
-                    logger.info(f"  📚 CAS 6b: SESSION PASSÉE (fin: {session_end}) + examen futur ({exam_date_parsed}) → recherche nouvelles sessions")
-            except (ValueError, TypeError) as e:
-                logger.debug(f"  ⚠️ CAS 6b: Erreur parsing dates session/examen: {e}")
+            session_end = parse_date_flexible(enriched_lookups['session_date_fin'], 'session_date_fin_cas6b')
+            exam_date_str = date_examen_info.get('Date_Examen', '') if date_examen_info else ''
+            exam_date_parsed = parse_date_flexible(exam_date_str, 'exam_date_cas6b') if exam_date_str else None
+            today_local = datetime.now().date()
+            if session_end and session_end < today_local and exam_date_parsed and exam_date_parsed > today_local:
+                exam_dates_for_session = [date_examen_info]
+                logger.info(f"  📚 CAS 6b: SESSION PASSÉE (fin: {session_end}) + examen futur ({exam_date_parsed}) → recherche nouvelles sessions")
 
         # Pour REPORT_DATE, toujours chercher les sessions des dates alternatives
         is_report_date = detected_intent == 'REPORT_DATE'
@@ -4044,11 +4039,9 @@ Cordialement,<br>
         # Détecter si la session assignée est passée (pour CAS 6b)
         session_is_passed = False
         if enriched_lookups.get('session_date_fin'):
-            try:
-                session_end_check = datetime.strptime(enriched_lookups['session_date_fin'], '%Y-%m-%d').date()
+            session_end_check = parse_date_flexible(enriched_lookups['session_date_fin'], 'session_date_fin_passed')
+            if session_end_check:
                 session_is_passed = session_end_check < datetime.now().date()
-            except (ValueError, TypeError):
-                pass
         should_analyze_sessions = (
             not skip_date_session_analysis
             and (exam_dates_for_session or has_specific_dates or is_session_complaint)  # Permettre le matching même sans dates d'examen, ou sur plainte
@@ -5786,15 +5779,15 @@ Bien cordialement,
             for date_info in next_dates:
                 date_str = date_info.get('Date_Examen') or date_info.get('date_examen')
                 if date_str:
-                    try:
-                        date_obj = datetime.strptime(date_str, '%Y-%m-%d')
+                    date_obj = parse_date_flexible(date_str, 'filter_requested_month')
+                    if date_obj:
                         # Garder les dates du mois demandé ou après
                         if date_obj.month >= requested_month:
                             filtered_dates.append(date_info)
                             # Vérifier si on a une date exactement dans le mois demandé
                             if date_obj.month == requested_month:
                                 has_date_in_exact_month = True
-                    except ValueError:
+                    else:
                         filtered_dates.append(date_info)  # En cas d'erreur, garder la date
 
             month_names = ['', 'janvier', 'février', 'mars', 'avril', 'mai', 'juin',
@@ -6533,14 +6526,9 @@ Génère maintenant la personnalisation (1-3 phrases):"""
             # Format date
             date_str = ""
             if created_time:
-                try:
-                    if 'T' in str(created_time):
-                        dt = datetime.fromisoformat(str(created_time).replace('Z', '+00:00'))
-                    else:
-                        dt = datetime.strptime(str(created_time), "%Y-%m-%d %H:%M:%S")
+                dt = parse_datetime_flexible(created_time, 'thread_created_time')
+                if dt:
                     date_str = dt.strftime("%d/%m/%Y")
-                except Exception as e:
-                    date_str = ""
 
             # Sender
             sender = "CANDIDAT" if direction == 'in' else "CAB Formations" if direction == 'out' else "?"

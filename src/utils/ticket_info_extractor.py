@@ -30,6 +30,7 @@ import logging
 from datetime import datetime
 from typing import Dict, List, Any, Optional, Tuple
 from src.constants.amounts import CMA_EXAM_FEE
+from src.utils.date_utils import parse_date_flexible, parse_datetime_flexible
 
 logger = logging.getLogger(__name__)
 
@@ -294,14 +295,9 @@ def _get_blocked_update_message(evalbox_status: str, date_cloture: str) -> str:
     # Formater la date
     date_formatted = ""
     if date_cloture:
-        try:
-            if 'T' in str(date_cloture):
-                date_obj = datetime.fromisoformat(str(date_cloture).replace('Z', '+00:00'))
-            else:
-                date_obj = datetime.strptime(str(date_cloture), "%Y-%m-%d")
+        date_obj = parse_date_flexible(str(date_cloture), "date_cloture")
+        if date_obj:
             date_formatted = date_obj.strftime("%d/%m/%Y")
-        except Exception as e:
-            pass
 
     return f"""Votre dossier a été validé par la CMA et les inscriptions sont clôturées.
 
@@ -461,14 +457,9 @@ def extract_cab_proposals_from_threads(threads: List[Dict]) -> Dict[str, Any]:
         # Parser la date du thread
         thread_date = None
         if thread_date_str:
-            try:
-                if 'T' in str(thread_date_str):
-                    thread_date = datetime.fromisoformat(thread_date_str.replace('Z', '+00:00'))
-                    thread_date = thread_date.replace(tzinfo=None)
-                else:
-                    thread_date = datetime.strptime(thread_date_str[:10], '%Y-%m-%d')
-            except Exception:
-                pass
+            thread_date = parse_datetime_flexible(thread_date_str, "thread_date")
+            if thread_date:
+                thread_date = thread_date.replace(tzinfo=None)
 
         # Verifier si recent (< 48h)
         if thread_date and thread_date > recent_threshold:
@@ -512,14 +503,9 @@ def extract_cab_proposals_from_threads(threads: List[Dict]) -> Dict[str, Any]:
         # Parser la date du thread
         thread_date = None
         if thread_date_str:
-            try:
-                if 'T' in str(thread_date_str):
-                    thread_date = datetime.fromisoformat(thread_date_str.replace('Z', '+00:00'))
-                    thread_date = thread_date.replace(tzinfo=None)
-                else:
-                    thread_date = datetime.strptime(thread_date_str[:10], '%Y-%m-%d')
-            except Exception:
-                pass
+            thread_date = parse_datetime_flexible(thread_date_str, "thread_date")
+            if thread_date:
+                thread_date = thread_date.replace(tzinfo=None)
 
         # Verifier si recent (< 48h)
         if thread_date and thread_date > recent_threshold:

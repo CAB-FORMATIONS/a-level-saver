@@ -31,6 +31,7 @@ from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
 from src.constants.emails import INTERNAL_DOMAIN_MARKERS
+from src.utils.date_utils import parse_datetime_flexible
 
 logger = logging.getLogger(__name__)
 
@@ -170,13 +171,9 @@ def parse_meta_line(line: str) -> Optional[MetaRecord]:
 
         ts_str = pairs.get('ts', '')
         if ts_str:
-            try:
-                record.timestamp = datetime.strptime(ts_str, '%Y-%m-%dT%H:%M')
-            except ValueError:
-                try:
-                    record.timestamp = datetime.strptime(ts_str, '%Y-%m-%dT%H:%M:%S')
-                except ValueError:
-                    logger.debug(f"Could not parse META timestamp: {ts_str}")
+            record.timestamp = parse_datetime_flexible(ts_str, "META timestamp")
+            if record.timestamp is None:
+                logger.debug(f"Could not parse META timestamp: {ts_str}")
 
         record.state = pairs.get('state', '')
         record.intent = pairs.get('intent', '')
@@ -359,27 +356,10 @@ def _parse_timeline_timestamp(val) -> Optional[datetime]:
     """
     if not val:
         return None
-    if isinstance(val, datetime):
+    dt = parse_datetime_flexible(val, "timeline_timestamp")
+    if dt is not None:
         # Strip timezone to make comparable with naive META timestamps
-        return val.replace(tzinfo=None)
-    if isinstance(val, str):
-        # Try common Zoho formats
-        for fmt in (
-            '%Y-%m-%dT%H:%M:%S%z',
-            '%Y-%m-%dT%H:%M:%S.%f%z',
-            '%Y-%m-%dT%H:%M:%SZ',
-            '%Y-%m-%dT%H:%M:%S.%fZ',
-        ):
-            try:
-                dt = datetime.strptime(val, fmt)
-                return dt.replace(tzinfo=None)
-            except ValueError:
-                continue
-        # Fallback: truncate to 19 chars (already naive)
-        try:
-            return datetime.strptime(val[:19], '%Y-%m-%dT%H:%M:%S')
-        except (ValueError, IndexError):
-            pass
+        return dt.replace(tzinfo=None)
     return None
 
 
@@ -765,21 +745,9 @@ def _parse_thread_time(thread: dict) -> Optional[datetime]:
         if not val:
             continue
 
-        if isinstance(val, datetime):
-            return val
-
-        if isinstance(val, str):
-            # Try ISO format variations
-            for fmt in ('%Y-%m-%dT%H:%M:%S.%fZ', '%Y-%m-%dT%H:%M:%SZ', '%Y-%m-%dT%H:%M:%S%z', '%Y-%m-%dT%H:%M:%S.%f%z'):
-                try:
-                    return datetime.strptime(val, fmt)
-                except ValueError:
-                    continue
-            # Try simple date
-            try:
-                return datetime.strptime(val[:19], '%Y-%m-%dT%H:%M:%S')
-            except (ValueError, IndexError):
-                pass
+        dt = parse_datetime_flexible(val, f"thread_{time_field}")
+        if dt is not None:
+            return dt
 
     return None
 

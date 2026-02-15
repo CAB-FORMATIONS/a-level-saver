@@ -14,6 +14,7 @@ from typing import Dict, Optional, List, Any, Tuple
 logger = logging.getLogger(__name__)
 
 from src.constants.sessions import SESSION_TYPE_JOUR, SESSION_TYPE_SOIR, is_uber_visio_session
+from src.utils.date_utils import parse_date_flexible, parse_datetime_flexible
 from src.constants.thresholds import SESSION_MIN_DAYS_BEFORE_EXAM as MIN_DAYS_BEFORE_EXAM, SESSION_MAX_DAYS_BEFORE_EXAM as MAX_DAYS_BEFORE_EXAM
 
 
@@ -43,7 +44,10 @@ def get_sessions_for_exam_date(
 
     try:
         # Parser la date d'examen
-        exam_date_obj = datetime.strptime(exam_date, "%Y-%m-%d")
+        exam_date_obj = parse_datetime_flexible(exam_date, "exam_date")
+        if exam_date_obj is None:
+            logger.warning(f"Impossible de parser la date d'examen: '{exam_date}'")
+            return []
         today = datetime.now()
         today_str = today.strftime('%Y-%m-%d')
 
@@ -147,12 +151,12 @@ def get_sessions_for_exam_date(
 
             # Calculer la distance avec l'examen
             if date_fin:
-                try:
-                    date_fin_obj = datetime.strptime(date_fin, "%Y-%m-%d")
+                date_fin_obj = parse_datetime_flexible(date_fin, "date_fin")
+                if date_fin_obj is not None:
                     days_before_exam = (exam_date_obj - date_fin_obj).days
                     session['days_before_exam'] = days_before_exam
-                except ValueError as e:
-                    logger.warning(f"Erreur parsing date_fin '{date_fin}': {e}")
+                else:
+                    logger.warning(f"Erreur parsing date_fin '{date_fin}'")
                     session['days_before_exam'] = 999
 
             # Marquer les sessions déjà commencées (Date_debut < aujourd'hui)
@@ -255,21 +259,19 @@ def format_session_for_display(session: Dict[str, Any]) -> str:
     date_debut_formatted = ""
     date_fin_formatted = ""
 
-    try:
-        if date_debut:
-            date_obj = datetime.strptime(date_debut, "%Y-%m-%d")
+    if date_debut:
+        date_obj = parse_date_flexible(date_debut, "date_debut")
+        if date_obj is not None:
             date_debut_formatted = date_obj.strftime("%d/%m/%Y")
-    except ValueError as e:
-        logger.debug(f"Erreur parsing date_debut '{date_debut}': {e}")
-        date_debut_formatted = date_debut
+        else:
+            date_debut_formatted = date_debut
 
-    try:
-        if date_fin:
-            date_obj = datetime.strptime(date_fin, "%Y-%m-%d")
+    if date_fin:
+        date_obj = parse_date_flexible(date_fin, "date_fin")
+        if date_obj is not None:
             date_fin_formatted = date_obj.strftime("%d/%m/%Y")
-    except ValueError as e:
-        logger.debug(f"Erreur parsing date_fin '{date_fin}': {e}")
-        date_fin_formatted = date_fin
+        else:
+            date_fin_formatted = date_fin
 
     result = f"**{session_type_label}** : du {date_debut_formatted} au {date_fin_formatted}"
     if type_cours and type_cours != '-None-':
@@ -296,27 +298,21 @@ def format_exam_with_sessions(
     exam_date = exam_info.get('Date_Examen', '')
     exam_date_formatted = ""
 
-    try:
-        if exam_date:
-            date_obj = datetime.strptime(exam_date, "%Y-%m-%d")
+    if exam_date:
+        date_obj = parse_date_flexible(exam_date, "exam_date")
+        if date_obj is not None:
             exam_date_formatted = date_obj.strftime("%d/%m/%Y")
-    except ValueError as e:
-        logger.debug(f"Erreur parsing exam_date '{exam_date}': {e}")
-        exam_date_formatted = exam_date
+        else:
+            exam_date_formatted = exam_date
 
     # Formater la date de clôture
     date_cloture = exam_info.get('Date_Cloture_Inscription', '')
     cloture_formatted = ""
 
     if date_cloture:
-        try:
-            if 'T' in str(date_cloture):
-                cloture_obj = datetime.fromisoformat(str(date_cloture).replace('Z', '+00:00'))
-            else:
-                cloture_obj = datetime.strptime(str(date_cloture), "%Y-%m-%d")
+        cloture_obj = parse_date_flexible(date_cloture, "date_cloture")
+        if cloture_obj is not None:
             cloture_formatted = cloture_obj.strftime("%d/%m/%Y")
-        except (ValueError, TypeError) as e:
-            logger.debug(f"Erreur parsing date_cloture '{date_cloture}': {e}")
 
     result = f"📅 **Examen du {exam_date_formatted}**"
     if cloture_formatted:
@@ -527,13 +523,11 @@ def analyze_session_situation(
                     logger.warning(f"  Erreur récupération session: {e}")
 
         if session_end_date:
-            try:
-                session_end_obj = datetime.strptime(session_end_date, "%Y-%m-%d")
-                if session_end_obj.date() < datetime.now().date():
+            session_end_obj = parse_date_flexible(session_end_date, "session_end_date")
+            if session_end_obj is not None:
+                if session_end_obj < datetime.now().date():
                     result['current_session_is_past'] = True
                     logger.info("  ⚠️ Session actuelle TERMINÉE (dans le passé)")
-            except ValueError as e:
-                logger.debug(f"Erreur parsing session_end_date '{session_end_date}': {e}")
 
     # 2. Détecter la préférence jour/soir
     # Priorité: 1) TriageAgent 2) Deal CRM 3) Threads
@@ -597,14 +591,16 @@ def analyze_session_situation(
         current_session_end_str = enriched_lookups.get('session_date_fin') if enriched_lookups else None
         current_type = enriched_lookups.get('session_type') if enriched_lookups else None
         if current_session_end_str and current_type:
-            try:
-                current_end = datetime.strptime(current_session_end_str, "%Y-%m-%d")
+            current_end = parse_datetime_flexible(current_session_end_str, "current_session_end")
+            if current_end is not None:
                 is_optimal = True
                 for option in result['proposed_options']:
                     exam_date_str = option['exam_info'].get('Date_Examen')
                     if not exam_date_str:
                         continue
-                    exam_date_obj = datetime.strptime(exam_date_str, "%Y-%m-%d")
+                    exam_date_obj = parse_datetime_flexible(exam_date_str, "exam_date")
+                    if exam_date_obj is None:
+                        continue
                     # Session actuelle se termine avant l'examen ?
                     if current_end >= exam_date_obj:
                         is_optimal = False
@@ -616,8 +612,8 @@ def analyze_session_situation(
                         closest = same_type[0]
                         closest_end_str = closest.get('Date_fin')
                         if closest_end_str:
-                            closest_end = datetime.strptime(closest_end_str, "%Y-%m-%d")
-                            if closest_end > current_end:
+                            closest_end = parse_datetime_flexible(closest_end_str, "closest_end")
+                            if closest_end is not None and closest_end > current_end:
                                 # Il existe une session plus proche de l'examen → proposer
                                 is_optimal = False
                                 break
@@ -628,8 +624,6 @@ def analyze_session_situation(
                     result['current_session_valid_for_new_date'] = True
                     result['message'] = f"Votre session de formation est déjà programmée : {session_name}"
                     return result
-            except (ValueError, TypeError) as e:
-                logger.warning(f"  ⚠️ Erreur parsing dates pour check session optimale: {e}")
 
     # 5. CAS SPÉCIAL: Session passée + Examen futur = Proposer rafraîchissement
     if result['current_session_is_past'] and result['proposed_options']:
@@ -727,32 +721,29 @@ def generate_refresh_session_message(refresh_session: Dict) -> str:
     date_debut_formatted = ""
     date_fin_formatted = ""
 
-    try:
-        if date_debut:
-            date_obj = datetime.strptime(date_debut, "%Y-%m-%d")
+    if date_debut:
+        date_obj = parse_date_flexible(date_debut, "date_debut")
+        if date_obj is not None:
             date_debut_formatted = date_obj.strftime("%d/%m/%Y")
-    except ValueError as e:
-        logger.debug(f"Erreur parsing date_debut '{date_debut}': {e}")
-        date_debut_formatted = date_debut
+        else:
+            date_debut_formatted = date_debut
 
-    try:
-        if date_fin:
-            date_obj = datetime.strptime(date_fin, "%Y-%m-%d")
+    if date_fin:
+        date_obj = parse_date_flexible(date_fin, "date_fin")
+        if date_obj is not None:
             date_fin_formatted = date_obj.strftime("%d/%m/%Y")
-    except ValueError as e:
-        logger.debug(f"Erreur parsing date_fin '{date_fin}': {e}")
-        date_fin_formatted = date_fin
+        else:
+            date_fin_formatted = date_fin
 
     # Formater la date d'examen
     exam_date = exam_info.get('Date_Examen', '')
     exam_date_formatted = ""
-    try:
-        if exam_date:
-            date_obj = datetime.strptime(exam_date, "%Y-%m-%d")
+    if exam_date:
+        date_obj = parse_date_flexible(exam_date, "exam_date")
+        if date_obj is not None:
             exam_date_formatted = date_obj.strftime("%d/%m/%Y")
-    except ValueError as e:
-        logger.debug(f"Erreur parsing exam_date '{exam_date}': {e}")
-        exam_date_formatted = exam_date
+        else:
+            exam_date_formatted = exam_date
 
     message = f"""📚 **PROPOSITION DE RAFRAÎCHISSEMENT (sans frais supplémentaires)**
 
@@ -826,11 +817,13 @@ def match_sessions_by_date_range(
         logger.warning("match_sessions_by_date_range: start_date manquant")
         return result
 
-    try:
-        start_date = datetime.strptime(start_date_str, "%Y-%m-%d")
-        end_date = datetime.strptime(end_date_str, "%Y-%m-%d") if end_date_str else start_date
-    except ValueError as e:
-        logger.error(f"Erreur parsing dates demandées: {e}")
+    start_date = parse_datetime_flexible(start_date_str, "start_date")
+    if start_date is None:
+        logger.error(f"Erreur parsing start_date: '{start_date_str}'")
+        return result
+    end_date = parse_datetime_flexible(end_date_str, "end_date") if end_date_str else start_date
+    if end_date is None:
+        logger.error(f"Erreur parsing end_date: '{end_date_str}'")
         return result
 
     logger.info(f"🔍 Recherche sessions pour dates demandées: {start_date_str} à {end_date_str}")
@@ -904,10 +897,9 @@ def match_sessions_by_date_range(
         if not session_start_str or not session_end_str:
             continue
 
-        try:
-            session_start = datetime.strptime(session_start_str, "%Y-%m-%d")
-            session_end = datetime.strptime(session_end_str, "%Y-%m-%d")
-        except ValueError:
+        session_start = parse_datetime_flexible(session_start_str, "session_start")
+        session_end = parse_datetime_flexible(session_end_str, "session_end")
+        if session_start is None or session_end is None:
             continue
 
         # Enrichir la session avec des infos formatées
@@ -941,20 +933,24 @@ def match_sessions_by_date_range(
         if session_end < start_date:
             s_type = session['session_type']
             key_before = f'closest_before_{s_type}'
-            if not result[key_before] or session_end > datetime.strptime(result[key_before].get('Date_fin', '1900-01-01'), "%Y-%m-%d"):
+            prev_end = parse_datetime_flexible(result[key_before].get('Date_fin', '1900-01-01'), "prev_end") if result[key_before] else None
+            if not result[key_before] or (prev_end is not None and session_end > prev_end):
                 result[key_before] = session
             # Aussi mettre à jour closest_before global (le plus proche tous types)
-            if not result['closest_before'] or session_end > datetime.strptime(result['closest_before'].get('Date_fin', '1900-01-01'), "%Y-%m-%d"):
+            global_prev_end = parse_datetime_flexible(result['closest_before'].get('Date_fin', '1900-01-01'), "global_prev_end") if result['closest_before'] else None
+            if not result['closest_before'] or (global_prev_end is not None and session_end > global_prev_end):
                 result['closest_before'] = session
 
         # Trouver la session la plus proche après les dates demandées (par type)
         if session_start > end_date:
             s_type = session['session_type']
             key_after = f'closest_after_{s_type}'
-            if not result[key_after] or session_start < datetime.strptime(result[key_after].get('Date_d_but', '2100-01-01'), "%Y-%m-%d"):
+            prev_start = parse_datetime_flexible(result[key_after].get('Date_d_but', '2100-01-01'), "prev_start") if result[key_after] else None
+            if not result[key_after] or (prev_start is not None and session_start < prev_start):
                 result[key_after] = session
             # Aussi mettre à jour closest_after global (le plus proche tous types)
-            if not result['closest_after'] or session_start < datetime.strptime(result['closest_after'].get('Date_d_but', '2100-01-01'), "%Y-%m-%d"):
+            global_prev_start = parse_datetime_flexible(result['closest_after'].get('Date_d_but', '2100-01-01'), "global_prev_start") if result['closest_after'] else None
+            if not result['closest_after'] or (global_prev_start is not None and session_start < global_prev_start):
                 result['closest_after'] = session
 
     # Déterminer le type de match

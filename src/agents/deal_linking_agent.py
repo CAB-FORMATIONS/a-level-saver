@@ -1598,6 +1598,7 @@ Emails alternatifs trouvés:"""
             # PRIORITÉ 1 : Deals avec date d'examen dans les 60 prochains jours
             if not selected_deal:
                 from datetime import datetime, timedelta
+                from src.utils.date_utils import parse_date_flexible as _parse_date
                 today = datetime.now().date()
                 future_limit = today + timedelta(days=60)
 
@@ -1607,14 +1608,11 @@ Emails alternatifs trouvés:"""
                         continue
                     exam_date_raw = d.get("Date_examen_VTC")
                     if exam_date_raw:
-                        try:
-                            # Le champ peut être un ID ou une date string
-                            if isinstance(exam_date_raw, str) and "-" in exam_date_raw:
-                                exam_date = datetime.strptime(exam_date_raw[:10], "%Y-%m-%d").date()
-                                if today <= exam_date <= future_limit:
-                                    deals_with_exam.append((d, exam_date))
-                        except (ValueError, TypeError):
-                            pass
+                        # Le champ peut être un ID ou une date string
+                        if isinstance(exam_date_raw, str) and "-" in exam_date_raw:
+                            exam_date = _parse_date(exam_date_raw, "Date_examen_VTC")
+                            if exam_date is not None and today <= exam_date <= future_limit:
+                                deals_with_exam.append((d, exam_date))
 
                 if deals_with_exam:
                     # Prendre celui avec la date la plus proche

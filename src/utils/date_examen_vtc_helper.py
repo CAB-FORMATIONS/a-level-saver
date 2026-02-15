@@ -176,9 +176,8 @@ def get_earlier_dates_other_departments(
             logger.warning("Pas de date de référence fournie")
             return []
 
-        try:
-            ref_date = datetime.strptime(str(reference_date), "%Y-%m-%d")
-        except Exception as e:
+        ref_date = parse_date_flexible(str(reference_date), "reference_date")
+        if ref_date is None:
             logger.warning(f"Format de date de référence invalide: {reference_date}")
             return []
 
@@ -245,13 +244,12 @@ def get_earlier_dates_other_departments(
             # Vérifier la date d'examen (doit être AVANT la date de référence)
             date_examen_str = session.get('Date_Examen')
             if date_examen_str:
-                try:
-                    date_examen = datetime.strptime(str(date_examen_str), "%Y-%m-%d")
-                    if date_examen >= ref_date:
-                        continue  # Pas plus tôt
-                    valid_sessions.append(session)
-                except Exception as e:
+                date_examen = parse_date_flexible(str(date_examen_str), "date_examen")
+                if date_examen is None:
                     continue
+                if date_examen >= ref_date:
+                    continue  # Pas plus tôt
+                valid_sessions.append(session)
 
         # Trier par date d'examen (plus proche en premier)
         valid_sessions.sort(key=lambda x: x.get('Date_Examen', '9999-99-99'))
@@ -374,26 +372,17 @@ def format_exam_date_for_display(session: Dict[str, Any], include_department: bo
     date_cloture = session.get('Date_Cloture_Inscription', '')
 
     # Formater la date d'examen
-    try:
-        if date_examen and date_examen != 'Date inconnue':
-            date_obj = datetime.strptime(str(date_examen), "%Y-%m-%d")
-            date_examen_formatted = date_obj.strftime("%d/%m/%Y")
-        else:
-            date_examen_formatted = date_examen
-    except Exception as e:
+    if date_examen and date_examen != 'Date inconnue':
+        date_obj = parse_date_flexible(str(date_examen), "date_examen")
+        date_examen_formatted = date_obj.strftime("%d/%m/%Y") if date_obj else date_examen
+    else:
         date_examen_formatted = date_examen
 
     # Formater la date de clôture
-    try:
-        if date_cloture:
-            if 'T' in str(date_cloture):
-                date_cloture_obj = datetime.fromisoformat(str(date_cloture).replace('Z', '+00:00'))
-            else:
-                date_cloture_obj = datetime.strptime(str(date_cloture), "%Y-%m-%d")
-            date_cloture_formatted = date_cloture_obj.strftime("%d/%m/%Y")
-        else:
-            date_cloture_formatted = ""
-    except Exception as e:
+    if date_cloture:
+        date_cloture_obj = parse_date_flexible(str(date_cloture), "date_cloture")
+        date_cloture_formatted = date_cloture_obj.strftime("%d/%m/%Y") if date_cloture_obj else ""
+    else:
         date_cloture_formatted = ""
 
     result = f"- **{date_examen_formatted}**"
@@ -419,15 +408,11 @@ def is_date_in_past(date_str: str) -> bool:
     if not date_str:
         return False
 
-    try:
-        if 'T' in str(date_str):
-            date_obj = datetime.fromisoformat(str(date_str).replace('Z', '+00:00'))
-        else:
-            date_obj = datetime.strptime(str(date_str), "%Y-%m-%d")
-
-        return date_obj.date() < datetime.now().date()
-    except Exception as e:
+    date_obj = parse_date_flexible(str(date_str), "is_date_in_past")
+    if date_obj is None:
         return False
+
+    return date_obj < datetime.now().date()
 
 
 def analyze_exam_date_situation(
@@ -851,16 +836,16 @@ def analyze_exam_date_situation(
             # Calculer le nombre de jours depuis l'examen
             days_since_exam = None
             if date_examen_str:
-                try:
-                    date_obj = datetime.strptime(str(date_examen_str), "%Y-%m-%d")
-                    today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+                date_obj = parse_date_flexible(str(date_examen_str), "date_examen_cas7")
+                if date_obj:
+                    today = datetime.now().date()
                     days_since_exam = (today - date_obj).days
                     result['days_since_exam'] = days_since_exam
                     # Force majeure possible uniquement si < 14 jours après l'examen
                     result['force_majeure_possible'] = days_since_exam <= FORCE_MAJEURE_DEADLINE_DAYS
                     logger.info(f"  📅 Jours depuis l'examen: {days_since_exam} → force majeure {'possible' if result['force_majeure_possible'] else 'NON possible (> 14 jours)'}")
-                except Exception as e:
-                    logger.warning(f"  ⚠️ Erreur calcul jours depuis examen: {e}")
+                else:
+                    logger.warning(f"  ⚠️ Erreur parsing date examen: {date_examen_str}")
                     result['days_since_exam'] = None
                     result['force_majeure_possible'] = False
 
@@ -928,12 +913,10 @@ def analyze_exam_date_situation(
             # Calculer les jours jusqu'à l'examen pour adapter le message
             days_until_exam = None
             if date_examen_str:
-                try:
-                    date_obj = datetime.strptime(str(date_examen_str), "%Y-%m-%d")
-                    today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+                date_obj = parse_date_flexible(str(date_examen_str), "date_examen_cas4")
+                if date_obj:
+                    today = datetime.now().date()
                     days_until_exam = (date_obj - today).days
-                except Exception as e:
-                    pass
 
             # Si examen dans ≤ 7 jours sans convocation → candidat sera décalé
             # Récupérer la prochaine date d'examen disponible
@@ -1418,11 +1401,10 @@ def search_dates_for_month_and_location(
             continue
 
         # Parser le mois de la date
-        try:
-            date_obj = datetime.strptime(date_str[:10], '%Y-%m-%d')
-            date_month = date_obj.month
-        except Exception:
+        date_obj = parse_date_flexible(date_str[:10], "exam_date_month")
+        if date_obj is None:
             continue
+        date_month = date_obj.month
 
         # Catégoriser
         if requested_month and requested_location:

@@ -95,12 +95,12 @@ class DateFilter:
         for date_info in self._dates:
             date_str = self._get_date_str(date_info)
             if date_str:
-                try:
-                    date_obj = datetime.strptime(date_str, '%Y-%m-%d')
+                date_obj = parse_date_flexible(date_str, "filter_by_month")
+                if date_obj is not None:
                     # Garder les dates du mois demandé ou après
                     if date_obj.month >= month:
                         filtered.append(date_info)
-                except ValueError:
+                else:
                     # En cas d'erreur de parsing, garder la date
                     filtered.append(date_info)
 
@@ -132,12 +132,9 @@ class DateFilter:
         for date_info in self._dates:
             date_str = self._get_date_str(date_info)
             if date_str:
-                try:
-                    date_obj = datetime.strptime(date_str, '%Y-%m-%d')
-                    if date_obj.month == month:
-                        filtered.append(date_info)
-                except ValueError:
-                    pass
+                date_obj = parse_date_flexible(date_str, "filter_exact_month")
+                if date_obj is not None and date_obj.month == month:
+                    filtered.append(date_info)
 
         self._dates = filtered
         return self
@@ -236,12 +233,9 @@ class DateFilter:
         for date_info in self._dates:
             date_str = self._get_date_str(date_info)
             if date_str:
-                try:
-                    date_obj = datetime.strptime(date_str, '%Y-%m-%d')
-                    if date_obj.month == month:
-                        return True
-                except ValueError:
-                    pass
+                date_obj = parse_date_flexible(date_str, "has_dates_in_month")
+                if date_obj is not None and date_obj.month == month:
+                    return True
 
         return False
 

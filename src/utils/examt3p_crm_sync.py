@@ -75,15 +75,10 @@ def is_date_past(date_str: str) -> bool:
     """Vérifie si une date est dans le passé."""
     if not date_str:
         return False
-    try:
-        if 'T' in str(date_str):
-            date_obj = datetime.fromisoformat(str(date_str).replace('Z', '+00:00'))
-            date_obj = date_obj.replace(tzinfo=None)
-        else:
-            date_obj = datetime.strptime(str(date_str), "%Y-%m-%d")
-        return date_obj.date() < datetime.now().date()
-    except Exception as e:
+    date_obj = parse_date_flexible(str(date_str), "is_date_past")
+    if date_obj is None:
         return False
+    return date_obj < datetime.now().date()
 
 
 def can_modify_exam_date(evalbox_status: str, date_cloture: str) -> Tuple[bool, str]:
@@ -408,18 +403,12 @@ def find_exam_session_by_date_and_dept(
         return None
 
     # Normaliser la date au format yyyy-mm-dd pour la recherche CRM
-    try:
-        if '/' in str(exam_date):
-            # Format dd/mm/yyyy
-            date_obj = datetime.strptime(str(exam_date), "%d/%m/%Y")
-        else:
-            # Format yyyy-mm-dd
-            date_obj = datetime.strptime(str(exam_date), "%Y-%m-%d")
-        date_iso = date_obj.strftime("%Y-%m-%d")
-        date_formatted = date_obj.strftime("%d/%m/%Y")
-    except ValueError as e:
-        logger.warning(f"  ⚠️ Format de date invalide: {exam_date} - {e}")
+    date_obj = parse_date_flexible(str(exam_date), "exam_date")
+    if date_obj is None:
+        logger.warning(f"  ⚠️ Format de date invalide: {exam_date}")
         return None
+    date_iso = date_obj.strftime("%Y-%m-%d")
+    date_formatted = date_obj.strftime("%d/%m/%Y")
 
     logger.info(f"  🔍 Recherche session: date={date_formatted}, département={departement}")
 

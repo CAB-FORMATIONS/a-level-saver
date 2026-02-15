@@ -701,13 +701,11 @@ class TemplateEngine:
         # Calculer la date de convocation (environ 10 jours avant l'examen)
         date_convocation = ''
         if date_examen:
-            try:
-                from datetime import timedelta
-                exam_date = datetime.strptime(date_examen, '%Y-%m-%d')
-                convoc_date = exam_date - timedelta(days=CONVOCATION_DAYS_BEFORE_EXAM)
+            from datetime import timedelta
+            exam_date_parsed = parse_date_flexible(date_examen, 'date_examen_convocation')
+            if exam_date_parsed:
+                convoc_date = exam_date_parsed - timedelta(days=CONVOCATION_DAYS_BEFORE_EXAM)
                 date_convocation = convoc_date.strftime('%d/%m/%Y')
-            except Exception as e:
-                pass
 
         # Détection du genre via le prénom
         is_female = self._detect_gender_from_name(prenom) == 'female'
@@ -2026,9 +2024,8 @@ class TemplateEngine:
                 'days_could_save': 0,
             }
 
-        try:
-            current_date_obj = datetime.strptime(str(current_date)[:10], '%Y-%m-%d')
-        except Exception:
+        current_date_obj = parse_date_flexible(current_date, 'current_date_cross_dept')
+        if not current_date_obj:
             return {
                 'has_earlier_options': False,
                 'earlier_options': [],
@@ -2045,22 +2042,21 @@ class TemplateEngine:
             if not alt_date_str or alt_dept == current_dept:
                 continue
 
-            try:
-                alt_date_obj = datetime.strptime(str(alt_date_str)[:10], '%Y-%m-%d')
-                if alt_date_obj < current_date_obj:
-                    days_earlier = (current_date_obj - alt_date_obj).days
-                    earlier_options.append({
-                        'date_examen_formatted': self._format_date(alt_date_str),
-                        'Date_Examen': alt_date_str,
-                        'dept': alt_dept,
-                        'Departement': alt_dept,
-                        'days_earlier': days_earlier,
-                        'comparison_text': f"{days_earlier} jours plus tot",
-                        'Date_Cloture_Inscription': date_info.get('Date_Cloture_Inscription', ''),
-                        'date_cloture_formatted': self._format_date(date_info.get('Date_Cloture_Inscription', '')),
-                    })
-            except Exception:
+            alt_date_obj = parse_date_flexible(alt_date_str, 'alt_date_cross_dept')
+            if not alt_date_obj:
                 continue
+            if alt_date_obj < current_date_obj:
+                days_earlier = (current_date_obj - alt_date_obj).days
+                earlier_options.append({
+                    'date_examen_formatted': self._format_date(alt_date_str),
+                    'Date_Examen': alt_date_str,
+                    'dept': alt_dept,
+                    'Departement': alt_dept,
+                    'days_earlier': days_earlier,
+                    'comparison_text': f"{days_earlier} jours plus tot",
+                    'Date_Cloture_Inscription': date_info.get('Date_Cloture_Inscription', ''),
+                    'date_cloture_formatted': self._format_date(date_info.get('Date_Cloture_Inscription', '')),
+                })
 
         # Trier par date (plus proche en premier)
         earlier_options.sort(key=lambda x: x.get('Date_Examen', ''))

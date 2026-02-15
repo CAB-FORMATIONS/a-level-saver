@@ -29,6 +29,7 @@ from datetime import datetime
 from typing import Dict, Any, List, Optional, Tuple
 
 from .base_agent import BaseAgent
+from src.utils.date_utils import parse_date_flexible, parse_datetime_flexible
 from src.zoho_client import ZohoCRMClient
 from src.constants.evalbox import BLOCKING_MODIFICATION
 
@@ -305,17 +306,13 @@ Réponds toujours en JSON avec la structure:
             # ================================================================
             date_cloture = session.get('Date_Cloture_Inscription')
             if date_cloture:
-                try:
-                    if isinstance(date_cloture, str):
-                        cloture_date = datetime.strptime(date_cloture, "%Y-%m-%d")
-                    else:
-                        cloture_date = date_cloture
-
-                    if cloture_date.date() < datetime.now().date():
+                cloture_date = parse_date_flexible(date_cloture, "Date_Cloture_Inscription")
+                if cloture_date is not None:
+                    if cloture_date < datetime.now().date():
                         logger.warning(f"  🚫 BLOCAGE: Date_examen_VTC {date_value} - clôture passée ({date_cloture})")
                         return None
-                except (ValueError, TypeError) as e:
-                    logger.warning(f"  ⚠️ Impossible de parser Date_Cloture_Inscription: {date_cloture} - {e}")
+                else:
+                    logger.warning(f"  ⚠️ Impossible de parser Date_Cloture_Inscription: {date_cloture}")
 
             logger.info(f"  📊 Date_examen_VTC: {date_value} → ID {session['id']}")
             return session['id']
@@ -410,7 +407,10 @@ Réponds toujours en JSON avec la structure:
             if date_match:
                 date_str = date_match.group(1)
                 # Convertir en yyyy-mm-dd
-                date_obj = datetime.strptime(date_str, "%d/%m/%Y")
+                date_obj = parse_date_flexible(date_str, "session_date")
+                if date_obj is None:
+                    logger.warning(f"  ⚠️ Impossible de parser la date session: {date_str}")
+                    return None
                 date_iso = date_obj.strftime("%Y-%m-%d")
 
                 # Recherche par date de début

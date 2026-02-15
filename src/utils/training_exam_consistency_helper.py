@@ -22,6 +22,7 @@ from datetime import datetime, timedelta
 from typing import Dict, Optional, List
 
 from src.constants.emails import COMPANY_SIGNATURE
+from src.utils.date_utils import parse_date_flexible, parse_datetime_flexible
 
 logger = logging.getLogger(__name__)
 
@@ -100,13 +101,12 @@ def analyze_training_exam_consistency(
     else:
         exam_date_str = str(exam_date_raw)
 
-    try:
-        exam_date = datetime.strptime(exam_date_str, "%Y-%m-%d")
-        result['exam_date'] = exam_date_str
-        result['exam_date_formatted'] = exam_date.strftime("%d/%m/%Y")
-    except ValueError:
+    exam_date = parse_datetime_flexible(exam_date_str, "exam_date")
+    if exam_date is None:
         logger.warning(f"  ⚠️ Format de date d'examen invalide: {exam_date_str}")
         return result
+    result['exam_date'] = exam_date_str
+    result['exam_date_formatted'] = exam_date.strftime("%d/%m/%Y")
 
     # Vérifier si l'examen est dans les 14 prochains jours (imminent)
     today = datetime.now()
@@ -146,10 +146,10 @@ def analyze_training_exam_consistency(
         )
         if next_exam:
             result['next_exam_date'] = next_exam.get('Date_Examen')
-            try:
-                next_date = datetime.strptime(result['next_exam_date'], "%Y-%m-%d")
+            next_date = parse_date_flexible(result['next_exam_date'], "next_exam_date")
+            if next_date:
                 result['next_exam_date_formatted'] = next_date.strftime("%d/%m/%Y")
-            except Exception as e:
+            else:
                 result['next_exam_date_formatted'] = result['next_exam_date']
             logger.info(f"  📅 Prochaine date d'examen disponible: {result['next_exam_date_formatted']}")
 
@@ -244,8 +244,6 @@ def detect_missed_training_from_crm(deal_data: Dict) -> Optional[Dict]:
     Returns:
         Dict avec 'detected': True et 'reason' si détecté, None sinon
     """
-    from src.utils.date_utils import parse_date_flexible
-
     today = datetime.now().date()
 
     # Récupérer la session assignée
@@ -530,21 +528,20 @@ def check_session_dates_consistency(
         if not date_fin_str:
             continue
 
-        try:
-            date_fin = datetime.strptime(str(date_fin_str), "%Y-%m-%d")
-
-            # La formation doit se terminer AU MOINS 3 jours avant l'examen
-            if date_fin <= exam_date - timedelta(days=3):
-                result['valid_sessions'].append(session)
-            else:
-                result['invalid_sessions'].append(session)
-                result['consistent'] = False
-                logger.warning(
-                    f"  ⚠️ Session invalide: fin le {date_fin.strftime('%d/%m/%Y')} "
-                    f"mais examen le {exam_date.strftime('%d/%m/%Y')}"
-                )
-        except ValueError:
+        date_fin = parse_datetime_flexible(str(date_fin_str), "session_date_fin")
+        if date_fin is None:
             continue
+
+        # La formation doit se terminer AU MOINS 3 jours avant l'examen
+        if date_fin <= exam_date - timedelta(days=3):
+            result['valid_sessions'].append(session)
+        else:
+            result['invalid_sessions'].append(session)
+            result['consistent'] = False
+            logger.warning(
+                f"  ⚠️ Session invalide: fin le {date_fin.strftime('%d/%m/%Y')} "
+                f"mais examen le {exam_date.strftime('%d/%m/%Y')}"
+            )
 
     return result
 
@@ -576,8 +573,6 @@ def detect_session_assignment_error(
             'correct_year': int or None,  # Année probable correcte (si erreur d'année)
         }
     """
-    from src.utils.date_utils import parse_date_flexible
-
     result = {
         'is_assignment_error': False,
         'session_name': None,
@@ -688,8 +683,6 @@ def find_corrected_session_for_year_error(
             'date_fin': str,
         }
     """
-    from src.utils.date_utils import parse_date_flexible
-
     if session_error_data.get('error_type') != 'wrong_year':
         logger.debug("  ℹ️ Pas une erreur d'année - pas de correction automatique")
         return None
