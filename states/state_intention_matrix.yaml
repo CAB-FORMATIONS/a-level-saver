@@ -2343,6 +2343,55 @@ matrix:
       show_dates_section: true
       show_sessions_section: true
 
+  "*:DEMANDE_AUTRES_DATES":
+    template: "response_master.html"
+    description: "Demande dates dans d'autres départements - tous états"
+    context_flags:
+      intention_demande_date: true
+      show_dates_section: true
+
+  "*:DEMANDE_INFOS_OFFRE":
+    template: "response_master.html"
+    description: "Question sur l'offre Uber 20€ - tous états"
+    context_flags:
+      intention_question_uber: true
+
+  "*:FORCE_MAJEURE_REPORT":
+    template: "response_master.html"
+    description: "Report pour force majeure - tous états"
+    context_flags:
+      intention_report_date: true
+
+  "*:ENVOIE_DOCUMENTS":
+    template: "response_master.html"
+    description: "Candidat envoie des documents - tous états"
+    context_flags:
+      intention_probleme_documents: true
+
+  "*:TRANSMET_DOCUMENTS":
+    template: "response_master.html"
+    description: "Candidat transmet des documents - tous états"
+    context_flags:
+      intention_probleme_documents: true
+
+  "*:ANNONCE_RESULTAT_POSITIF":
+    template: "response_master.html"
+    description: "Candidat annonce avoir réussi l'examen - tous états"
+    context_flags:
+      intention_resultat_examen: true
+
+  "*:ANNONCE_RESULTAT_NEGATIF":
+    template: "response_master.html"
+    description: "Candidat annonce avoir échoué l'examen - tous états"
+    context_flags:
+      intention_resultat_examen: true
+
+  "*:QUESTION_EXAMEN_PRATIQUE":
+    template: "response_master.html"
+    description: "Question sur l'examen pratique VTC - tous états"
+    context_flags:
+      intention_question_examen_pratique: true
+
 # =============================================================================
 # SECTION 4: CONFIGURATION GLOBALE
 # =============================================================================

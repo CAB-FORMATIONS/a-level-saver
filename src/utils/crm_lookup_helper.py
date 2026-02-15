@@ -69,7 +69,7 @@ def enrich_lookup_field(
     # Appeler le module CRM
     try:
         record = crm_client.get_record(module_name, lookup_id)
-        if record:
+        if record is not None:
             logger.debug(f"  ✅ {field_name} enrichi depuis {module_name}")
             # Mettre en cache
             if cache is not None:
@@ -124,7 +124,7 @@ def enrich_deal_lookups(
 
     # Enrichir Date_examen_VTC
     date_examen_record = enrich_lookup_field(crm_client, deal_data, 'Date_examen_VTC', cache)
-    if date_examen_record:
+    if date_examen_record is not None:
         result['date_examen_record'] = date_examen_record
         result['date_examen'] = date_examen_record.get('Date_Examen')
         result['date_cloture'] = date_examen_record.get('Date_Cloture_Inscription')
@@ -133,7 +133,7 @@ def enrich_deal_lookups(
 
     # Enrichir Session
     session_record = enrich_lookup_field(crm_client, deal_data, 'Session', cache)
-    if session_record:
+    if session_record is not None:
         result['session_record'] = session_record
         result['session_name'] = session_record.get('Name')
         result['session_date_debut'] = session_record.get('Date_d_but')
