@@ -2392,6 +2392,33 @@ matrix:
     context_flags:
       intention_question_examen_pratique: true
 
+  "*:DEMANDE_REINSCRIPTION":
+    template: "response_master.html"
+    description: "Demande de réinscription à l'examen - tous états (cas spécifiques EXAM_DATE_PAST_VALIDATED et RESULTAT_NON_ADMIS gardent leurs templates dédiés)"
+    context_flags:
+      intention_demande_reinscription: true
+      show_dates_section: true
+
+  "*:QUESTION_CARTE_VTC":
+    template: "response_master.html"
+    description: "Question sur la carte professionnelle VTC - tous états (cas RESULTAT_ADMIS garde son template dédié)"
+    context_flags:
+      intention_question_carte_vtc: true
+
+  "*:DEMANDE_SUPPRESSION_DONNEES":
+    template: "response_master.html"
+    description: "Demande RGPD suppression données - filet de sécurité si pas routé vers Contact"
+    context_flags:
+      intention_demande_suppression_donnees: true
+      show_dates_section: false
+      show_sessions_section: false
+
+  "*:DEMANDE_CERTIFICAT_FORMATION":
+    template: "response_master.html"
+    description: "Demande attestation ou certificat de formation - tous états"
+    context_flags:
+      intention_demande_certificat: true
+
 # =============================================================================
 # SECTION 4: CONFIGURATION GLOBALE
 # =============================================================================

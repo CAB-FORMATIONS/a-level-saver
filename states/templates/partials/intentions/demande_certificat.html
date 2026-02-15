@@ -1,0 +1,14 @@
+<!-- Partial: DEMANDE_CERTIFICAT_FORMATION -->
+<!-- Cas: Candidat demande une attestation ou un certificat de formation -->
+<b>Concernant votre demande d'attestation</b><br>
+{{#if resultat_admis}}
+Votre attestation de réussite à l'examen VTC vous a été transmise par la CMA (Chambre des Métiers et de l'Artisanat) de votre département. Nous vous invitons à vérifier vos courriers et emails (y compris les spams).<br>
+{{else}}
+{{#if evalbox_convoc_recue}}
+Votre attestation de formation sera disponible après le passage de votre examen. La CMA vous la transmettra directement.<br>
+{{else}}
+Nous prenons note de votre demande. L'attestation de formation est délivrée par la CMA (Chambre des Métiers et de l'Artisanat) après validation de votre dossier et passage de l'examen.<br>
+{{/if}}
+{{/if}}
+<br>
+Si vous avez besoin d'un justificatif de votre inscription auprès de CAB Formations, n'hésitez pas à nous le préciser.<br>
