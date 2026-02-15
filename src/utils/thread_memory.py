@@ -349,6 +349,172 @@ def parse_timeline(timeline_response: dict) -> Tuple[List[FieldChange], List[Hum
     return field_changes, human_interventions
 
 
+def detect_refus_after_cloture(field_changes: List[FieldChange], date_cloture_str: str) -> bool:
+    """Detect if a Refusé CMA occurred AFTER the exam registration deadline (clôture).
+
+    This catches the case where:
+    - Paiement was BEFORE clôture (paiement_avant_cloture=True)
+    - BUT a refus CMA happened AFTER clôture → candidate is effectively rejected
+    - Even if the refus was later resolved (Evalbox = Dossier Synchronisé now)
+    - The date is stale and should trigger CAS 8 auto-report
+
+    Args:
+        field_changes: Parsed Evalbox field changes from parse_timeline()
+        date_cloture_str: Clôture date string (e.g. "2026-01-23")
+
+    Returns:
+        True if a refus CMA occurred after clôture date
+    """
+    if not field_changes or not date_cloture_str:
+        return False
+
+    from src.utils.date_utils import parse_date_flexible
+
+    date_cloture = parse_date_flexible(date_cloture_str, "detect_refus_cloture")
+    if not date_cloture:
+        return False
+
+    for fc in field_changes:
+        if fc.field != 'Evalbox':
+            continue
+        if 'Refus' not in fc.new_value and 'refus' not in fc.new_value:
+            continue
+        # Found an Evalbox change TO "Refusé CMA" (or similar)
+        if fc.timestamp:
+            refus_date = fc.timestamp.date() if hasattr(fc.timestamp, 'date') else fc.timestamp
+            if refus_date > date_cloture:
+                logger.info(
+                    f"  🔍 TIMELINE: Refus CMA détecté le {refus_date} "
+                    f"(APRÈS clôture {date_cloture_str}) → date stale"
+                )
+                return True
+
+    return False
+
+
+def build_deal_journey_summary(field_changes: List[FieldChange], deal_data: dict = None) -> str:
+    """Build a concise chronological summary of the deal's journey from CRM timeline.
+
+    Used to give the triage agent context about WHAT HAPPENED in the deal's history,
+    so it can answer candidate questions grounded in real CRM data.
+
+    Args:
+        field_changes: Parsed field changes from parse_timeline()
+        deal_data: Current deal data for a snapshot of current state
+
+    Returns:
+        Concise text summary (max ~500 chars), empty string if no changes
+    """
+    if not field_changes:
+        return ''
+
+    # Human-readable field names
+    FIELD_DISPLAY = {
+        'Evalbox': 'Statut dossier',
+        'Date_examen_VTC': "Date d'examen",
+        'Session': 'Session de formation',
+        'Session_souhait_e': 'Préférence horaire',
+        'PAYE_EN_PROD': 'Paiement CMA',
+        'IDENTIFIANT_EVALBOX': 'Identifiant Evalbox',
+        'Stage': 'Étape',
+        'Date_de_depot_CMA': 'Dépôt CMA',
+        'Frais_Examen': "Frais d'examen",
+    }
+
+    lines = []
+    prev_date_str = None
+
+    for fc in field_changes:
+        # Format timestamp as date
+        date_str = fc.timestamp.strftime('%d/%m') if fc.timestamp else '??'
+
+        # Format the field change
+        field_label = FIELD_DISPLAY.get(fc.field, fc.field)
+        old_display = _format_field_value(fc.field, fc.old_value)
+        new_display = _format_field_value(fc.field, fc.new_value)
+
+        # Group same-day changes on one line prefix
+        if date_str == prev_date_str:
+            prefix = '       '
+        else:
+            prefix = f"  {date_str}:"
+            prev_date_str = date_str
+
+        if old_display and new_display:
+            lines.append(f"{prefix} {field_label}: {old_display} → {new_display}")
+        elif new_display:
+            lines.append(f"{prefix} {field_label}: {new_display}")
+
+    if not lines:
+        return ''
+
+    # Add current state snapshot
+    summary_parts = ['CHRONOLOGIE:']
+    summary_parts.extend(lines)
+
+    if deal_data:
+        current_parts = []
+        evalbox = deal_data.get('Evalbox')
+        if evalbox and evalbox != 'N/A':
+            from src.constants.evalbox import STATUT_DISPLAY
+            evalbox_display = STATUT_DISPLAY.get(evalbox, evalbox)
+            current_parts.append(f"Statut={evalbox_display}")
+        session = deal_data.get('Session')
+        if session:
+            s_name = session.get('name', str(session)) if isinstance(session, dict) else str(session)
+            current_parts.append(f"Session={s_name}")
+        if current_parts:
+            summary_parts.append(f"  ACTUEL: {', '.join(current_parts)}")
+
+    summary = '\n'.join(summary_parts)
+
+    # Cap at ~600 chars to keep triage prompt lean
+    if len(summary) > 600:
+        summary = summary[:597] + '...'
+
+    return summary
+
+
+def _format_field_value(field: str, value: str) -> str:
+    """Format a field value for human-readable display in the journey summary.
+
+    IMPORTANT: Never expose CRM jargon to candidates. Use candidate-friendly terms.
+    """
+    if not value:
+        return ''
+
+    if field == 'Evalbox':
+        # Map CRM statuses to candidate-friendly terms
+        from src.constants.evalbox import STATUT_DISPLAY
+        return STATUT_DISPLAY.get(value, value)
+
+    if field == 'Date_examen_VTC':
+        # "75_2026-03-31" → "31/03/2026 (dept 75)"
+        if '_' in value:
+            dept, date_part = value.split('_', 1)
+            try:
+                parts = date_part.split('-')
+                if len(parts) == 3:
+                    return f"{parts[2]}/{parts[1]}/{parts[0]} (dept {dept})"
+            except Exception:
+                pass
+        return value
+
+    if field == 'Session':
+        # "cdj-montreuil-13/04-24/04" → shorter display
+        if len(value) > 30:
+            return value[:30] + '...'
+        return value
+
+    if field == 'PAYE_EN_PROD':
+        if value.lower() in ('true', '1', 'oui'):
+            return 'Oui'
+        if value.lower() in ('false', '0', 'non'):
+            return 'Non'
+
+    return value
+
+
 def _parse_timeline_timestamp(val) -> Optional[datetime]:
     """Parse a timestamp from a timeline entry.
 

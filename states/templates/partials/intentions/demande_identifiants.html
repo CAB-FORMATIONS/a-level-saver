@@ -42,7 +42,11 @@ Ils seront créés lors de la constitution de votre dossier CMA.<br>
 {{else}}
 &nbsp;&nbsp;→ <b>Cours du soir</b> : du {{session_date_debut}} au {{session_date_fin}} (18h-22h)<br>
 {{/if}}
+{{#if session_in_progress}}
+Si vous n'avez pas reçu le lien de connexion, vérifiez vos spams ou contactez-nous.<br>
+{{else}}
 Vous recevrez le lien d'invitation à la visioconférence par email avant le début de la formation.<br>
+{{/if}}
 {{/unless}}
 {{/if}}
 {{/if}}

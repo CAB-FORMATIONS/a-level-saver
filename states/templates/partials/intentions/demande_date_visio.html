@@ -30,7 +30,18 @@ Pour l'examen du {{this.date_examen_formatted}} :<br>
 Merci de nous contacter pour que nous puissions vous proposer une nouvelle session avant votre examen.<br>
 {{/if}}
 {{else}}
-<!-- Session déjà assignée et FUTURE - rappeler les dates -->
+{{#if session_in_progress}}
+<!-- Session EN COURS -->
+Votre session de formation est actuellement en cours :<br>
+{{#if session_is_jour}}
+&nbsp;&nbsp;→ <b>Cours du jour</b> : du {{session_date_debut}} au {{session_date_fin}} (8h30-17h30)<br>
+{{else}}
+&nbsp;&nbsp;→ <b>Cours du soir</b> : du {{session_date_debut}} au {{session_date_fin}} (18h-22h)<br>
+{{/if}}
+<br>
+Si vous n'avez pas reçu le lien de connexion, vérifiez vos spams ou contactez-nous.<br>
+{{else}}
+<!-- Session FUTURE - rappeler les dates -->
 Votre session de formation est confirmée :<br>
 {{#if session_is_jour}}
 &nbsp;&nbsp;→ <b>Cours du jour</b> : du {{session_date_debut}} au {{session_date_fin}} (8h30-17h30)<br>
@@ -39,6 +50,7 @@ Votre session de formation est confirmée :<br>
 {{/if}}
 <br>
 Vous recevrez le lien d'invitation par email avant le début de la formation.<br>
+{{/if}}
 {{/if}}
 {{else}}
 {{#unless intention_confirmation_session}}

@@ -1039,6 +1039,9 @@ class TemplateEngine:
                 context.get('cab_proposals', {}).get('last_proposed_exam_date', '')
             ),
 
+            # Direct answer from triage (grounded in CRM data)
+            'direct_answer': context.get('direct_answer', ''),
+
             # Mode de communication du candidat (clarification vs request)
             'communication_mode': context.get('communication_mode', 'request'),
             'references_previous_communication': context.get('references_previous_communication', False),
@@ -1072,6 +1075,7 @@ class TemplateEngine:
 
             # Permis probatoire (pour PERMIS_PROBATOIRE)
             'probation_completed': intent_context.get('probation_status') == 'completed',
+            'probation_eligible_for_exam': intent_context.get('probation_status') == 'eligible',
             'probation_pending': intent_context.get('probation_status') == 'pending',
 
             # ===== THREAD MEMORY (mémoire persistante) =====
@@ -2297,8 +2301,10 @@ class TemplateEngine:
 
     def _filter_closest_sessions_by_exam(self, context: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Filtre les closest_session_before/after par date d'examen (Rule 16).
-        Les sessions qui se terminent APRÈS l'examen sont nullifiées.
+        Filtre les closest_session_before/after :
+        1. Par date d'examen (Rule 16) — sessions qui se terminent APRÈS l'examen
+        2. Par date du jour — sessions déjà commencées (passées)
+        3. Par session actuelle — ne pas re-proposer la session du candidat
         """
         keys = [
             'closest_session_before', 'closest_session_after',
@@ -2319,14 +2325,40 @@ class TemplateEngine:
         if is_session_change and date_examen_raw:
             exam_date = parse_date_flexible(date_examen_raw)
 
+        # Session actuelle du candidat (pour ne pas la re-proposer)
+        current_session_id = context.get('current_session_id') or enriched_lookups.get('session_record', {}).get('id', '')
+        today = datetime.now().date()
+
         result = {}
         for key in keys:
             raw_session = context.get(key)
-            if exam_date and raw_session and not self._session_ends_before_exam(raw_session, exam_date):
+            if not raw_session:
+                result[key] = None
+                continue
+
+            # Filtre 1: Session se termine après l'examen (Rule 16)
+            if exam_date and not self._session_ends_before_exam(raw_session, exam_date):
                 logger.info(f"📅 {key} filtré: session se termine après examen {exam_date}")
                 result[key] = None
-            else:
-                result[key] = self._format_session_for_template(raw_session)
+                continue
+
+            # Filtre 2: Session déjà commencée (date_debut <= aujourd'hui)
+            start_str = raw_session.get('Date_d_but', '') or raw_session.get('date_debut', '') or ''
+            if start_str:
+                start_date = parse_date_flexible(start_str)
+                if start_date and start_date <= today:
+                    logger.info(f"📅 {key} filtré: session déjà commencée ({start_str} <= {today})")
+                    result[key] = None
+                    continue
+
+            # Filtre 3: C'est la session actuelle du candidat
+            session_id = str(raw_session.get('id', ''))
+            if current_session_id and session_id and session_id == str(current_session_id):
+                logger.info(f"📅 {key} filtré: c'est la session actuelle du candidat")
+                result[key] = None
+                continue
+
+            result[key] = self._format_session_for_template(raw_session)
 
         return result
 
@@ -2739,7 +2771,30 @@ class TemplateEngine:
                 else:
                     logger.warning(f"⚠️ Impossible de parser la date d'examen '{date_examen_raw}'")
 
-        # FILTRE 3: Préférence jour/soir pour CONFIRMATION_SESSION
+        # FILTRE 3: Sessions passées (date_debut <= aujourd'hui) et session actuelle du candidat
+        today = datetime.now().date()
+        enriched_lookups_f3 = context.get('enriched_lookups', {})
+        current_session_id = str(enriched_lookups_f3.get('session_record', {}).get('id', ''))
+        filtered_past = []
+        for s in all_sessions:
+            # Filtre sessions passées
+            s_debut = s.get('date_debut', '') or s.get('debut', '')
+            if s_debut:
+                s_date = parse_date_flexible(s_debut)
+                if s_date and s_date <= today:
+                    logger.info(f"📅 Session filtrée (passée): {s.get('session_name', s.get('nom', ''))} ({s_debut})")
+                    continue
+            # Filtre session actuelle du candidat
+            s_id = str(s.get('session_id', '') or s.get('id', ''))
+            if current_session_id and s_id and s_id == current_session_id:
+                logger.info(f"📅 Session filtrée (session actuelle): {s.get('session_name', s.get('nom', ''))}")
+                continue
+            filtered_past.append(s)
+        if len(filtered_past) < len(all_sessions):
+            logger.info(f"📅 Sessions après filtre passées/actuelle: {len(filtered_past)}/{len(all_sessions)}")
+            all_sessions = filtered_past
+
+        # FILTRE 4 (ex-3): Préférence jour/soir pour CONFIRMATION_SESSION
         secondary_intents = context.get('secondary_intents', [])
         session_preference = self._get_session_preference(context)
 
@@ -2755,7 +2810,7 @@ class TemplateEngine:
                 return filtered
             logger.warning(f"⚠️ Aucune session '{session_preference}' trouvée, affichage de toutes les sessions")
 
-        # FILTRE 4: Pour session_assignment_error, filtrer par le type de session d'origine
+        # FILTRE 5 (ex-4): Pour session_assignment_error, filtrer par le type de session d'origine
         # (la session erronée indique la préférence du candidat)
         if has_session_assignment_error:
             enriched_lookups = context.get('enriched_lookups', {})

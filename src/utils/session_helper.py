@@ -564,6 +564,12 @@ def analyze_session_situation(
             return result
 
     # 4. Récupérer les sessions pour chaque date d'examen UNIQUE (cache pour éviter doublons)
+    # Si changement de session explicite → charger TOUS les types (jour+soir) pour la cascade
+    load_type = preference
+    if is_explicit_session_change:
+        load_type = None
+        logger.info(f"  🔄 Changement explicite → chargement TOUS types (jour+soir)")
+
     if crm_client:
         # Cache: date_string -> sessions
         sessions_cache = {}
@@ -576,7 +582,7 @@ def analyze_session_situation(
                     sessions_cache[exam_date] = get_sessions_for_exam_date(
                         crm_client,
                         exam_date,
-                        session_type=preference
+                        session_type=load_type
                     )
 
                 result['proposed_options'].append({
@@ -914,10 +920,12 @@ def match_sessions_by_date_range(
         # Cas 2: La session est CONTENUE dans la plage demandée (ex: "semaine du 16/02" = 7j,
         #         session 16-20/02 = 5j → la session tombe exactement dans la semaine demandée)
         # Cas 3: Candidat n'a donné qu'une date de début → session commence à cette date
+        # Cas 4: Range ouvert "après le X" (end_date_str=None) → toute session commençant après X
         session_contained_in_range = (session_start.date() >= start_date.date() and session_end.date() <= end_date.date())
         no_explicit_end = (end_date_str is None) or (start_date.date() == end_date.date())
         starts_on_date = session_start.date() == start_date.date()
-        if session_contained_in_range or (starts_on_date and no_explicit_end):
+        open_ended_after = (end_date_str is None) and session_start.date() > start_date.date()
+        if session_contained_in_range or (starts_on_date and no_explicit_end) or open_ended_after:
             result['exact_matches'].append(session)
             logger.info(f"  ✅ EXACT MATCH: {session.get('Name')} ({session_start_str} - {session_end_str})")
 

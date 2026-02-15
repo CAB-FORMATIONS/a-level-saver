@@ -137,8 +137,16 @@ INTENTIONS POSSIBLES (par ordre de spécificité - préfère les intentions spé
   Exemples avec date existante: "je voudrais juillet au lieu de mars", "dates à Montpellier" (si sa date actuelle est ailleurs), "je ne peux pas en mars"
   Exemples d'indisponibilité: "je serai en voyage le jour de l'examen", "je pars le 15 et l'examen est le 24", "je ne serai pas disponible à cette date"
   ⚠️ CAS PIÈGE: "je n'ai pas reçu ma convocation et je suis en voyage à partir du 15" → Le vrai problème est l'ABSENCE, pas la convocation. primary_intent = REPORT_DATE
-  ⚠️ CAS PIÈGE INFORMATIF: Si le candidat INFORME que sa date a été changée/déplacée (par l'administration, la CMA, etc.) sans DEMANDER de changement → ce n'est PAS REPORT_DATE. Il constate un fait. Chercher sa VRAIE demande dans le reste du message.
-  Exemples: "ma date a été reportée en mars", "ça a été annulé et je le passerai fin mars", "la CMA m'a déplacé en avril" → Le candidat ne demande PAS un report, il INFORME. Sa vraie demande est ailleurs (session, convocation, etc.)
+  ⚠️ CAS PIÈGE INFORMATIF: Si le candidat INFORME/QUESTIONNE un changement de date sans DEMANDER de report → ce n'est PAS REPORT_DATE.
+  Deux sous-cas:
+  a) Il CONSTATE un fait: "ma date a été reportée en mars", "la CMA m'a déplacé en avril" → Sa vraie demande est ailleurs (session, convocation, etc.)
+  b) Il QUESTIONNE une incohérence: "pourquoi ma date a changé ?", "vous m'aviez dit mars mais je vois février", "qui a modifié ma date ?"
+     → C'est DEMANDE_DATE_EXAMEN avec communication_mode: "clarification" et mentions_discrepancy: true
+     → PAS REPORT_DATE ! Le candidat ne veut PAS changer de date, il veut COMPRENDRE
+  Exemples NON-REPORT:
+  - "pourquoi la date de mon examen a été modifiée" → DEMANDE_DATE_EXAMEN (clarification)
+  - "vous m'aviez dit le 31 mars, mais je reçois un message pour le 24 février" → DEMANDE_DATE_EXAMEN (clarification + discrepancy)
+  - "ma date a été reportée en mars" → le candidat INFORME, chercher sa vraie demande
   ⚠️ CAS IMPLICITE: Si le candidat demande une formation/session à un MOIS ou une DATE qui est APRÈS sa date d'examen actuelle → c'est REPORT_DATE (pas DEMANDE_CHANGEMENT_SESSION).
   Mettre implicit_date_repositioning: true dans intent_context.
   Exemples (Date examen actuelle = "2026-03-31"):
@@ -283,7 +291,8 @@ INTENTIONS POSSIBLES (par ordre de spécificité - préfère les intentions spé
   Exemples: "permis probatoire", "jeune permis", "moins de 3 ans de permis", "fin de probation", "j'ai atteint 3 ans"
   ⚠️ IMPORTANT: Ajouter dans intent_context.probation_status:
     - "completed": le candidat ANNONCE qu'il a atteint les 3 ans (ex: "j'ai atteint les 3 ans", "j'ai maintenant 3 ans de permis") → il est PRÊT, pas besoin de lui demander la date
-    - "pending": le candidat n'a PAS encore 3 ans et DEMANDE quand il pourra s'inscrire
+    - "eligible": le candidat n'a PAS encore 3 ans MAIS donne une date de fin de probation qui est AVANT sa date d'examen → il SERA éligible au moment de l'examen, pas besoin de lui redemander
+    - "pending": le candidat n'a PAS encore 3 ans et NE DONNE PAS de date précise → on doit lui demander
     - "question": question générale sur le permis probatoire
 - PERMIS_RENOUVELLEMENT: Permis en cours de renouvellement, abîmé, volé ou perdu
   Exemples: "nouveau permis", "renouvellement permis", "permis abîmé", "permis volé", "permis perdu", "en attente de mon permis", "ANTS", "récépissé"
@@ -530,10 +539,32 @@ Réponds UNIQUEMENT en JSON valide:
             "wrong_dates": "YYYY-MM-DD - YYYY-MM-DD" | null,
             "wrong_dates_raw": "texte original" | null
         } | null,
-        "probation_status": "completed" | "pending" | "question" | null,
+        "probation_status": "completed" | "eligible" | "pending" | "question" | null,
         "implicit_date_repositioning": true | false
-    }
+    },
+    "direct_answer": "2-3 phrases qui répondent DIRECTEMENT à la question spécifique du candidat, basées uniquement sur les données CRM disponibles. Si tu ne peux pas répondre factuellement, dis-le honnêtement. null si le message n'est pas une question."
 }
+
+IMPORTANT - DIRECT_ANSWER:
+Tu dois TOUJOURS fournir un "direct_answer" qui répond à la question SPÉCIFIQUE du candidat.
+- Base ta réponse UNIQUEMENT sur les données CRM et l'historique du dossier ci-dessus
+- Ne JAMAIS inventer ou supposer des informations non présentes dans les données
+- Si tu ne sais pas → dis "Je n'ai pas cette information dans votre dossier"
+- 2-3 phrases maximum, ton professionnel et empathique
+- Si le message n'est PAS une question (confirmation, remerciement, envoi de documents), mettre null
+- JAMAIS de jargon CRM/technique ! Utiliser des termes compréhensibles par le candidat:
+  • "Dossier Synchronisé" → "en cours d'instruction par la CMA"
+  • "Pret a payer" → "dossier prêt, en attente du paiement CMA"
+  • "VALIDE CMA" → "dossier validé par la CMA"
+  • "Convoc CMA reçue" → "convocation reçue"
+  • "Evalbox" → ne pas mentionner ce mot
+- Exemples:
+  - Q: "Pourquoi je reçois un mail de formation alors que j'ai déjà fait la formation?"
+    → Si historique montre report de date: "Votre date d'examen ayant été reportée du [ancienne] au [nouvelle], une nouvelle session de formation vous est proposée pour vous préparer avant cette nouvelle date."
+    → Si pas d'info: "Je vais vérifier votre dossier. D'après nos données, vous êtes inscrit à la session [dates]. Merci de nous préciser les détails de la formation que vous avez déjà suivie."
+  - Q: "Où en est mon dossier ?" → "Votre dossier est actuellement au statut [statut Evalbox]. [explication de ce que ça signifie]."
+  - Pas une question: "OK merci" → null
+  - Pas une question: "Je confirme la date du 15 mars" → null
 
 IMPORTANT: Si le candidat exprime plusieurs intentions, liste l'intention principale dans primary_intent
 et les autres dans secondary_intents (array, peut être vide).
@@ -619,7 +650,8 @@ EXEMPLE PLAINTE - Message: "J'avais clairement indiqué mon choix pour une forma
         thread_content: str,
         deal_data: Optional[Dict[str, Any]] = None,
         current_department: str = DEPT_DOC,
-        conversation_summary: Optional[str] = None
+        conversation_summary: Optional[str] = None,
+        deal_journey: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Analyse un ticket et détermine l'action de triage + intention du candidat.
@@ -693,6 +725,10 @@ EXEMPLE PLAINTE - Message: "J'avais clairement indiqué mon choix pour une forma
                 f"**Session formation actuelle:** {session_info}"
             ]
             context_parts.append("\n".join(deal_info))
+
+            # Historique du dossier (chronologie CRM) — pour réponse directe factuelle
+            if deal_journey:
+                context_parts.append(f"**Historique du dossier (chronologie CRM):**\n{deal_journey}")
 
             # Règle automatique: Si Evalbox indique un refus → vérifier l'intention
             # LOGIQUE MÉTIER (modifiée 2026-01-31):
@@ -805,7 +841,7 @@ EXEMPLE PLAINTE - Message: "J'avais clairement indiqué mon choix pour une forma
             client = Anthropic()
             response = client.messages.create(
                 model=MODEL_TRIAGE,  # Modèle précis pour ne pas rater les intentions
-                max_tokens=800,  # Sonnet peut être plus verbeux
+                max_tokens=1000,  # Extra tokens for direct_answer field
                 system=self.SYSTEM_PROMPT,
                 messages=[
                     {"role": "user", "content": f"Analyse ce ticket et détermine l'action de triage:\n\n{context}"}
@@ -882,6 +918,11 @@ EXEMPLE PLAINTE - Message: "J'avais clairement indiqué mon choix pour une forma
                 if intent_context.get('assigned_session_wrong'):
                     logger.info(f"  ❌ Session erronée reçue: {intent_context.get('assigned_session_wrong')}")
 
+            # Direct answer — grounded response to candidate's specific question
+            direct_answer = result.get('direct_answer') or ''
+            if direct_answer:
+                logger.info(f"  💬 Direct answer: {direct_answer[:80]}...")
+
             llm_result = {
                 'action': action,
                 'target_department': target_dept,
@@ -893,7 +934,9 @@ EXEMPLE PLAINTE - Message: "J'avais clairement indiqué mon choix pour une forma
                 'secondary_intents': secondary_intents,
                 # Rétrocompatibilité
                 'detected_intent': primary_intent,
-                'intent_context': intent_context
+                'intent_context': intent_context,
+                # Direct answer (grounded in CRM data)
+                'direct_answer': direct_answer
             }
 
             # ================================================================

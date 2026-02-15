@@ -15,6 +15,15 @@
 {{> salutation_personnalisee}}
 
 <!-- =====================================================================
+     RÉPONSE DIRECTE: Réponse à la question spécifique du candidat
+     (Générée par le triage, basée sur les données CRM)
+     ===================================================================== -->
+{{#if direct_answer}}
+{{direct_answer}}<br>
+<br>
+{{/if}}
+
+<!-- =====================================================================
      CONTEXTE: Reconnaissance communication precedente (clarification/follow-up)
      ===================================================================== -->
 {{> partials/context/previous_communication}}

@@ -96,7 +96,7 @@ from src.utils.ticket_info_extractor import (
     detect_candidate_references,
     detect_dossier_completion_request,
 )
-from src.utils.thread_memory import analyze_thread_memory
+from src.utils.thread_memory import analyze_thread_memory, parse_timeline, build_deal_journey_summary
 from src.utils.conversation_analyzer import analyze_conversation
 from src.utils.date_confirmation_extractor import extract_confirmed_exam_date
 from src.utils.cross_department_helper import (
@@ -2339,6 +2339,19 @@ Le candidat a un ancien dossier dont les frais CMA ({CMA_EXAM_FEE}€) ont déj�
                 except Exception as e:
                     logger.warning(f"  ⚠️ Impossible d'enrichir Date_examen_VTC: {e}")
 
+        # Fetch timeline for deal journey (needed by triage for grounded direct_answer)
+        deal_timeline_for_triage = None
+        deal_journey_summary = ''
+        if selected_deal and selected_deal.get('id'):
+            try:
+                deal_timeline_for_triage = self.crm_client.get_deal_timeline(selected_deal['id'])
+                field_changes_for_journey, _ = parse_timeline(deal_timeline_for_triage)
+                deal_journey_summary = build_deal_journey_summary(field_changes_for_journey, selected_deal)
+                if deal_journey_summary:
+                    logger.info(f"  📜 Deal journey: {len(deal_journey_summary)} chars")
+            except Exception as e:
+                logger.warning(f"  ⚠️ Deal journey failed (graceful degradation): {e}")
+
         # Générer un résumé de l'historique si plusieurs threads
         conversation_summary = None
         if len(threads) > 2:
@@ -2441,7 +2454,8 @@ RÉSUMÉ (2-3 phrases):"""
                 thread_content=last_thread_content,
                 deal_data=selected_deal,
                 current_department=DEPT_DOC,
-                conversation_summary=conversation_summary  # Nouveau: contexte historique
+                conversation_summary=conversation_summary,
+                deal_journey=deal_journey_summary
             )
 
         logger.info(f"  🤖 Résultat IA: {ai_triage['action']} → {ai_triage['target_department']} ({ai_triage['reason']})")
@@ -2460,6 +2474,10 @@ RÉSUMÉ (2-3 phrases):"""
         # Multi-intentions
         triage_result['primary_intent'] = ai_triage.get('primary_intent')
         triage_result['secondary_intents'] = ai_triage.get('secondary_intents', [])
+        # Direct answer (grounded in CRM data)
+        triage_result['direct_answer'] = ai_triage.get('direct_answer', '')
+        # Store timeline for reuse (avoid duplicate API call in ThreadMemory)
+        triage_result['_deal_timeline'] = deal_timeline_for_triage
         # Ajouter selected_deal pour utilisation ultérieure (ex: draft TRANSMET_DOCUMENTS)
         triage_result['selected_deal'] = selected_deal
 
@@ -2787,14 +2805,27 @@ RÉSUMÉ (2-3 phrases):"""
                 for d in all_deals[:5]
             ]) if all_deals else "Aucun deal trouvé"
 
-            note = (
-                "⚠️ WORKFLOW STOPPÉ — PAS DE DEAL GAGNÉ\n\n"
-                "Potentiel prospect Uber sans deal Gagné 20 euros à investiguer.\n"
-                "Attention : si pas Uber, déplacer vers Contact.\n\n"
-                f"Deals trouvés ({len(all_deals)}) : {deals_summary}"
-            )
+            # Vérifier si une note "WORKFLOW STOPPÉ" existe déjà (éviter les doublons)
+            already_noted = False
+            try:
+                existing_comments = self.desk_client.get_ticket_comments(ticket_id, include_public=False)
+                already_noted = any(
+                    "WORKFLOW STOPP" in (c.get('content') or c.get('contentText') or '')
+                    for c in existing_comments
+                )
+            except Exception:
+                pass  # Graceful degradation — on poste la note si doute
 
-            self._add_internal_note(ticket_id, note)
+            if not already_noted:
+                note = (
+                    "⚠️ WORKFLOW STOPPÉ — PAS DE DEAL GAGNÉ\n\n"
+                    "Potentiel prospect Uber sans deal Gagné 20 euros à investiguer.\n"
+                    "Attention : si pas Uber, déplacer vers Contact.\n\n"
+                    f"Deals trouvés ({len(all_deals)}) : {deals_summary}"
+                )
+                self._add_internal_note(ticket_id, note)
+            else:
+                logger.info("  ℹ️ Note 'WORKFLOW STOPPÉ' déjà présente → skip doublon")
 
             logger.warning("🛑 STOP WORKFLOW — Pas de deal GAGNÉ → investigation manuelle")
             return {
@@ -3073,12 +3104,13 @@ Deux comptes ExamenT3P fonctionnels ont été détectés pour ce candidat, et le
             try:
                 deal_notes = self.crm_client.get_deal_notes(deal_id)
 
-                # Timeline API (v8) — field changes + human interventions
-                deal_timeline = None
-                try:
-                    deal_timeline = self.crm_client.get_deal_timeline(deal_id)
-                except Exception as e:
-                    logger.warning(f"  ⚠️ Timeline API failed (graceful degradation): {e}")
+                # Timeline API (v8) — reuse from triage step if available
+                deal_timeline = triage_result.get('_deal_timeline')
+                if deal_timeline is None:
+                    try:
+                        deal_timeline = self.crm_client.get_deal_timeline(deal_id)
+                    except Exception as e:
+                        logger.warning(f"  ⚠️ Timeline API failed (graceful degradation): {e}")
 
                 current_intent = triage_result.get('detected_intent', '')
                 thread_memory_result = analyze_thread_memory(
@@ -3386,7 +3418,8 @@ Cordialement,<br>
                 crm_client=self.crm_client,
                 examt3p_data=examt3p_data,
                 session_preference=triage_session_pref,
-                enriched_lookups=enriched_lookups
+                enriched_lookups=enriched_lookups,
+                deal_timeline=triage_result.get('_deal_timeline')
             )
 
             if date_examen_vtc_result.get('should_include_in_response'):
@@ -4156,7 +4189,8 @@ Cordialement,<br>
                 _cascade_engagement = classify_engagement_level(_cascade_evalbox, _cascade_cloture, examt3p_data)
 
                 session_data = self._apply_session_change_cascade(
-                    session_data, current_session_type, current_session_id, _cascade_engagement
+                    session_data, current_session_type, current_session_id, _cascade_engagement,
+                    requested_type=triage_session_pref
                 )
 
             # ================================================================
@@ -5489,6 +5523,9 @@ Bien cordialement,
             'customer_message': customer_message,
             'threads': analysis_result.get('threads', []),
 
+            # Direct answer from triage (grounded in CRM data)
+            'direct_answer': triage_result.get('direct_answer', ''),
+
             # Données extraites pour les placeholders (niveau racine)
             # Filtrer next_dates: exclure la date actuelle
             # DEMANDE_ANNULATION: proposer plus de dates pour alternative au candidat
@@ -6290,12 +6327,17 @@ Bien cordialement,
     }
     RESULTAT_MID = {'ADMISSIBLE'}
 
-    def _apply_session_change_cascade(self, session_data, current_type, current_id, engagement):
+    def _apply_session_change_cascade(self, session_data, current_type, current_id, engagement, requested_type=None):
         """Cascade d'alternatives pour DEMANDE_CHANGEMENT_SESSION.
 
+        Si requested_type est fourni et différent de current_type, le candidat veut
+        changer de TYPE (ex: soir→jour). La cascade adapte sa stratégie:
+        - Skip CASCADE 1 (proposer d'autres sessions du même type ne sert à rien)
+        - Cherche le type demandé sur la date actuelle ET la prochaine date
+
         Niveaux:
-        1. Même type, même date, session différente → proposer celle-là uniquement
-        2. Combo: autre type même date (Alt A) + même type prochaine date (Alt B)
+        1. Même type, même date, session différente (skip si changement de type demandé)
+        2. Combo: type demandé même date + type demandé/même type prochaine date
         3. Fallback: prochaine date (tout type disponible)
         0. Rien trouvé → garder les options originales
         """
@@ -6308,40 +6350,72 @@ Bien cordialement,
         next_option = proposed[1] if len(proposed) > 1 else None
         current_sessions = current_option.get('sessions', [])
 
-        # Step 1: Autre session du MÊME type sur la MÊME date
-        same_type_alts = [s for s in current_sessions
-                          if s.get('session_type') == current_type
-                          and str(s.get('id', '')) != str(current_id or '')]
-        if same_type_alts:
-            current_option['sessions'] = same_type_alts
-            session_data['proposed_options'] = [current_option]
-            session_data['_cascade_level'] = 1
-            logger.info(f"  🔄 CASCADE 1: {len(same_type_alts)} alternative(s) même type trouvée(s)")
-            return session_data
+        # Déterminer si le candidat demande un changement de TYPE
+        wants_type_change = requested_type and requested_type != current_type
 
-        # Step 2: Combo — autre type même date (Alt A) + même type prochaine date (Alt B)
+        # Step 1: Autre session du MÊME type sur la MÊME date
+        # → Skip si le candidat veut changer de type (proposer plus de soir n'aide pas)
+        if not wants_type_change:
+            same_type_alts = [s for s in current_sessions
+                              if s.get('session_type') == current_type
+                              and str(s.get('id', '')) != str(current_id or '')]
+            if same_type_alts:
+                current_option['sessions'] = same_type_alts
+                session_data['proposed_options'] = [current_option]
+                session_data['_cascade_level'] = 1
+                logger.info(f"  🔄 CASCADE 1: {len(same_type_alts)} alternative(s) même type trouvée(s)")
+                return session_data
+
+        # Step 2: Combo — chercher des alternatives pertinentes
+        # Si changement de type: chercher le type demandé partout (date actuelle + prochaine)
+        # Sinon: autre type même date + même type prochaine date
+        target_type = requested_type if wants_type_change else None
         other_type = [s for s in current_sessions if s.get('session_type') != current_type]
+        next_requested = []
         next_same_type = []
         if next_option and engagement.get('can_reposition'):
             next_sessions = next_option.get('sessions', [])
             next_same_type = [s for s in next_sessions if s.get('session_type') == current_type]
+            if target_type:
+                next_requested = [s for s in next_sessions if s.get('session_type') == target_type]
 
         combo = []
-        if other_type:
-            alt_a = copy.deepcopy(current_option)
-            alt_a['sessions'] = other_type
-            combo.append(alt_a)
-        if next_same_type:
-            alt_b = copy.deepcopy(next_option)
-            alt_b['sessions'] = next_same_type
-            combo.append(alt_b)
+        if wants_type_change:
+            # Candidat veut changer de type → chercher le type demandé sur les deux dates
+            if other_type:
+                alt_a = copy.deepcopy(current_option)
+                alt_a['sessions'] = other_type
+                combo.append(alt_a)
+            if next_requested:
+                alt_b = copy.deepcopy(next_option)
+                alt_b['sessions'] = next_requested
+                combo.append(alt_b)
+            # Si aucune session du type demandé trouvée nulle part, fallback sur même type prochaine date
+            if not combo and next_same_type:
+                alt_b = copy.deepcopy(next_option)
+                alt_b['sessions'] = next_same_type
+                combo.append(alt_b)
+        else:
+            # Changement de date classique (pas de changement de type)
+            if other_type:
+                alt_a = copy.deepcopy(current_option)
+                alt_a['sessions'] = other_type
+                combo.append(alt_a)
+            if next_same_type:
+                alt_b = copy.deepcopy(next_option)
+                alt_b['sessions'] = next_same_type
+                combo.append(alt_b)
 
         if combo:
             session_data['proposed_options'] = combo
             session_data['_cascade_level'] = 2
-            session_data['_includes_next_date'] = bool(next_same_type)
+            session_data['_includes_next_date'] = bool(next_requested or next_same_type)
             session_data['_needs_cma'] = engagement.get('needs_cma_message', False)
-            logger.info(f"  🔄 CASCADE 2: combo {len(other_type)} autre type + {len(next_same_type)} même type prochaine date")
+            if wants_type_change:
+                logger.info(f"  🔄 CASCADE 2 (type change {current_type}→{requested_type}): "
+                            f"{len(other_type)} {requested_type} même date + {len(next_requested)} {requested_type} prochaine date")
+            else:
+                logger.info(f"  🔄 CASCADE 2: combo {len(other_type)} autre type + {len(next_same_type)} même type prochaine date")
             return session_data
 
         # Step 3: Fallback — tout ce qui est dispo sur prochaine date

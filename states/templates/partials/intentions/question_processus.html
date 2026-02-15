@@ -58,6 +58,23 @@
 ⏳ <b>Convocation</b><br>
 {{/if}}
 {{/if}}
-<!-- Étape 7-8: Formation + Examen -->
+<!-- Étape 7: Formation préparatoire -->
+{{#if session_finished}}
+✅ <b>Formation préparatoire</b> : terminée<br>
+{{else}}
+{{#if session_in_progress}}
+🔄 <b>Formation préparatoire</b> : en cours (du {{session_date_debut}} au {{session_date_fin}})<br>
+{{else}}
 ⏳ <b>Formation préparatoire</b><br>
+{{/if}}
+{{/if}}
+<!-- Étape 8: Examen VTC -->
+{{#if exam_today}}
+🔔 <b>Examen VTC</b> : aujourd'hui !<br>
+{{else}}
+{{#if exam_within_30_days}}
+⏳ <b>Examen VTC</b> : le {{date_examen_formatted}} (J-{{days_until_exam}})<br>
+{{else}}
 ⏳ <b>Examen VTC</b><br>
+{{/if}}
+{{/if}}

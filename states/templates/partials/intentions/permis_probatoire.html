@@ -15,6 +15,14 @@ Félicitations ! Vous avez terminé votre période probatoire et pouvez désorma
 <br>
 {{/if}}
 {{else}}
+{{#if probation_eligible_for_exam}}
+<!-- Candidat n'a pas encore 3 ans MAIS son examen est APRÈS la fin de probation → éligible -->
+<b>Concernant votre période probatoire</b><br>
+Pour passer l'examen VTC, vous devez avoir terminé votre période de probation de permis de conduire (3 ans, ou 2 ans si conduite accompagnée).<br>
+<br>
+<b>Règle importante :</b> Vous pouvez vous inscrire à un examen dont la <b>date de clôture des inscriptions</b> est postérieure à la fin de votre période probatoire. Votre examen étant prévu le {{date_examen}}, vous serez bien éligible.<br>
+<br>
+{{else}}
 <b>Concernant votre période probatoire</b><br>
 Pour passer l'examen VTC, vous devez avoir terminé votre période de probation de permis de conduire (3 ans, ou 2 ans si conduite accompagnée).<br>
 <br>
@@ -22,4 +30,5 @@ Pour passer l'examen VTC, vous devez avoir terminé votre période de probation 
 <br>
 <b>Merci de nous préciser la date de fin de votre période probatoire</b> (indiquée sur votre permis de conduire) afin que nous puissions vous confirmer les dates d'examen accessibles pour vous.<br>
 <br>
+{{/if}}
 {{/if}}

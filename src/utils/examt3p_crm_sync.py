@@ -646,6 +646,49 @@ def sync_exam_date_from_examt3p(
         result['sync_performed'] = True
         return result
 
+    # ================================================================
+    # 2c. VÉRIFIER CLÔTURE PASSÉE + CRM PLUS TARDIF (date ExamT3P stale)
+    # ================================================================
+    # Si ExamT3P date future MAIS sa clôture est passée ET le CRM a une date
+    # PLUS TARDIVE → le CRM a déjà été auto-reporté (CAS 8) → NE PAS sync.
+    # Cas couverts:
+    #   - Paiement fait APRÈS clôture → candidat jamais inscrit pour cette date
+    #   - Refus CMA survenu APRÈS clôture → candidat ne peut plus s'inscrire à temps
+    #   - Tout autre cas où la clôture est passée et CRM avancé
+    if not examt3p_date_is_past and crm_date and crm_date != examt3p_date:
+        try:
+            _dept = (
+                examt3p_data.get('departement') or
+                deal_data.get('CMA_de_depot', '')
+            )
+            import re as _re
+            _match = _re.search(r'\b(\d{2,3})\b', str(_dept))
+            _dept_num = _match.group(1) if _match else None
+            if _dept_num:
+                _session = find_exam_session_by_date_and_dept(crm_client, examt3p_date, _dept_num)
+                if _session:
+                    _cloture_str = _session.get('Date_Cloture_Inscription')
+                    if _cloture_str:
+                        _date_cloture = parse_date_flexible(_cloture_str, "sync_cloture")
+                        _crm_date_obj = parse_date_flexible(crm_date, "sync_crm_date")
+                        _examt3p_date_obj = parse_date_flexible(examt3p_date, "sync_examt3p_date")
+                        if _date_cloture and is_date_past(_cloture_str) and _crm_date_obj and _examt3p_date_obj and _crm_date_obj > _examt3p_date_obj:
+                            logger.info(
+                                f"  🔒 BLOCAGE SYNC DATE: Clôture ({_cloture_str}) de la date ExamT3P "
+                                f"({examt3p_date}) est passée ET CRM a une date plus tardive ({crm_date}) "
+                                f"→ ExamT3P stale (auto-report déjà effectué), CRM protégé"
+                            )
+                            result['blocked'] = True
+                            result['blocked_reason'] = (
+                                f"Clôture ({_cloture_str}) de la date ExamT3P ({examt3p_date}) est passée "
+                                f"et le CRM a déjà été reporté sur une date ultérieure ({crm_date}). "
+                                f"ExamT3P est stale."
+                            )
+                            result['sync_performed'] = True
+                            return result
+        except Exception as e:
+            logger.warning(f"  ⚠️ Erreur vérification clôture sync: {e}")
+
     if not examt3p_date_is_past:
         logger.info(f"  ✅ Date ExamT3P future ({examt3p_date}) → sync autorisée (Evalbox={current_evalbox!r})")
 

@@ -421,7 +421,8 @@ def analyze_exam_date_situation(
     crm_client = None,
     examt3p_data: Dict[str, Any] = None,
     session_preference: str = None,
-    enriched_lookups: Dict[str, Any] = None
+    enriched_lookups: Dict[str, Any] = None,
+    deal_timeline: Dict[str, Any] = None
 ) -> Dict[str, Any]:
     """
     Analyse la situation de date d'examen VTC du candidat et détermine l'action à prendre.
@@ -720,6 +721,25 @@ def analyze_exam_date_situation(
         if not compte_existe:
             paiement_avant_cloture = True
             logger.info(f"  🛡️ GUARD RAIL: Evalbox={evalbox_status} (paiement fait) + pas d'accès ExamT3P → présume paiement avant clôture, CAS 8 BLOQUÉ")
+
+    # ================================================================
+    # VÉRIFICATION REFUS CMA APRÈS CLÔTURE (via Timeline)
+    # Même si paiement_avant_cloture=True, un refus CMA survenu APRÈS la clôture
+    # rend la date stale → le candidat doit être auto-reporté.
+    # Cas typique: Dossier Synchronisé cache un refus résolu (Sync→Refusé→Sync)
+    # ================================================================
+    if paiement_avant_cloture and date_cloture_is_past and deal_timeline and result.get('date_cloture'):
+        try:
+            from src.utils.thread_memory import parse_timeline, detect_refus_after_cloture
+            timeline_field_changes, _ = parse_timeline(deal_timeline)
+            if detect_refus_after_cloture(timeline_field_changes, result['date_cloture']):
+                paiement_avant_cloture = False
+                logger.info(
+                    "  ⚠️ OVERRIDE: paiement_avant_cloture=True MAIS refus CMA après clôture "
+                    "détecté dans la timeline → paiement_avant_cloture forcé à False → CAS 8 activé"
+                )
+        except Exception as e:
+            logger.warning(f"  ⚠️ Erreur détection refus après clôture: {e}")
 
     # CAS 8: Seulement si paiement fait APRÈS clôture (ou pas de paiement trouvé)
     if evalbox_status not in BLOCKED_STATUSES_FOR_RESCHEDULE and date_cloture_is_past and not date_is_past and not paiement_avant_cloture:

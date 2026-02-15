@@ -1,9 +1,15 @@
 <!-- Partial: Réponse à l'intention DEMANDE_LIEN_VISIO -->
 <b>Lien de formation visio</b><br>
 {{#if session_choisie}}
-Votre session de formation est prévue prochainement.<br>
-<br>
-Le lien de connexion vous sera envoyé par email quelques jours avant le début de la formation.<br>
+{{#if session_finished}}
+Votre session de formation (du {{matched_session_start}} au {{matched_session_end}}) est terminée. Si vous n'avez pas pu y assister ou si vous avez manqué des séances, merci de nous le signaler afin que nous puissions trouver une solution.<br>
+{{else}}
+{{#if session_in_progress}}
+Votre session de formation est actuellement en cours (du {{matched_session_start}} au {{matched_session_end}}). Vous devriez avoir reçu le lien de connexion par email. Si ce n'est pas le cas, merci de vérifier vos spams et de nous recontacter si vous ne le trouvez pas.<br>
+{{else}}
+Le lien de connexion pour votre session de formation (du {{matched_session_start}} au {{matched_session_end}}) vous sera envoyé par email quelques jours avant le début de la formation.<br>
+{{/if}}
+{{/if}}
 {{else}}
 {{#if is_prospect}}
 Une fois votre inscription finalisée et votre session confirmée, le lien de connexion vous sera envoyé par email quelques jours avant le début de la formation.<br>
