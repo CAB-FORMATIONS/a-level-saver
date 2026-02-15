@@ -1,6 +1,29 @@
-<!-- Partial: DEMANDE_REINSCRIPTION (wildcard générique) -->
-<!-- Cas: Candidat demande à se réinscrire — contexte non spécifique -->
-<!-- Note: Les cas EXAM_DATE_PAST_VALIDATED et RESULTAT_NON_ADMIS ont leurs propres templates legacy -->
+<!-- Partial: DEMANDE_REINSCRIPTION -->
+{{#if resultat_non_admis}}
+<!-- Cas NON ADMIS: empathie + règles repassage + options (autonome / CPF pratique) -->
+<b>Concernant votre demande de réinscription</b><br>
+Ne vous découragez pas, l'examen pratique VTC est exigeant et beaucoup de candidats ont besoin de plusieurs tentatives pour réussir.<br>
+<br>
+<b>Les règles de repassage :</b><br>
+Vous disposez de <b>3 passages maximum</b> sur une période d'<b>un an</b> à compter de votre première date d'examen. Au-delà de 3 tentatives ou si le délai d'un an est dépassé, il faudra reprendre l'ensemble du parcours (examen théorique inclus).<br>
+<br>
+<b>Deux options s'offrent à vous :</b><br>
+<br>
+<b>Option 1 — Réinscription autonome ({{frais_repassage_admission}}€)</b><br>
+Les frais de repassage de l'épreuve d'admission sont de <b>{{frais_repassage_admission}}€</b>.<br>
+<ol>
+<li>Connectez-vous sur <a href="https://www.exament3p.fr">www.exament3p.fr</a></li>
+<li>Sélectionnez une nouvelle date d'examen</li>
+<li>Procédez au paiement ({{frais_repassage_admission}}€)</li>
+</ol>
+<b>Option 2 — Formation pratique CPF (frais d'examen INCLUS)</b><br>
+Nous proposons des <b>formations de préparation à l'examen pratique</b> (2h ou 4h) incluant la <b>mise à disposition du véhicule double commande</b> le jour de l'examen. Ces formations sont <b>finançables via votre CPF</b> (frais d'examen inclus).<br>
+<br>
+Souhaitez-vous être {{#if is_female}}recontactée{{else}}recontacté{{/if}} par un conseiller pour étudier la meilleure option ? Si oui, répondez simplement à ce mail.<br>
+<br>
+<b>Bonne nouvelle :</b> vous pouvez refaire notre formation e-learning <b>gratuitement</b> pour rafraîchir vos connaissances.<br>
+{{else}}
+<!-- Cas générique: réinscription standard (contexte inconnu) -->
 <b>Concernant votre demande de réinscription</b><br>
 Vous souhaitez vous réinscrire à l'examen VTC. C'est tout à fait possible.<br>
 <br>
@@ -12,6 +35,7 @@ Vous souhaitez vous réinscrire à l'examen VTC. C'est tout à fait possible.<br
 <ol>
 <li>Connectez-vous sur <a href="https://www.exament3p.fr">www.exament3p.fr</a></li>
 <li>Sélectionnez une nouvelle date d'examen</li>
-<li>Procédez au paiement des frais d'inscription (241€)</li>
+<li>Procédez au paiement des frais d'inscription ({{frais_examen_complet}}€)</li>
 </ol>
 <b>Bonne nouvelle :</b> vous pouvez refaire notre formation <b>gratuitement</b> pour rafraîchir vos connaissances via la plateforme e-learning.<br>
+{{/if}}

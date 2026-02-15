@@ -416,7 +416,8 @@ class ResponseValidator:
     ):
         """Vérifie que les montants sont autorisés."""
         # Montants généralement OK à mentionner
-        default_allowed = [CMA_EXAM_FEE, CMA_DOSSIER_FEE]  # Frais CMA, frais dossier
+        from src.constants.amounts import CMA_ADMISSION_RETAKE_FEE, CMA_MOBILITE_PRO_FEE
+        default_allowed = [CMA_EXAM_FEE, CMA_DOSSIER_FEE, CMA_ADMISSION_RETAKE_FEE, CMA_MOBILITE_PRO_FEE]
         if allowed_amounts:
             default_allowed.extend(allowed_amounts)
 

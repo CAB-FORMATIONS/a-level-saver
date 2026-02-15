@@ -36,6 +36,9 @@ from src.constants.evalbox import (
     READY_TO_PAY, DOCUMENTS_PROBLEM, DOSSIER_CONSTITUE, STATUT_DISPLAY,
 )
 from src.constants.intents import FULL_RECAP_INTENTS, STATUT_INTENTS, DATES_INTENTS
+from src.constants.amounts import (
+    CMA_EXAM_FEE, CMA_DOSSIER_FEE, CMA_ADMISSION_RETAKE_FEE, CMA_MOBILITE_PRO_FEE,
+)
 
 # Détecteur de genre par prénom (singleton)
 _gender_detector = gender_detector.Detector()
@@ -806,6 +809,11 @@ class TemplateEngine:
             # Champ CRM: EXAM_INCLUS (picklist: Oui/Non/N/A)
             'exam_inclus': deal_data.get('EXAM_INCLUS', '') == 'Oui',
             'cab_paye_examen': deal_data.get('EXAM_INCLUS', '') == 'Oui',
+            # Montants métier (variables Handlebars — source: src/constants/amounts.py)
+            'frais_examen_complet': CMA_EXAM_FEE,
+            'frais_repassage_admission': CMA_ADMISSION_RETAKE_FEE,
+            'frais_mobilite_pro': CMA_MOBILITE_PRO_FEE,
+            'frais_dossier': CMA_DOSSIER_FEE,
             'can_choose_other_department': context.get('can_choose_other_department', False) or not context.get('compte_existe', True),
             # Session assignée: soit explicitement dans context, soit déduit des enriched_lookups
             'session_assigned': context.get('session_assigned', False) or bool(enriched_lookups.get('session_name')),
@@ -1164,6 +1172,7 @@ class TemplateEngine:
         # UBER CAS D/E: Candidat non éligible ou compte non vérifié
         # → Supprimer TOUTES les sections (dates, sessions, statut, e-learning, identifiants, credentials)
         # Le partial uber gère tout + propose alternatives CPF/rappel conseiller
+        # Rule 11 intentional override: terminal state, returns early
         is_uber_blocked = result.get('uber_cas_d', False) or result.get('uber_cas_e', False)
         if is_uber_blocked:
             result['show_dates_section'] = False
@@ -1207,7 +1216,7 @@ class TemplateEngine:
         # ================================================================
         date_case = context.get('date_case')
         if v3_confirmed:
-            # V3: date confirmée → pas de Section 4 dates/sessions (report_possible gère tout)
+            # Rule 11 intentional override: V3 confirmed date → report_possible gère tout
             result['show_dates_section'] = False
             result['show_sessions_section'] = False
             logger.info(f"📅 show_dates_section=False, show_sessions_section=False (V3 date confirmée {v3_confirmed})")
@@ -1234,7 +1243,8 @@ class TemplateEngine:
         elif not is_report_intention:
             result['show_dates_section'] = not date_examen and bool(context.get('next_dates', []))
 
-        # DEMANDE_ANNULATION: show_dates_section dynamique
+        # Rule 11 intentional override: DEMANDE_ANNULATION show_dates_section dynamique
+        # (CMA payment status unknown at matrix time)
         # - CMA payée + next_dates → True (proposer décalage comme alternative)
         # - Sinon → False (pas de dates à proposer pour une annulation simple)
         if context.get('primary_intent') == 'DEMANDE_ANNULATION':
@@ -1245,9 +1255,10 @@ class TemplateEngine:
                 result['show_dates_section'] = False
                 logger.info("📅 show_dates_section=False (DEMANDE_ANNULATION sans CMA payée)")
 
-        # show_sessions_section - CONFIRMATION_SESSION et session existante ont priorité absolue
-        # Si le candidat a confirmé sa session OU si une session existe déjà, on ne propose JAMAIS d'autres sessions
-        # EXCEPTION: session_assignment_error → la session existante est ERRONNÉE, on doit proposer les bonnes
+        # show_sessions_section — runtime overrides before matrix guard
+        # Rule 11 intentional overrides: These runtime states (session_assignment_error,
+        # session_confirmed, confirmation+session_exists) MUST take priority because
+        # the matrix cannot express these dynamic conditions
         session_already_exists = bool(enriched_lookups.get('session_name')) or bool(deal_data.get('Session'))
         is_confirmation_intent = context.get('intention_confirmation_session') or context.get('primary_intent') == 'CONFIRMATION_SESSION'
         has_session_assignment_error = context.get('session_assignment_error', False)
@@ -1419,7 +1430,8 @@ class TemplateEngine:
 
         # ================================================================
         # GARDE-FOU: Pièces refusées → toujours afficher statut + action corriger
-        # Même si la matrice désactive show_statut_section (ex: DEMANDE_DATE_PLUS_TOT)
+        # Rule 11 intentional override: candidate MUST see rejected documents
+        # regardless of matrix flags (safety net)
         # ================================================================
         if result.get('has_pieces_refusees') and result.get('pieces_refusees_details'):
             if not result.get('show_statut_section'):

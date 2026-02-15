@@ -2060,11 +2060,11 @@ matrix:
       - options_reinscription
 
   "RESULTAT_NON_ADMIS:DEMANDE_REINSCRIPTION":
-    template: "reinscription.html"
-    blocks:
-      - procedure_reinscription
-      - tarifs
-      - rafraichissement_gratuit
+    template: "response_master.html"
+    description: "NON ADMIS demande réinscription — empathie + CPF pratique + 241€ autonome"
+    context_flags:
+      intention_demande_reinscription: true
+      show_dates_section: true
 
   # --- Intentions génériques (fallback par intention) ---
   "*:DEMANDE_APPEL_TEL":
