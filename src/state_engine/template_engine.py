@@ -1108,6 +1108,19 @@ class TemplateEngine:
             # ===== FORMATION MANQUÉE + FORCE MAJEURE (FM-1) =====
             'missed_training_force_majeure': context.get('missed_training_force_majeure', False),
 
+            # ===== CONFIRMATION DATE (variables pour confirmation_date_examen.html) =====
+            'confirmed_exam_date_valid': context.get('confirmed_exam_date_valid', False),
+            'confirmed_exam_date_unavailable': context.get('confirmed_exam_date_unavailable', False),
+            'available_exam_dates_for_dept': context.get('available_exam_dates_for_dept', []),
+
+            # ===== CONFIRMATION SESSION (variables pour confirmation_session.html) =====
+            'no_sessions_of_requested_type': context.get('no_sessions_of_requested_type', False),
+            'alternative_type_label': context.get('alternative_type_label', ''),
+
+            # ===== CONVOCATION (variables pour demande_convocation.html) =====
+            'deadline_missed': context.get('deadline_missed', False),
+            'examen_probablement_passe': context.get('examen_probablement_passe', False),
+
             # Flags pour le template master (architecture modulaire)
             # Sections à afficher (peuvent être désactivées via context_flags de la matrice)
             'show_statut_section': context.get('show_statut_section', True),  # Par défaut True, sauf si désactivé
@@ -1447,7 +1460,8 @@ class TemplateEngine:
         # "En attente de traitement" contredit "inscription confirmée".
         # ================================================================
         if result.get('auto_assigned') and result.get('no_evalbox_status'):
-            result['show_statut_section'] = False
+            if 'show_statut_section' not in context:  # Rule 11: matrice prime
+                result['show_statut_section'] = False
             result['has_required_action'] = False
             result['action_choisir_date'] = False
             logger.info("📋 show_statut_section=False (auto-assignation → confirmation suffit, 'en attente' serait contradictoire)")
@@ -1541,6 +1555,29 @@ class TemplateEngine:
         # Intentions doublon
         'CONFIRMATION_DOUBLON': 'intention_confirmation_doublon',
         'REFUS_DOUBLON': 'intention_refus_doublon',
+        # Synonymes résultats
+        'ANNONCE_RESULTAT_POSITIF': 'intention_resultat_examen',
+        'ANNONCE_RESULTAT_NEGATIF': 'intention_resultat_examen',
+        # Documents transmis (candidat envoie des PJ)
+        'TRANSMET_DOCUMENTS': 'intention_probleme_documents',
+        # Offre Uber
+        'DEMANDE_INFOS_OFFRE': 'intention_question_uber',
+        # Réinscription
+        'DEMANDE_REINSCRIPTION': 'intention_demande_reinscription',
+        # Communication / support
+        'DEMANDE_APPEL_TEL': 'intention_demande_appel_tel',
+        'SIGNALE_PAS_RECU_EMAIL': 'intention_signale_pas_recu_email',
+        'PROBLEME_CONNEXION_ELEARNING': 'intention_probleme_connexion_elearning',
+        # Autres demandes spécifiques
+        'QUESTION_CARTE_VTC': 'intention_question_carte_vtc',
+        'DEMANDE_CERTIFICAT_FORMATION': 'intention_demande_certificat',
+        'DEMANDE_SUPPRESSION_DONNEES': 'intention_demande_suppression_donnees',
+        # Date lointaine ExamT3P
+        'DATE_LOINTAINE_EXAMT3P': 'intention_date_lointaine',
+        # Meta (templates dédiés, flags pour cohérence)
+        'REMERCIEMENT': 'intention_remerciement',
+        'SALUTATION': 'intention_salutation',
+        'MESSAGE_CONFUS': 'intention_message_confus',
     }
 
     def _auto_map_intention_flags(self, context: Dict[str, Any]) -> Dict[str, bool]:
@@ -1588,6 +1625,26 @@ class TemplateEngine:
             'intention_confirmation_doublon': False,
             'intention_refus_doublon': False,
             'intention_demande_annulation': False,
+            # Intentions ajoutées (complétude FLAG_MAP)
+            'intention_demande_reinscription': False,
+            'intention_demande_appel_tel': False,
+            'intention_signale_pas_recu_email': False,
+            'intention_probleme_connexion_elearning': False,
+            'intention_question_carte_vtc': False,
+            'intention_demande_certificat': False,
+            'intention_demande_suppression_donnees': False,
+            'intention_remerciement': False,
+            'intention_salutation': False,
+            'intention_message_confus': False,
+            # Flags utilisés par response_master.html (étaient injectés
+            # uniquement via matrix context_flags, maintenant aussi auto-mappés)
+            'intention_demande_changement_session': False,
+            'intention_document_question': False,
+            'intention_question_carte_sejour': False,
+            'intention_question_hebergement': False,
+            'intention_question_permis_etranger': False,
+            'intention_reclamation': False,
+            'intention_date_lointaine': False,
         }
 
         # Récupérer l'intention principale (rétrocompatibilité + nouveau format)

@@ -38,20 +38,13 @@ from src.agents.dispatcher_agent import TicketDispatcherAgent
 from src.agents.crm_update_agent import CRMUpdateAgent
 from src.agents.triage_agent import TriageAgent
 from src.zoho_client import ZohoDeskClient, ZohoCRMClient
-from knowledge_base.scenarios_mapping import (
-    detect_scenario_from_text,
-    should_stop_workflow,
-    requires_crm_update,
-    get_crm_update_fields,
-    SCENARIOS
-)
 
 # State Engine - Architecture State-Driven
 from src.state_engine import StateDetector, TemplateEngine, ResponseValidator, CRMUpdater
 from src.utils.crm_lookup_helper import enrich_deal_lookups
 from src.utils.response_humanizer import humanize_response
 from src.utils.intent_parser import IntentParser
-from src.utils.date_filter import DateFilter, apply_final_filter
+from src.utils.date_filter import apply_final_filter
 from src.constants.models import MODEL_EXTRACTION, MODEL_PERSONALIZATION, MODEL_TRIAGE
 from src.constants.amounts import UBER_OFFER_AMOUNT
 from src.constants.intents import (
