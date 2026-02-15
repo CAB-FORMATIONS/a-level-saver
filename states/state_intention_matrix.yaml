@@ -2419,6 +2419,26 @@ matrix:
     context_flags:
       intention_demande_certificat: true
 
+  "*:DEMANDE_AUTRES_DEPARTEMENTS":
+    template: "response_master.html"
+    description: "Demande de dates dans d'autres départements - tous états"
+    context_flags:
+      intention_autres_departements: true
+      show_dates_section: true
+
+  "*:QUESTION_PROCESSUS":
+    template: "response_master.html"
+    description: "Question sur le processus d'inscription/examen - tous états"
+    context_flags:
+      intention_question_processus: true
+
+  "*:QUESTION_SESSION":
+    template: "response_master.html"
+    description: "Question sur les sessions de formation - tous états"
+    context_flags:
+      intention_question_session: true
+      show_sessions_section: true
+
 # =============================================================================
 # SECTION 4: CONFIGURATION GLOBALE
 # =============================================================================
