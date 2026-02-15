@@ -410,18 +410,16 @@ class ZohoAutomationOrchestrator:
         self,
         ticket_id: str,
         contact_email: str,
-        auto_create_deal: bool = False
     ) -> Optional[str]:
         """
-        Find or create a deal associated with a ticket's contact.
+        Find a deal associated with a ticket's contact.
 
         Args:
             ticket_id: The ticket ID
             contact_email: Contact email to search for in CRM
-            auto_create_deal: Whether to create a deal if none exists
 
         Returns:
-            Deal ID if found or created, None otherwise
+            Deal ID if found, None otherwise
         """
         logger.info(f"Linking ticket {ticket_id} to deal for contact {contact_email}")
 
@@ -437,14 +435,8 @@ class ZohoAutomationOrchestrator:
                 logger.info(f"Found existing deal {deal_id} for contact {contact_email}")
                 return deal_id
 
-            elif auto_create_deal:
-                # TODO: Implement deal creation logic
-                logger.info("Auto-create deal is not yet implemented")
-                return None
-
-            else:
-                logger.info(f"No deal found for contact {contact_email}")
-                return None
+            logger.info(f"No deal found for contact {contact_email}")
+            return None
 
         except Exception as e:
             logger.error(f"Error linking ticket to deal: {e}")

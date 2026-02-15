@@ -471,45 +471,6 @@ class TicketDealLinker:
 
         return deal_id
 
-    def get_all_tickets_for_deal(self, deal_id: str) -> List[Dict[str, Any]]:
-        """
-        Get all tickets associated with a deal.
-
-        Searches Desk tickets for those linked to this deal.
-
-        Args:
-            deal_id: Zoho CRM deal ID
-
-        Returns:
-            List of tickets
-        """
-        logger.info(f"Finding all tickets for deal {deal_id}")
-
-        # Get the deal to extract contact info
-        try:
-            deal = self.crm_client.get_deal(deal_id)
-        except Exception as e:
-            logger.error(f"Could not fetch deal {deal_id}: {e}")
-            return []
-
-        # Get contact email from deal
-        contact_name = deal.get("Contact_Name", {})
-        if isinstance(contact_name, dict):
-            email = contact_name.get("email")
-        else:
-            email = None
-
-        if not email:
-            logger.warning(f"No contact email found for deal {deal_id}")
-            return []
-
-        # Search tickets for this contact
-        # Note: Zoho Desk API might not support search by email directly
-        # This would need to use the Desk search API
-        # For now, return empty list with a TODO
-        logger.info("TODO: Implement ticket search by contact email")
-        return []
-
     def close(self):
         """Clean up resources."""
         self.desk_client.close()

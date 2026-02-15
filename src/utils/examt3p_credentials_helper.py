@@ -20,6 +20,7 @@ project_root = Path(__file__).parent.parent.parent
 load_dotenv(project_root / ".env")
 
 from src.constants.models import MODEL_EXTRACTION
+from src.constants.urls import EXAMT3P_LOGIN_URL
 
 logger = logging.getLogger(__name__)
 
@@ -183,7 +184,7 @@ def test_examt3p_connection(identifiant: str, mot_de_passe: str) -> Tuple[bool, 
 
                 try:
                     # Accéder à la page de connexion
-                    await page.goto("https://www.exament3p.fr/id/14", wait_until='networkidle', timeout=30000)
+                    await page.goto(EXAMT3P_LOGIN_URL, wait_until='networkidle', timeout=30000)
                     await asyncio.sleep(3)  # Augmenté pour s'assurer que la page est chargée
 
                     # Cliquer sur "Me connecter" pour ouvrir la modal
@@ -965,7 +966,7 @@ def generate_account_creation_followup_response() -> str:
     Génère le message à envoyer au candidat quand on lui avait précédemment
     demandé de créer son compte ExamT3P et qu'on n'a toujours pas ses identifiants.
     """
-    return """Bonjour,
+    return f"""Bonjour,
 
 Suite à notre précédent échange, nous souhaitions savoir si vous avez pu créer votre compte sur la plateforme ExamT3P.
 
@@ -973,7 +974,7 @@ Si vous avez créé votre compte, merci de nous transmettre vos identifiants de 
 
 Si vous n'avez pas encore créé votre compte, voici les étapes à suivre :
 
-1. Rendez-vous sur : https://www.exament3p.fr/id/14
+1. Rendez-vous sur : {EXAMT3P_LOGIN_URL}
 2. Cliquez sur "S'inscrire"
 3. Complétez le formulaire d'inscription
 4. Une fois inscrit, transmettez-nous vos identifiants par retour de mail
@@ -1022,7 +1023,7 @@ Sans accès à votre compte ExamT3P, il nous est **impossible** de :
 **Vous n'avez pas encore créé votre compte ExamT3P ?**
 
 Pas de souci ! Voici comment faire :
-1. Rendez-vous sur : https://www.exament3p.fr/id/14
+1. Rendez-vous sur : {EXAMT3P_LOGIN_URL}
 2. Cliquez sur "S'inscrire"
 3. Complétez le formulaire d'inscription avec vos informations personnelles
 4. Une fois inscrit, transmettez-nous vos identifiants par retour de mail

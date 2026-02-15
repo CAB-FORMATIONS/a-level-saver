@@ -17,9 +17,12 @@ Gates:
 - If AGENT ANALYSTE finds ANCIEN_DOSSIER → internal alert, end workflow
 - If data missing → escalate, end workflow
 """
+import copy
 import logging
 import os
+import re
 import sys
+import traceback
 from pathlib import Path
 from typing import Dict, Optional, List, Any
 from datetime import datetime
@@ -64,7 +67,54 @@ from src.constants.keywords import (
     OUT_OF_SCOPE, UBER_KEYWORDS, SKIP_PATTERNS, LOGO_SIGNATURE_PATTERNS,
     DOCUMENT_KEYWORDS as DOC_KEYWORDS,
 )
+from config import settings
+from business_rules import BusinessRules
 import anthropic
+
+# Utils
+from src.utils.text_utils import get_clean_thread_content
+from src.utils.examt3p_credentials_helper import get_credentials_with_validation
+from src.utils.date_examen_vtc_helper import (
+    analyze_exam_date_situation,
+    get_next_exam_dates,
+    classify_engagement_level,
+    search_dates_for_month_and_location,
+    get_earlier_dates_other_departments,
+    get_next_exam_dates_any_department,
+    DEPT_TO_REGION,
+    REGION_TO_DEPTS,
+)
+from src.utils.uber_eligibility_helper import analyze_uber_eligibility
+from src.utils.examt3p_crm_sync import (
+    sync_examt3p_to_crm,
+    sync_exam_date_from_examt3p,
+    find_exam_session_by_date_and_dept,
+)
+from src.utils.ticket_info_extractor import (
+    extract_confirmations_from_threads,
+    extract_cab_proposals_from_threads,
+    detect_candidate_references,
+    detect_dossier_completion_request,
+)
+from src.utils.thread_memory import analyze_thread_memory
+from src.utils.conversation_analyzer import analyze_conversation
+from src.utils.date_confirmation_extractor import extract_confirmed_exam_date
+from src.utils.cross_department_helper import (
+    get_cross_department_alternatives,
+    get_dates_for_month_other_departments,
+)
+from src.utils.training_exam_consistency_helper import (
+    analyze_training_exam_consistency,
+    detect_session_assignment_error,
+)
+from src.utils.session_helper import (
+    analyze_session_situation,
+    match_sessions_by_date_range,
+    verify_session_complaint,
+)
+
+# Constants
+from src.constants.evalbox import PAID_STATUSES, READY_TO_PAY, BLOCKING_MODIFICATION
 
 logger = logging.getLogger(__name__)
 
@@ -207,8 +257,6 @@ class DOCTicketWorkflow:
             None if no pending clarification
             Dict with pending_deal_id, duplicate_type, duplicate_email, duplicate_phone
         """
-        import re
-
         try:
             comments = self.desk_client.get_ticket_comments(
                 ticket_id=ticket_id,
@@ -283,8 +331,6 @@ class DOCTicketWorkflow:
                 'reason': str
             }
         """
-        import re
-
         result = {
             'verified': False,
             'match_type': 'none',
@@ -627,8 +673,6 @@ Cordialement,<br>
                     # Créer le brouillon si demandé
                     if auto_create_draft:
                         try:
-                            from config import settings
-
                             ticket = self.desk_client.get_ticket(ticket_id)
                             to_email = ticket.get('email', '')
                             from_email = settings.zoho_desk_email_doc or settings.zoho_desk_email_default
@@ -727,8 +771,6 @@ Cordialement,<br>
                 # Créer le brouillon si demandé
                 if auto_create_draft and duplicate_response.get('response_text'):
                     try:
-                        from config import settings
-
                         # Récupérer les infos du ticket pour l'email
                         ticket = self.desk_client.get_ticket(ticket_id)
                         to_email = ticket.get('email', '')
@@ -777,8 +819,6 @@ Cordialement,<br>
                 # Créer le brouillon si demandé
                 if auto_create_draft and clarification_response.get('response_text'):
                     try:
-                        from config import settings
-
                         # Récupérer les infos du ticket pour l'email
                         ticket = self.desk_client.get_ticket(ticket_id)
                         to_email = ticket.get('email', '')
@@ -906,8 +946,6 @@ Le dossier peut être repris sans frais supplémentaires auprès de la CMA."""
                 # Créer le brouillon si demandé
                 if auto_create_draft and recoverable_response.get('response_text'):
                     try:
-                        from config import settings
-
                         # Récupérer les infos du ticket pour l'email
                         ticket = self.desk_client.get_ticket(ticket_id)
                         to_email = ticket.get('email', '')
@@ -954,8 +992,6 @@ Le dossier peut être repris sans frais supplémentaires auprès de la CMA."""
                 # Créer le brouillon si demandé
                 if auto_create_draft and clarification_response.get('response_text'):
                     try:
-                        from config import settings
-
                         # Récupérer les infos du ticket pour l'email
                         ticket = self.desk_client.get_ticket(ticket_id)
                         to_email = ticket.get('email', '')
@@ -1034,7 +1070,6 @@ Le candidat a un ancien dossier dont les frais CMA ({CMA_EXAM_FEE}€) ont déj�
             detected_intent_go = triage_result.get('detected_intent', '')
             if detected_intent_go == 'DEMANDE_ANNULATION':
                 # Vérifier les threads sortants pour détecter une réponse précédente
-                from src.utils.text_utils import get_clean_thread_content
                 annulation_already_answered = False
                 cma_payment_mentioned = False
                 candidate_still_wants_annulation = False
@@ -1064,7 +1099,6 @@ Le candidat a un ancien dossier dont les frais CMA ({CMA_EXAM_FEE}€) ont déj�
                         if last_inbound:
                             last_msg = get_clean_thread_content(last_inbound).lower()
                             # Nettoyer le contenu cité pour ne garder que le message du candidat
-                            from business_rules import BusinessRules
                             last_msg = BusinessRules.strip_forwarded_content(last_msg).lower()
                             candidate_still_wants_annulation = any(
                                 kw in last_msg for kw in annulation_keywords
@@ -1099,9 +1133,8 @@ Le candidat a un ancien dossier dont les frais CMA ({CMA_EXAM_FEE}€) ont déj�
 
                     self._escalate_to_agent(ticket_id, escalation_note, auto_update_ticket)
 
-                    from config import settings as _cfg
                     result['workflow_stage'] = 'ESCALATED_ANNULATION_INSISTENCE'
-                    result['escalated_to'] = _cfg.escalation_agent_name
+                    result['escalated_to'] = settings.escalation_agent_name
                     result['cma_payment_at_risk'] = cma_payment_mentioned
                     result['success'] = True
                     return result
@@ -1172,8 +1205,6 @@ Le candidat a un ancien dossier dont les frais CMA ({CMA_EXAM_FEE}€) ont déj�
                     )
                     if previous_annulation:
                         # Cross-ticket insistence detected — check if candidate still wants annulation
-                        from src.utils.text_utils import get_clean_thread_content
-                        from business_rules import BusinessRules
                         candidate_still_wants = True  # Default: assume yes for cross-ticket
                         try:
                             threads = self.desk_client.get_all_threads_with_full_content(ticket_id)
@@ -1218,9 +1249,8 @@ Le candidat a un ancien dossier dont les frais CMA ({CMA_EXAM_FEE}€) ont déj�
 
                             self._escalate_to_agent(ticket_id, escalation_note, auto_update_ticket)
 
-                            from config import settings as _cfg
                             result['workflow_stage'] = 'ESCALATED_ANNULATION_INSISTENCE'
-                            result['escalated_to'] = _cfg.escalation_agent_name
+                            result['escalated_to'] = settings.escalation_agent_name
                             result['cma_payment_at_risk'] = cma_payment_at_risk
                             result['success'] = True
                             return result
@@ -1454,7 +1484,6 @@ Le candidat a un ancien dossier dont les frais CMA ({CMA_EXAM_FEE}€) ont déj�
             if auto_send or auto_create_draft:
                 # Convertir markdown en HTML pour des liens cliquables
                 draft_content = response_result.get('response_text', '')
-                import re
                 html_content = draft_content
 
                 # Convertir liens markdown [text](url) → <a href="url">text</a>
@@ -1470,7 +1499,6 @@ Le candidat a un ancien dossier dont les frais CMA ({CMA_EXAM_FEE}€) ont déj�
 
                 try:
                     # Récupérer from_email selon le département
-                    from config import settings
 
                     # Récupérer le ticket pour le département et l'email destinataire
                     ticket = self.desk_client.get_ticket(ticket_id)
@@ -1662,7 +1690,6 @@ Le candidat a un ancien dossier dont les frais CMA ({CMA_EXAM_FEE}€) ont déj�
         except Exception as e:
             logger.error(f"❌ Error in workflow: {e}")
             result['errors'].append(str(e))
-            import traceback
             traceback.print_exc()
             return result
 
@@ -1688,8 +1715,6 @@ Le candidat a un ancien dossier dont les frais CMA ({CMA_EXAM_FEE}€) ont déj�
                 'transferred': bool (if auto_transfer and ROUTE)
             }
         """
-        from src.utils.text_utils import get_clean_thread_content
-
         # Get ticket details
         ticket = self.desk_client.get_ticket(ticket_id)
         subject = ticket.get('subject', '')
@@ -1733,7 +1758,6 @@ Le candidat a un ancien dossier dont les frais CMA ({CMA_EXAM_FEE}€) ont déj�
                 # Strip quoted/forwarded content to avoid contamination
                 # (e.g., our own "Mot de passe", "@email", "241€" in Gmail/Outlook quotes)
                 try:
-                    from business_rules import BusinessRules
                     content = BusinessRules.strip_forwarded_content(content)
                 except Exception:
                     pass  # Graceful degradation
@@ -1794,7 +1818,6 @@ Le candidat a un ancien dossier dont les frais CMA ({CMA_EXAM_FEE}€) ont déj�
         is_cma_sender = bool(most_recent_from) and any(domain in most_recent_from for domain in cma_email_domains)
 
         if is_cma_sender:
-            import re as _re
             cma_type = None
 
             # IMPORTANT: Nettoyer le contenu pour ne garder que le dernier message CMA
@@ -1820,7 +1843,7 @@ Le candidat a un ancien dossier dont les frais CMA ({CMA_EXAM_FEE}€) ont déj�
                 r"s'avère incomplet",
                 r'toujours en incomplet',
             ]
-            if not is_batch and any(_re.search(p, cma_combined) for p in incomplet_patterns):
+            if not is_batch and any(re.search(p, cma_combined) for p in incomplet_patterns):
                 cma_type = 'DOSSIER_INCOMPLET'
 
             # Pattern DOSSIER VALIDÉ / COMPLET
@@ -1829,7 +1852,7 @@ Le candidat a un ancien dossier dont les frais CMA ({CMA_EXAM_FEE}€) ont déj�
                 r'dossier.*a été validé',
                 r'confirmons que votre dossier.*complet',
             ]
-            if not cma_type and any(_re.search(p, cma_combined) for p in valide_patterns):
+            if not cma_type and any(re.search(p, cma_combined) for p in valide_patterns):
                 cma_type = 'DOSSIER_VALIDE'
 
             if cma_type:
@@ -1862,8 +1885,7 @@ Le candidat a un ancien dossier dont les frais CMA ({CMA_EXAM_FEE}€) ont déj�
         detected_intent = triage_result.get('detected_intent', '')
         if detected_intent == 'DEMANDE_SUPPRESSION_DONNEES':
             logger.info("🔒 DEMANDE RGPD DÉTECTÉE → Routage vers Contact + note référent RGPD")
-            from config import settings as _cfg_rgpd
-            rgpd_email = _cfg_rgpd.rgpd_referent_email
+            rgpd_email = settings.rgpd_referent_email
             triage_result['action'] = 'ROUTE'
             triage_result['target_department'] = DEPT_CONTACT
             triage_result['reason'] = 'Demande RGPD (suppression données) - Transférer au référent RGPD'
@@ -2322,9 +2344,6 @@ Le candidat a un ancien dossier dont les frais CMA ({CMA_EXAM_FEE}€) ont déj�
         if len(threads) > 2:
             logger.info("📝 Génération du résumé de conversation...")
             try:
-                import anthropic
-                from config import settings
-
                 # Extraire le contenu des threads pour le résumé
                 threads_text = []
                 for t in threads[:10]:  # Max 10 derniers threads
@@ -2615,7 +2634,6 @@ RÉSUMÉ (2-3 phrases):"""
         """Extrait un résumé propre du message (strip HTML, tronquer)."""
         if not content:
             return "(Message vide)"
-        import re
         text = re.sub(r'<[^>]+>', ' ', content)
         text = re.sub(r'\s+', ' ', text).strip()
         if len(text) > max_length:
@@ -2794,9 +2812,7 @@ RÉSUMÉ (2-3 phrases):"""
         # Source 2: ExamenT3P avec gestion complète des identifiants
         logger.info("  🌐 Source 2/6: ExamenT3P...")
 
-        # Import du helper pour la gestion des identifiants
-        from src.utils.examt3p_credentials_helper import get_credentials_with_validation
-        from src.utils.date_examen_vtc_helper import analyze_exam_date_situation
+        # Helper pour la gestion des identifiants
 
         # Récupérer les threads du ticket avec contenu complet
         threads_data = self.desk_client.get_all_threads_with_full_content(ticket_id)
@@ -2959,9 +2975,6 @@ Deux comptes ExamenT3P fonctionnels ont été détectés pour ce candidat, et le
         # 1. Envoyer leurs documents (Date_Dossier_re_u non vide)
         # 2. Passer le test de sélection (Date_test_selection non vide)
         # Si ces étapes ne sont pas complétées, on ne peut pas les inscrire à l'examen
-        from src.utils.uber_eligibility_helper import analyze_uber_eligibility
-        from src.utils.examt3p_crm_sync import sync_examt3p_to_crm, sync_exam_date_from_examt3p
-        from src.utils.ticket_info_extractor import extract_confirmations_from_threads, extract_cab_proposals_from_threads, detect_candidate_references, detect_dossier_completion_request
 
         # ================================================================
         # SYNC EXAMT3P → CRM (AVANT toute analyse)
@@ -3058,7 +3071,6 @@ Deux comptes ExamenT3P fonctionnels ont été détectés pour ce candidat, et le
         thread_memory_result = None
         if deal_id:
             try:
-                from src.utils.thread_memory import analyze_thread_memory
                 deal_notes = self.crm_client.get_deal_notes(deal_id)
 
                 # Timeline API (v8) — field changes + human interventions
@@ -3095,7 +3107,6 @@ Deux comptes ExamenT3P fonctionnels ont été détectés pour ce candidat, et le
             conversation_state = None
             if deal_id and threads_data:
                 try:
-                    from src.utils.conversation_analyzer import analyze_conversation
                     conversation_state = analyze_conversation(
                         threads=threads_data,
                         current_deal_data=deal_data,
@@ -3116,7 +3127,6 @@ Deux comptes ExamenT3P fonctionnels ont été détectés pour ce candidat, et le
         # ================================================================
         # Detecte si le candidat fait reference a une communication precedente
         # et s'il questionne une incoherence (clarification vs request)
-        from src.utils.text_utils import get_clean_thread_content
         # Trouver le dernier message ENTRANT du candidat (direction: 'in')
         # threads_data[0] peut être une réponse sortante 'out'
         latest_candidate_thread = None
@@ -3223,8 +3233,6 @@ Cordialement,<br>
 
                     # Créer le brouillon
                     try:
-                        from config import settings
-
                         ticket = self.desk_client.get_ticket(ticket_id)
                         to_email = ticket.get('email', '')
                         from_email = settings.zoho_desk_email_doc or settings.zoho_desk_email_default
@@ -3296,7 +3304,6 @@ Cordialement,<br>
             evalbox_status = deal_data.get('Evalbox', '')
 
             # Statuts Evalbox qui prouvent que le dossier a été traité
-            from src.constants.evalbox import PAID_STATUSES, READY_TO_PAY
             ADVANCED_EVALBOX_STATUSES = PAID_STATUSES | READY_TO_PAY
 
             if not date_dossier_recu:
@@ -3393,8 +3400,6 @@ Cordialement,<br>
             # Si le système détecte un auto-report (date passée + statut pré-validation),
             # vérifier si le candidat confirme une date spécifique dans son message
             if date_examen_vtc_result.get('auto_report'):
-                from src.utils.date_confirmation_extractor import extract_confirmed_exam_date
-                from src.utils.examt3p_crm_sync import find_exam_session_by_date_and_dept
 
                 # Extraire le dernier message du candidat
                 candidate_message = ''
@@ -3500,7 +3505,6 @@ Cordialement,<br>
 
                 if current_dept:
                     # Vérifier si la date existe pour ce département
-                    from src.utils.date_examen_vtc_helper import get_next_exam_dates
                     dept_dates = get_next_exam_dates(self.crm_client, current_dept, limit=20)
                     available_exam_dates_for_dept = dept_dates
 
@@ -3549,8 +3553,7 @@ Cordialement,<br>
                         # Vérifier engagement level (guard rail: VALIDE CMA, clôture passée, etc.)
                         evalbox_for_v3 = deal_data.get('Evalbox', '') if deal_data else ''
                         cloture_for_v3 = date_examen_vtc_result.get('date_cloture')
-                        from src.utils.date_examen_vtc_helper import classify_engagement_level as _classify_eng_v3
-                        engagement_v3 = _classify_eng_v3(evalbox_for_v3, cloture_for_v3, examt3p_data)
+                        engagement_v3 = classify_engagement_level(evalbox_for_v3, cloture_for_v3, examt3p_data)
 
                         if engagement_v3.get('can_reposition', False):
                             # Trouver la date dans les dates du département
@@ -3561,8 +3564,7 @@ Cordialement,<br>
                                 current_dept_v3 = str(date_examen_vtc_result['date_examen_info']['Departement'])
 
                             if current_dept_v3:
-                                from src.utils.date_examen_vtc_helper import get_next_exam_dates as _get_dates_v3
-                                dept_dates_v3 = _get_dates_v3(self.crm_client, current_dept_v3, limit=20)
+                                dept_dates_v3 = get_next_exam_dates(self.crm_client, current_dept_v3, limit=20)
 
                                 for d in dept_dates_v3:
                                     if str(d.get('Date_Examen', ''))[:10] == v3_target:
@@ -3594,7 +3596,6 @@ Cordialement,<br>
                 requested_dept_code = intent.requested_dept_code  # Code département (ex: "34")
 
                 if requested_month or requested_location or requested_dept_code:
-                    from src.utils.date_examen_vtc_helper import search_dates_for_month_and_location
 
                     # Utiliser le code département extrait par TriageAgent (prioritaire)
                     # Fallback: département du candidat depuis son deal/date_examen
@@ -3638,7 +3639,6 @@ Cordialement,<br>
             # Si le candidat demande une formation APRÈS sa date d'examen → repositionnement implicite
             intent_for_repositioning = IntentParser(triage_result)
             if intent_for_repositioning.implicit_date_repositioning and intent_for_repositioning.detected_intent == 'REPORT_DATE':
-                from src.utils.date_examen_vtc_helper import classify_engagement_level
 
                 evalbox_for_engagement = date_examen_vtc_result.get('evalbox_status', '')
                 cloture_for_engagement = date_examen_vtc_result.get('date_cloture', '')
@@ -3658,14 +3658,12 @@ Cordialement,<br>
                     requested_month = intent_for_repositioning.requested_month
                     current_dept = date_examen_vtc_result.get('current_departement') or date_examen_vtc_result.get('date_examen_info', {}).get('Departement')
                     if requested_month and current_dept:
-                        from src.utils.date_examen_vtc_helper import get_next_exam_dates
                         dept_dates = get_next_exam_dates(self.crm_client, str(current_dept), limit=20)
                         # Filtrer pour le mois demandé
-                        from datetime import datetime as dt_repo
                         target_dates = []
                         for d in dept_dates:
                             try:
-                                d_date = dt_repo.strptime(str(d.get('Date_Examen', ''))[:10], '%Y-%m-%d')
+                                d_date = datetime.strptime(str(d.get('Date_Examen', ''))[:10], '%Y-%m-%d')
                                 if d_date.month == requested_month:
                                     target_dates.append(d)
                             except Exception:
@@ -3695,8 +3693,7 @@ Cordialement,<br>
                 _current_date_str = date_examen_vtc_result.get('date_examen_info', {}).get('Date_Examen', '') if date_examen_vtc_result.get('date_examen_info') else ''
                 if _requested_month and _current_date_str:
                     try:
-                        from datetime import datetime as _dt
-                        _current_date = _dt.strptime(str(_current_date_str)[:10], '%Y-%m-%d')
+                        _current_date = datetime.strptime(str(_current_date_str)[:10], '%Y-%m-%d')
                         _requested_month_int = int(_requested_month)
                         if 1 <= _requested_month_int <= 12 and _requested_month_int < _current_date.month:
                             logger.info(f"  🔄 GARDE-FOU: REPORT_DATE → DEMANDE_DATE_PLUS_TOT (mois demandé {_requested_month_int} < date actuelle {_current_date.month}/{_current_date.year})")
@@ -3722,7 +3719,6 @@ Cordialement,<br>
             # Déclencher si intention explicite OU flag wants_earlier_date
             if (is_early_date_intent or wants_earlier_date) and current_dept:
                 logger.info(f"  🚀 Candidat demande date plus tôt (intent={intent.detected_intent}, wants_earlier={wants_earlier_date})")
-                from src.utils.date_examen_vtc_helper import get_earlier_dates_other_departments
 
                 # Trouver la date de référence (date actuelle assignée ou première date du dept)
                 current_dates = date_examen_vtc_result.get('next_dates', [])
@@ -3734,7 +3730,6 @@ Cordialement,<br>
 
                 if reference_date:
                     # Utiliser le helper enrichi avec priorite regionale et urgence
-                    from src.utils.cross_department_helper import get_cross_department_alternatives
                     compte_existe = examt3p_data.get('compte_existe', False)
 
                     cross_dept_data = get_cross_department_alternatives(
@@ -3797,7 +3792,6 @@ Cordialement,<br>
 
                 if should_search_month:
                     logger.info(f"  🔍 Mode {communication_mode} avec mois {mentioned_month} mentionné - recherche cross-département")
-                    from src.utils.cross_department_helper import get_dates_for_month_other_departments
 
                     compte_existe = examt3p_data.get('compte_existe', False)
                     month_options = get_dates_for_month_other_departments(
@@ -3834,8 +3828,6 @@ Cordialement,<br>
         # ================================================================
         # Cas critique: candidat a manqué sa formation + examen imminent
         # → Proposer 2 options: maintenir examen (e-learning suffit) ou reporter (force majeure requise)
-        from src.utils.training_exam_consistency_helper import analyze_training_exam_consistency
-
         training_exam_consistency_result = {}
         if not skip_date_session_analysis:
             logger.info("  🔍 Vérification cohérence formation/examen...")
@@ -3863,7 +3855,6 @@ Cordialement,<br>
         # ANALYSE SESSIONS DE FORMATION
         # ================================================================
         # Si des dates d'examen sont proposées OU si date examen assignée mais pas de session
-        from src.utils.session_helper import analyze_session_situation
 
         next_dates = date_examen_vtc_result.get('next_dates', [])
         date_examen_info = date_examen_vtc_result.get('date_examen_info')
@@ -3873,7 +3864,6 @@ Cordialement,<br>
         session_is_empty = not current_session
 
         # Détecter erreur de saisie session (session passée impossible)
-        from src.utils.training_exam_consistency_helper import detect_session_assignment_error
         session_error_check = detect_session_assignment_error(deal_data, enriched_lookups)
         has_session_assignment_error = session_error_check.get('is_assignment_error', False)
         session_year_error_corrected = None  # Session corrigée si erreur d'année
@@ -3899,7 +3889,6 @@ Cordialement,<br>
         if date_case == 2:
             current_dept = date_examen_vtc_result.get('current_departement') or (date_examen_info.get('Departement') if date_examen_info else None)
             if current_dept:
-                from src.utils.date_examen_vtc_helper import get_next_exam_dates
                 exam_dates_for_session = get_next_exam_dates(self.crm_client, current_dept, limit=2)
                 logger.info(f"  📚 CAS 2 (date passée non validée) → prochaines dates département {current_dept}: {len(exam_dates_for_session)}")
             else:
@@ -3914,7 +3903,6 @@ Cordialement,<br>
             current_dept = date_examen_vtc_result.get('current_departement') or (date_examen_info.get('Departement') if date_examen_info else None)
             v3_matched = False
             if current_dept:
-                from src.utils.date_examen_vtc_helper import get_next_exam_dates
                 dept_dates = get_next_exam_dates(self.crm_client, str(current_dept), limit=20)
                 matching = [d for d in dept_dates if str(d.get('Date_Examen', ''))[:10] == v3_target]
                 if matching:
@@ -3963,7 +3951,6 @@ Cordialement,<br>
                 logger.info(f"  📚 DATE NON DISPONIBLE: affichage de {len(available_exam_dates_for_dept)} alternative(s)")
             # CAS 2c: Pas de date spécifique → charger les dates du département
             elif current_dept:
-                from src.utils.date_examen_vtc_helper import get_next_exam_dates
                 dept_dates = get_next_exam_dates(self.crm_client, current_dept, limit=10)
                 # Filtrer la date actuelle
                 exam_dates_for_session = [d for d in dept_dates if d.get('Date_Examen') != current_date]
@@ -4002,11 +3989,9 @@ Cordialement,<br>
             if current_dept:
                 evalbox_for_cascade = enriched_lookups.get('evalbox_status') or deal_data.get('Evalbox', '')
                 cloture_for_cascade = date_examen_vtc_result.get('date_cloture')
-                from src.utils.date_examen_vtc_helper import classify_engagement_level as _classify_eng_cas7
-                engagement_cas7 = _classify_eng_cas7(evalbox_for_cascade, cloture_for_cascade, examt3p_data)
+                engagement_cas7 = classify_engagement_level(evalbox_for_cascade, cloture_for_cascade, examt3p_data)
                 if engagement_cas7.get('can_reposition'):
-                    from src.utils.date_examen_vtc_helper import get_next_exam_dates as _get_next_dates_cas7
-                    next_dept_dates = _get_next_dates_cas7(self.crm_client, str(current_dept), limit=3)
+                    next_dept_dates = get_next_exam_dates(self.crm_client, str(current_dept), limit=3)
                     for d in next_dept_dates:
                         if d.get('Date_Examen') != date_examen_info.get('Date_Examen'):
                             exam_dates_for_session.append(d)
@@ -4021,12 +4006,11 @@ Cordialement,<br>
         # Détecte le cas où deal_data['Session'] est null mais les dates viennent du lookup Session1
         # Ce cas n'est pas détecté par training_exam_consistency car il regarde deal_data['Session']
         if not exam_dates_for_session and has_assigned_date and enriched_lookups.get('session_date_fin'):
-            from datetime import datetime as dt_local
             try:
-                session_end = dt_local.strptime(enriched_lookups['session_date_fin'], '%Y-%m-%d').date()
+                session_end = datetime.strptime(enriched_lookups['session_date_fin'], '%Y-%m-%d').date()
                 exam_date_str = date_examen_info.get('Date_Examen', '') if date_examen_info else ''
-                exam_date_parsed = dt_local.strptime(exam_date_str, '%Y-%m-%d').date() if exam_date_str else None
-                today_local = dt_local.now().date()
+                exam_date_parsed = datetime.strptime(exam_date_str, '%Y-%m-%d').date() if exam_date_str else None
+                today_local = datetime.now().date()
                 if session_end < today_local and exam_date_parsed and exam_date_parsed > today_local:
                     exam_dates_for_session = [date_examen_info]
                     logger.info(f"  📚 CAS 6b: SESSION PASSÉE (fin: {session_end}) + examen futur ({exam_date_parsed}) → recherche nouvelles sessions")
@@ -4047,12 +4031,10 @@ Cordialement,<br>
             if _sn_dept:
                 _sn_evalbox = enriched_lookups.get('evalbox_status') or deal_data.get('Evalbox', '')
                 _sn_cloture = date_examen_vtc_result.get('date_cloture')
-                from src.utils.date_examen_vtc_helper import classify_engagement_level as _classify_eng_sn
-                _sn_engagement = _classify_eng_sn(_sn_evalbox, _sn_cloture, examt3p_data)
+                _sn_engagement = classify_engagement_level(_sn_evalbox, _sn_cloture, examt3p_data)
                 if _sn_engagement.get('can_reposition'):
-                    from src.utils.date_examen_vtc_helper import get_next_exam_dates as _get_next_dates_sn
                     _sn_current_dates = {d.get('Date_Examen') for d in exam_dates_for_session}
-                    _sn_next_dates = _get_next_dates_sn(self.crm_client, str(_sn_dept), limit=3)
+                    _sn_next_dates = get_next_exam_dates(self.crm_client, str(_sn_dept), limit=3)
                     for d in _sn_next_dates:
                         if d.get('Date_Examen') not in _sn_current_dates:
                             exam_dates_for_session.append(d)
@@ -4063,9 +4045,8 @@ Cordialement,<br>
         session_is_passed = False
         if enriched_lookups.get('session_date_fin'):
             try:
-                from datetime import datetime as dt_check
-                session_end_check = dt_check.strptime(enriched_lookups['session_date_fin'], '%Y-%m-%d').date()
-                session_is_passed = session_end_check < dt_check.now().date()
+                session_end_check = datetime.strptime(enriched_lookups['session_date_fin'], '%Y-%m-%d').date()
+                session_is_passed = session_end_check < datetime.now().date()
             except (ValueError, TypeError):
                 pass
         should_analyze_sessions = (
@@ -4098,7 +4079,6 @@ Cordialement,<br>
             # NOUVEAU: Matching par dates spécifiques demandées
             # ================================================================
             elif intent.has_date_range_request:
-                from src.utils.session_helper import match_sessions_by_date_range
 
                 requested_dates = intent.requested_training_dates
                 logger.info(f"  📅 Dates spécifiques demandées: {requested_dates.get('raw_text', 'N/A')}")
@@ -4180,8 +4160,7 @@ Cordialement,<br>
                 current_session_id = deal_data.get('Session', {}).get('id') if isinstance(deal_data.get('Session'), dict) else None
                 _cascade_evalbox = enriched_lookups.get('evalbox_status') or deal_data.get('Evalbox', '')
                 _cascade_cloture = date_examen_vtc_result.get('date_cloture')
-                from src.utils.date_examen_vtc_helper import classify_engagement_level as _classify_eng_cascade
-                _cascade_engagement = _classify_eng_cascade(_cascade_evalbox, _cascade_cloture, examt3p_data)
+                _cascade_engagement = classify_engagement_level(_cascade_evalbox, _cascade_cloture, examt3p_data)
 
                 session_data = self._apply_session_change_cascade(
                     session_data, current_session_type, current_session_id, _cascade_engagement
@@ -4236,7 +4215,6 @@ Cordialement,<br>
             # ================================================================
             if is_session_change_request and intent.is_complaint:
                 logger.info("  ⚠️ PLAINTE SESSION détectée - vérification de l'erreur...")
-                from src.utils.session_helper import verify_session_complaint
 
                 # Récupérer la date d'examen pour chercher des sessions alternatives
                 exam_date_for_complaint = date_examen_info.get('Date_Examen') if date_examen_info else None
@@ -4338,7 +4316,6 @@ Cordialement,<br>
             if not confirmed_dates:
                 customer_msg = triage_result.get('customer_message', '')
                 if customer_msg:
-                    from business_rules import BusinessRules
                     clean_msg = BusinessRules.strip_forwarded_content(customer_msg)
                     extracted = self._extract_dates_from_message(clean_msg)
                     if extracted:
@@ -4600,8 +4577,6 @@ Cordialement,<br>
         Returns:
             String "DD/MM/YYYY-DD/MM/YYYY" (range) ou "DD/MM/YYYY" (date unique) ou None
         """
-        import re
-        from datetime import datetime
 
         # Nettoyage HTML basique
         clean = re.sub(r'<[^>]+>', ' ', message)
@@ -5255,8 +5230,6 @@ Bien cordialement,
         ticket_subject = ticket.get('subject', '')
 
         # Extract customer message and our previous response
-        from src.utils.text_utils import get_clean_thread_content
-
         customer_message = ""
         previous_response = ""
         for thread in analysis_result.get('threads', []):
@@ -5383,7 +5356,6 @@ Bien cordialement,
         # ================================================================
         suppressed_warnings = []
         if detected_states.warning_states:
-            from src.utils.text_utils import get_clean_thread_content as _get_clean_content
             threads_data_for_check = analysis_result.get('threads', [])
             # Markers pour chaque WARNING qui peut être supprimé si déjà communiqué
             warning_suppression_markers = {
@@ -5396,7 +5368,7 @@ Bien cordialement,
             outgoing_content_lower = ""
             for t in threads_data_for_check:
                 if t.get('direction') == 'out' and t.get('status') != 'DRAFT':
-                    outgoing_content_lower += " " + _get_clean_content(t).lower()
+                    outgoing_content_lower += " " + get_clean_thread_content(t).lower()
 
             if outgoing_content_lower:
                 for ws in list(detected_states.warning_states):
@@ -5415,7 +5387,6 @@ Bien cordialement,
         uber_cas_d_email_received = False
         uber_alternative_email = ''
         if 'UBER_ACCOUNT_NOT_VERIFIED' in suppressed_warnings:
-            import re
             candidate_msg = (customer_message or '').strip()
             if candidate_msg:
                 # Extraire les emails du message candidat
@@ -5783,7 +5754,6 @@ Bien cordialement,
 
                 # Recalculer can_modify_exam_date selon règle B1
                 evalbox = detected_state.context_data.get('evalbox', '')
-                from src.constants.evalbox import BLOCKING_MODIFICATION
                 if evalbox in BLOCKING_MODIFICATION and cloture_passed:
                     detected_state.context_data['can_modify_exam_date'] = False
                     logger.info(f"  ⚠️ can_modify_exam_date recalculé: False (clôture {date_cloture} passée)")
@@ -5796,7 +5766,6 @@ Bien cordialement,
         next_dates = detected_state.context_data.get('next_dates', [])
         needs_next_dates = detected_intent in NEEDS_NEXT_DATES_INTENTS
         if needs_next_dates and not next_dates:
-            from src.utils.date_examen_vtc_helper import get_next_exam_dates
             departement = detected_state.context_data.get('departement')
             if departement and self.crm_client:
                 logger.info(f"  📅 Chargement next_dates pour {detected_intent} (dept {departement})...")
@@ -5812,7 +5781,6 @@ Bien cordialement,
 
         # Validation: requested_month doit être entre 1 et 12
         if requested_month and isinstance(requested_month, int) and 1 <= requested_month <= 12 and next_dates:
-            from datetime import datetime
             filtered_dates = []
             has_date_in_exact_month = False
             for date_info in next_dates:
@@ -5910,7 +5878,6 @@ Bien cordialement,
             departement = detected_state.context_data.get('departement')
             if departement and self.crm_client:
                 logger.info(f"  🔄 REPORT_DATE: Aucune date alternative dans dept {departement} → recherche cross-département (toutes dates)...")
-                from src.utils.date_examen_vtc_helper import get_next_exam_dates_any_department, DEPT_TO_REGION, REGION_TO_DEPTS
                 compte_existe = detected_state.context_data.get('compte_examt3p', False)
 
                 def _fmt_date(d):
@@ -6031,13 +5998,12 @@ Bien cordialement,
         # le humanizer ne copie les instructions "contacter Uber" de l'ancien message
         prev_resp_for_humanizer = previous_response
         if uber_cas_d_email_received and prev_resp_for_humanizer:
-            import re as _re_humanizer
             # Retirer la section CAS D de l'ancien message (entre "Vérification" et la fin du bloc Uber)
-            prev_resp_for_humanizer = _re_humanizer.sub(
+            prev_resp_for_humanizer = re.sub(
                 r'(?i)<b>V[ée]rification de votre compte Uber</b>.*?(?=<b>|$)',
                 '',
                 prev_resp_for_humanizer,
-                flags=_re_humanizer.DOTALL
+                flags=re.DOTALL
             )
             logger.info("  📧 CAS D email reçu: section Uber retirée du previous_response pour humanizer")
 
@@ -6215,7 +6181,6 @@ Bien cordialement,
         Appelé quand le candidat demande un mois spécifique qui n'existe pas
         dans son département. Enrichit le context_data avec les alternatives.
         """
-        from src.utils.cross_department_helper import get_dates_for_month_other_departments
 
         context = detected_state.context_data
         current_dept = context.get('departement', '')
@@ -6329,7 +6294,6 @@ Bien cordialement,
             return session_data
 
         # Step 2: Combo — autre type même date (Alt A) + même type prochaine date (Alt B)
-        import copy
         other_type = [s for s in current_sessions if s.get('session_type') != current_type]
         next_same_type = []
         if next_option and engagement.get('can_reposition'):
@@ -6570,7 +6534,6 @@ Génère maintenant la personnalisation (1-3 phrases):"""
             date_str = ""
             if created_time:
                 try:
-                    from datetime import datetime
                     if 'T' in str(created_time):
                         dt = datetime.fromisoformat(str(created_time).replace('Z', '+00:00'))
                     else:
@@ -6613,7 +6576,6 @@ Génère maintenant la personnalisation (1-3 phrases):"""
         """
         if crm_updates_applied is None:
             crm_updates_applied = {}
-        import anthropic
 
         lines = []
 
@@ -6717,8 +6679,6 @@ Génère maintenant la personnalisation (1-3 phrases):"""
         - Ignorée visuellement par les humains
         - Source de vérité pour savoir ce qui a été communiqué
         """
-        from datetime import datetime
-
         parts = []
 
         # Ticket ID
@@ -6842,8 +6802,6 @@ Génère maintenant la personnalisation (1-3 phrases):"""
         1. Résumé de ce qui a été répondu au candidat
         2. Next steps candidat et CAB
         """
-        import anthropic
-
         # Récupérer la réponse envoyée
         response_text = response_result.get('response_text', '')
 
@@ -6937,9 +6895,6 @@ Réponds UNIQUEMENT avec le format demandé, rien d'autre."""
         IMPORTANT: Utilise les fonctions existantes de examt3p_crm_sync.py pour
         convertir les valeurs string en IDs CRM (lookup fields).
         """
-        from src.utils.examt3p_crm_sync import find_exam_session_by_date_and_dept
-        import re
-
         # Get AI-extracted updates (primary source)
         ai_updates = response_result.get('crm_updates', {})
 
