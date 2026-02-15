@@ -47,7 +47,7 @@ Le workflow traite les tickets DOC en utilisant plusieurs agents spécialisés e
 | 2 | **CRM Lookups = appel API extra** | Utiliser `lookup.get('name')` directement | `docs/HELPERS.md` §2 |
 | 3 | **Blocage modification date** | Modifier Date_examen_VTC si VALIDE CMA + clôture passée | `docs/BUSINESS_RULES.md` §2 |
 | 4 | **Intention duality** | Ajouter intention YAML sans TriageAgent prompt | `docs/STATE_ENGINE.md` |
-| 5 | **Uber 20€ one-time** | Ignorer doublon offre Uber | `docs/BUSINESS_RULES.md` §4 |
+| 5 | **Uber 20€ one-time** | Ignorer doublon offre Uber (sauf post-examen) | `docs/BUSINESS_RULES.md` §4 |
 | 6 | **Multi-severity states** | Combiner états BLOCKING | `docs/STATE_ENGINE.md` |
 | 7 | **Mapping ExamT3P→Evalbox** | Mauvais mapping statut | `docs/BUSINESS_RULES.md` §1 |
 | 8 | **Date_test_selection READ-ONLY** | Modifier via workflow | `docs/BUSINESS_RULES.md` §5 |
@@ -81,11 +81,11 @@ Le workflow traite les tickets DOC en utilisant plusieurs agents spécialisés e
 
 | # | Fichier | Action |
 |---|---------|--------|
-| 1 | `states/state_intention_matrix.yaml` | Définir l'intention (section `intentions:`) |
-| 2 | **`src/agents/triage_agent.py`** | **OBLIGATOIRE** - Ajouter dans `SYSTEM_PROMPT` |
-| 3 | `states/state_intention_matrix.yaml` | Ajouter entrées matrice `"*:NOM_INTENTION"` |
-| 4 | `states/templates/partials/intentions/<nom>.html` | Template partial |
-| 5 | `states/templates/response_master.html` | Ajouter `{{#if intention_xxx}}` |
+| 1 | `src/agents/triage_agent.py` | **OBLIGATOIRE** - Ajouter dans `SYSTEM_PROMPT` + JSON schema |
+| 2 | `states/state_intention_matrix.yaml` | Définir l'intention (section `intentions:`) + wildcard `"*:NOM"` |
+| 3 | `states/templates/partials/intentions/<nom>.html` | Créer le template partial |
+| 4 | `states/templates/response_master.html` | Ajouter `{{#if intention_xxx}}` block |
+| 5 | `src/state_engine/template_engine.py` | Ajouter dans `INTENTION_FLAG_MAP` + `_auto_map_intention_flags()` + `_prepare_placeholder_data()` |
 
 **CRITIQUE : Si l'intention n'est pas dans YAML ET TriageAgent → jamais détectée !**
 
@@ -115,11 +115,11 @@ grep '"\*:NOM_INTENTION"' states/state_intention_matrix.yaml  # Wildcard obligat
 Avant de coder une fonctionnalité, **TOUJOURS vérifier** si elle existe :
 
 ```bash
-# Lister états existants (38+)
+# Lister états existants (41+)
 grep -E "^  [A-Z_]+:" states/candidate_states.yaml | head -50
 
-# Lister intentions existantes (37+)
-grep -E "^  [A-Z_]+:" states/state_intention_matrix.yaml | head -50
+# Lister intentions existantes (50+)
+grep -E "^  [A-Z_]+:" states/state_intention_matrix.yaml | head -60
 
 # Chercher si similaire existe
 grep -i "mot_clé" states/candidate_states.yaml
@@ -136,13 +136,14 @@ ls src/utils/
 ## Workflow Principal (8 étapes)
 
 ```
-1. TRIAGE AGENT     → GO/ROUTE/SPAM + intention + session_preference
-2. ANALYSIS         → 6 sources (ticket, deal, ExamT3P, dates, sessions, uber)
-3. STATE DETECTION  → Déterministe, multi-severity (BLOCKING/WARNING/INFO)
-4. TEMPLATE ENGINE  → STATE×INTENTION → Template + partials
-5. HUMANIZER        → Reformulation naturelle (optionnel)
-6. CRM UPDATES      → Via CRMUpdateAgent (mapping auto, règles blocage)
-7. DRAFT CREATION   → Brouillon Zoho Desk
+0. DRAFT CHECK      → Skip si brouillon existant
+1. TRIAGE AGENT     → GO/ROUTE/SPAM/DUPLICATE_UBER + intention + session_preference
+2. ANALYSIS         → 7 sources (ticket, deal, ExamT3P, dates, sessions, uber, conversation V3)
+3. STATE ENGINE     → STATE×INTENTION → Template + partials (déterministe)
+4. HUMANIZER        → Reformulation naturelle (optionnel)
+5. CRM UPDATES      → Via CRMUpdateAgent (mapping auto, règles blocage, dossier_termine guard)
+6. DRAFT CREATION   → Brouillon Zoho Desk
+7. CRM NOTE         → [META] line pour ThreadMemory
 8. VALIDATION       → Vérification finale
 ```
 
@@ -154,12 +155,85 @@ ls src/utils/
 
 | Fichier | Contenu |
 |---------|---------|
-| `states/candidate_states.yaml` | **38 ÉTATS** - severity, detection, workflow |
-| `states/state_intention_matrix.yaml` | **37 INTENTIONS** + matrice État×Intention |
+| `states/candidate_states.yaml` | **41 ÉTATS** - severity, detection, workflow |
+| `states/state_intention_matrix.yaml` | **50 INTENTIONS** + 125 entrées matrice État×Intention |
 | `states/templates/response_master.html` | Template master modulaire (v2.0) |
 | `states/templates/partials/**/*.html` | Partials modulaires (intentions, statuts, actions) |
 | `states/VARIABLES.md` | Variables Handlebars disponibles |
 | `alerts/active_alerts.yaml` | Alertes temporaires (éditable) |
+
+---
+
+## Constants Architecture
+
+Toutes les constantes métier sont centralisées dans `src/constants/` :
+
+| Module | Contenu | Exemple |
+|--------|---------|---------|
+| `models.py` | IDs modèles IA (5) | `MODEL_TRIAGE`, `MODEL_HUMANIZER` |
+| `evalbox.py` | Frozensets statuts (12) + STATUT_DISPLAY | `PAID_STATUSES`, `VALIDATED` |
+| `thresholds.py` | Seuils temporels (11) | `EXAM_WITHIN_DAYS`, `RECENT_THREAD_HOURS` |
+| `amounts.py` | Montants métier (3) | `UBER_OFFER_AMOUNT=20`, `CMA_EXAM_FEE=241` |
+| `sessions.py` | Types/horaires sessions | `SESSION_HOURS`, `is_uber_visio_session()` |
+| `intents.py` | Frozensets d'intentions (8) | `DATES_INTENTS`, `SESSION_INTENTS` |
+| `keywords.py` | Charge 17 listes depuis `config/keywords.yaml` | `ANNULATION_KEYWORDS` |
+| `urls.py` | URLs externes (6) | `EXAMT3P_URL`, `ELEARNING_URL` |
+
+Autres données externalisées :
+- `config/keywords.yaml` — 17 listes de mots-clés (source unique)
+- `data/geography.json` — DEPT_TO_REGION (94), CITY_TO_REGION (73), REGION_ALIASES (34)
+- `config.py` — Staff config : `escalation_agent_id`, `escalation_agent_name`, `rgpd_referent_email`
+
+---
+
+## Resultat CRM et dossier_termine
+
+Le champ `Resultat` du CRM (ADMIS/NON ADMIS/ADMISSIBLE/etc.) est classifié par `_classify_resultat()` :
+
+| Catégorie | Valeurs | dossier_termine |
+|-----------|---------|-----------------|
+| `pre_exam` | (vide), None | `False` |
+| `mid_exam` | ADMISSIBLE | `False` |
+| `post_exam` | ADMIS, NON ADMIS, ABSENT | `True` |
+| `closed` | CONVOC PAS REÇU, PLUS INTÉRESSÉ | `True` |
+
+**`dossier_termine=True`** → bloque les mises à jour CRM (Date_examen_VTC, Session, Preference_horaire), supprime dates/sessions/actions/elearning dans les templates.
+
+**Exception** : REPORT_DATE/DEMANDE_REINSCRIPTION réactivent les dates pour les NON ADMIS qui veulent repasser.
+
+**Bypass doublon** : Si Resultat indique post-exam (mid_exam/post_exam/closed), le workflow normal s'exécute au lieu du template doublon Uber.
+
+---
+
+## ThreadMemory (V1/V2/V3)
+
+Mémoire persistante inter-tickets via notes CRM `[META]`.
+
+| Version | Source | Données |
+|---------|--------|---------|
+| V1 | `[META]` lines dans CRM notes | state, intent, evalbox, sections |
+| V2 | Timeline API (field changes) | Progression CRM, interventions humaines |
+| V3 | `conversation_analyzer.py` (LLM) | conversation_mode, response_mode, commitments |
+
+**Fichiers** : `src/utils/thread_memory.py`, `src/utils/conversation_analyzer.py`
+
+**V3 response_mode** contrôle la visibilité des sections :
+- `full` → tout affiché
+- `brief_confirmation` → supprime dates/sessions
+- `targeted` → réponse ciblée
+- `status_update` → force statut
+
+**Règle** : ThreadMemory ne doit JAMAIS écraser un flag défini par la matrice (Rule 11).
+
+---
+
+## Temporal Awareness (Sessions & Exam)
+
+**5 flags session** : `session_upcoming`, `session_in_progress`, `session_finished`, `session_starts_soon`, `days_until_session_start`
+
+**2 flags examen** : `exam_today`, `exam_within_30_days`
+
+Calculés dans `_compute_session_temporal_flags()` de `template_engine.py`. Les templates utilisent ces flags pour adapter le ton (passé/présent/futur).
 
 ---
 
@@ -579,12 +653,17 @@ if linking_result.get('has_duplicate_uber_offer'):
     ...
 ```
 
-### Exemple
+### Exemples
 
 - Candidat A a un dossier Uber 20€ GAGNÉ
 - Candidat A écrit : "Je veux m'inscrire avec mon CPF à 720€"
 - ❌ FAUX : Répondre "Vous avez déjà utilisé l'offre Uber 20€"
 - ✅ CORRECT : Router vers Contact pour traitement formation CPF
+
+- Candidat B a un dossier Uber 20€ GAGNÉ + Resultat = ADMISSIBLE
+- Candidat B écrit : "Quand recevrai-je mes résultats ?"
+- ❌ FAUX : Répondre "Vous avez déjà utilisé l'offre Uber 20€"
+- ✅ CORRECT : Bypass doublon → workflow normal → intention RESULTAT_EXAMEN
 
 **Fichiers :** `docs/GESTION_DOUBLONS_BFS.md`, `src/workflows/doc_ticket_workflow.py`
 
@@ -870,9 +949,12 @@ python show_response.py <ticket_id>
 |-----------|--------|------|
 | Extraction identifiants | Haiku 3.5 | ~$0.001 |
 | Agent Trieur | Haiku 3.5 | ~$0.001 |
-| Agent Rédacteur | Sonnet 4.5 | ~$0.036 |
+| Conversation Analyzer (V3) | Sonnet 4.5 | ~$0.01-0.02 |
+| Response Humanizer | Sonnet 4.5 | ~$0.036 |
 | Next steps note CRM | Haiku 3.5 | ~$0.001 |
-| **Total** | | **~$0.04** |
+| **Total** | | **~$0.05-0.06** |
+
+**Note** : Le Conversation Analyzer ne s'exécute que pour les tickets multi-thread (>1 thread entrant). Les tickets single-thread = $0 (short-circuit).
 
 ---
 
