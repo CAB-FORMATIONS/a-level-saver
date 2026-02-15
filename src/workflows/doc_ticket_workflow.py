@@ -2255,68 +2255,81 @@ La date d'examen dans Zoho CRM est dans le passé. Le workflow a été stoppé p
                     # Pas de return → le triage IA va s'exécuter normalement
 
             if not is_recoverable:
-                # Vérifier si le doublon a DÉJÀ été communiqué (threads sortants OU contenu cité dans l'entrant)
-                # Si oui, le candidat répond à autre chose → laisser le triage IA gérer
-                duplicate_already_communicated = False
-                duplicate_markers = DUPLICATE_MARKERS
-                for thread in threads:
-                    status = thread.get('status', '').upper()
-                    direction = thread.get('direction', '')
-                    if status == 'DRAFT':
-                        continue
-                    # Chercher UNIQUEMENT dans les threads sortants (réponses de CAB)
-                    # Les threads entrants contiennent du contenu cité (ex: "offre uber à 20€"
-                    # dans l'email de confirmation d'inscription) → faux positifs
-                    if direction == 'out':
-                        content = get_clean_thread_content(thread).lower()
-                        if any(marker in content for marker in duplicate_markers):
-                            duplicate_already_communicated = True
-                            logger.info(f"  📋 Marqueur doublon trouvé dans thread sortant: {thread.get('id')}")
-                            break
-
-                if duplicate_already_communicated:
-                    # Le candidat a déjà été informé du doublon et revient (souvent pour être rappelé)
-                    # → Router vers Contact pour upsell (offre fi perso ou CPF)
-                    logger.info("🔄 DOUBLON UBER déjà communiqué → Route vers Contact pour upsell")
-                    triage_result['action'] = 'ROUTE'
-                    triage_result['target_department'] = 'Contact'
-                    triage_result['reason'] = "Doublon Uber déjà communiqué - candidat revient (upsell fi perso/CPF)"
-                    triage_result['method'] = 'duplicate_already_communicated_upsell'
-
-                    # Ajouter note interne pour le conseiller Contact
-                    internal_note = (
-                        "⚡ UPSELL - Candidat Uber ayant déjà bénéficié de l'offre 20€.\n"
-                        "On lui a expliqué qu'il ne pouvait pas s'inscrire une seconde fois gratuitement.\n"
-                        "Il revient pour être recontacté par un conseiller → prospect pour offre fi perso ou CPF."
-                    )
-                    try:
-                        self.desk_client.add_ticket_comment(ticket_id, internal_note, is_public=False)
-                        logger.info("  📝 Note interne ajoutée (upsell)")
-                    except Exception as e:
-                        logger.warning(f"  ⚠️ Erreur ajout note interne: {e}")
-
-                    # Transférer vers Contact si auto_transfer
-                    if auto_transfer:
-                        try:
-                            transfer_success = self.dispatcher._reassign_ticket(ticket_id, 'Contact')
-                            if transfer_success:
-                                logger.info("  ✅ Ticket transféré vers Contact")
-                                triage_result['transferred'] = True
-                            else:
-                                logger.warning("  ⚠️ Échec transfert vers Contact")
-                        except Exception as e:
-                            logger.error(f"  ❌ Erreur transfert: {e}")
-
-                    return triage_result
+                # GUARD RAIL: Si le Resultat indique que l'examen a été passé (ADMIS, ADMISSIBLE, etc.),
+                # le candidat ne demande PAS une nouvelle inscription — il demande ses résultats.
+                # → Bypass doublon, laisser le workflow normal gérer (intention RESULTAT_EXAMEN)
+                resultat_raw = selected_deal.get('Resultat', '') if selected_deal else ''
+                resultat_info = self._classify_resultat(resultat_raw)
+                if resultat_info['category'] in ('mid_exam', 'post_exam', 'closed'):
+                    logger.info(f"🟢 DOUBLON IGNORÉ: Resultat='{resultat_raw}' ({resultat_info['category']}) → Examen passé, workflow normal")
+                    triage_result['action'] = 'GO'
+                    triage_result['reason'] = f"Doublon Uber mais Resultat={resultat_raw} - candidat a passé l'examen, workflow normal"
+                    triage_result['method'] = 'duplicate_with_resultat_bypass'
+                    linking_result['has_duplicate_uber_offer'] = False
+                    # Pas de return → le triage IA va s'exécuter normalement
                 else:
-                    # Pas de demande CPF et pas récupérable → workflow doublon Uber standard (offre épuisée)
-                    triage_result['action'] = 'DUPLICATE_UBER'
-                    triage_result['reason'] = f"Candidat a déjà bénéficié de l'offre Uber 20€ ({len(duplicate_deals)} opportunités GAGNÉ)"
-                    triage_result['method'] = 'duplicate_detection'
-                    triage_result['duplicate_deals'] = duplicate_deals
-                    triage_result['selected_deal'] = selected_deal
-                    logger.info("🚫 DOUBLON UBER → Workflow spécifique (pas de gratuité)")
-                    return triage_result
+                    # Vérifier si le doublon a DÉJÀ été communiqué (threads sortants OU contenu cité dans l'entrant)
+                    # Si oui, le candidat répond à autre chose → laisser le triage IA gérer
+                    duplicate_already_communicated = False
+                    duplicate_markers = DUPLICATE_MARKERS
+                    for thread in threads:
+                        status = thread.get('status', '').upper()
+                        direction = thread.get('direction', '')
+                        if status == 'DRAFT':
+                            continue
+                        # Chercher UNIQUEMENT dans les threads sortants (réponses de CAB)
+                        # Les threads entrants contiennent du contenu cité (ex: "offre uber à 20€"
+                        # dans l'email de confirmation d'inscription) → faux positifs
+                        if direction == 'out':
+                            content = get_clean_thread_content(thread).lower()
+                            if any(marker in content for marker in duplicate_markers):
+                                duplicate_already_communicated = True
+                                logger.info(f"  📋 Marqueur doublon trouvé dans thread sortant: {thread.get('id')}")
+                                break
+
+                    if duplicate_already_communicated:
+                        # Le candidat a déjà été informé du doublon et revient (souvent pour être rappelé)
+                        # → Router vers Contact pour upsell (offre fi perso ou CPF)
+                        logger.info("🔄 DOUBLON UBER déjà communiqué → Route vers Contact pour upsell")
+                        triage_result['action'] = 'ROUTE'
+                        triage_result['target_department'] = 'Contact'
+                        triage_result['reason'] = "Doublon Uber déjà communiqué - candidat revient (upsell fi perso/CPF)"
+                        triage_result['method'] = 'duplicate_already_communicated_upsell'
+
+                        # Ajouter note interne pour le conseiller Contact
+                        internal_note = (
+                            "⚡ UPSELL - Candidat Uber ayant déjà bénéficié de l'offre 20€.\n"
+                            "On lui a expliqué qu'il ne pouvait pas s'inscrire une seconde fois gratuitement.\n"
+                            "Il revient pour être recontacté par un conseiller → prospect pour offre fi perso ou CPF."
+                        )
+                        try:
+                            self.desk_client.add_ticket_comment(ticket_id, internal_note, is_public=False)
+                            logger.info("  📝 Note interne ajoutée (upsell)")
+                        except Exception as e:
+                            logger.warning(f"  ⚠️ Erreur ajout note interne: {e}")
+
+                        # Transférer vers Contact si auto_transfer
+                        if auto_transfer:
+                            try:
+                                transfer_success = self.dispatcher._reassign_ticket(ticket_id, 'Contact')
+                                if transfer_success:
+                                    logger.info("  ✅ Ticket transféré vers Contact")
+                                    triage_result['transferred'] = True
+                                else:
+                                    logger.warning("  ⚠️ Échec transfert vers Contact")
+                            except Exception as e:
+                                logger.error(f"  ❌ Erreur transfert: {e}")
+
+                        return triage_result
+                    else:
+                        # Pas de demande CPF et pas récupérable → workflow doublon Uber standard (offre épuisée)
+                        triage_result['action'] = 'DUPLICATE_UBER'
+                        triage_result['reason'] = f"Candidat a déjà bénéficié de l'offre Uber 20€ ({len(duplicate_deals)} opportunités GAGNÉ)"
+                        triage_result['method'] = 'duplicate_detection'
+                        triage_result['duplicate_deals'] = duplicate_deals
+                        triage_result['selected_deal'] = selected_deal
+                        logger.info("🚫 DOUBLON UBER → Workflow spécifique (pas de gratuité)")
+                        return triage_result
 
         # Rule #2.6: CANDIDAT NON TROUVÉ - Vérifier si demande d'info/CPF avant clarification
         # Si c'est un nouveau ticket et qu'on ne trouve pas le candidat dans le CRM,
