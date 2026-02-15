@@ -170,10 +170,8 @@ def _format_date(date_str: str) -> str:
     """Formate une date au format DD/MM/YYYY."""
     if not date_str:
         return ''
-    try:
-        return datetime.strptime(str(date_str)[:10], '%Y-%m-%d').strftime('%d/%m/%Y')
-    except Exception:
-        return str(date_str)
+    from src.utils.date_utils import format_date_for_display
+    return format_date_for_display(date_str) or str(date_str)
 
 
 def get_dates_for_month_other_departments(

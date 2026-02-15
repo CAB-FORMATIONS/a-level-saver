@@ -2134,11 +2134,8 @@ class TemplateEngine:
         """Formate une date en DD/MM/YYYY."""
         if not date_str:
             return ''
-        try:
-            date_obj = datetime.strptime(str(date_str)[:10], '%Y-%m-%d')
-            return date_obj.strftime('%d/%m/%Y')
-        except Exception as e:
-            return str(date_str)
+        from src.utils.date_utils import format_date_for_display
+        return format_date_for_display(date_str) or str(date_str)
 
     def _is_date_passed(self, date_str: str) -> bool:
         """Vérifie si une date est passée (avant aujourd'hui)."""

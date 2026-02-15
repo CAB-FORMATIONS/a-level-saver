@@ -313,16 +313,8 @@ def log_exam_date_blocked(
         Résultat de create_crm_note()
     """
     # Formater la date de clôture
-    date_formatted = date_cloture
-    try:
-        if date_cloture:
-            if 'T' in str(date_cloture):
-                date_obj = datetime.fromisoformat(str(date_cloture).replace('Z', '+00:00'))
-            else:
-                date_obj = datetime.strptime(str(date_cloture), "%Y-%m-%d")
-            date_formatted = date_obj.strftime("%d/%m/%Y")
-    except Exception as e:
-        pass
+    from src.utils.date_utils import format_date_for_display
+    date_formatted = format_date_for_display(date_cloture) or str(date_cloture or '')
 
     content_lines = [
         "⚠️ TENTATIVE DE MODIFICATION BLOQUÉE",
@@ -444,19 +436,9 @@ def log_session_linked(
     session_type = 'Cours du jour' if 'CDJ' in session_name else 'Cours du soir' if 'CDS' in session_name else 'N/A'
 
     # Formater les dates
-    try:
-        if exam_date and 'T' not in str(exam_date):
-            exam_date_obj = datetime.strptime(str(exam_date), "%Y-%m-%d")
-            exam_date = exam_date_obj.strftime("%d/%m/%Y")
-    except Exception as e:
-        pass
-
-    try:
-        if session_date and 'T' not in str(session_date):
-            session_date_obj = datetime.strptime(str(session_date), "%Y-%m-%d")
-            session_date = session_date_obj.strftime("%d/%m/%Y")
-    except Exception as e:
-        pass
+    from src.utils.date_utils import format_date_for_display
+    exam_date = format_date_for_display(exam_date) or str(exam_date or 'N/A')
+    session_date = format_date_for_display(session_date) or str(session_date or 'N/A')
 
     content_lines.extend([
         "Session de formation liée à l'examen",

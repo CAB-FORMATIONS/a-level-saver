@@ -326,11 +326,10 @@ class ResponseValidator:
                     # Ajouter format YYYY-MM-DD
                     valid_dates.add(date_str)
                     # Ajouter format DD/MM/YYYY
-                    try:
-                        dt = datetime.strptime(date_str[:10], '%Y-%m-%d')
-                        valid_dates.add(dt.strftime('%d/%m/%Y'))
-                    except Exception as e:
-                        pass
+                    from src.utils.date_utils import format_date_for_display
+                    formatted = format_date_for_display(date_str)
+                    if formatted:
+                        valid_dates.add(formatted)
 
             # Vérifier chaque date trouvée
             for date_found in dates_found:
@@ -345,11 +344,9 @@ class ResponseValidator:
                     context_dates = {d for d in context_dates if d}
                     # Ajouter les formats alternatifs
                     for d in list(context_dates):
-                        try:
-                            dt = datetime.strptime(d[:10], '%Y-%m-%d')
-                            context_dates.add(dt.strftime('%d/%m/%Y'))
-                        except Exception as e:
-                            pass
+                        formatted = format_date_for_display(d)
+                        if formatted:
+                            context_dates.add(formatted)
 
                     if normalized not in context_dates:
                         result.add_error(ValidationError(

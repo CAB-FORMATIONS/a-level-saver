@@ -44,6 +44,7 @@ from datetime import datetime
 from typing import Dict, List, Any, Optional, Tuple
 
 from src.constants.evalbox import BLOCKING_MODIFICATION
+from src.utils.date_utils import parse_date_flexible, format_date_for_display
 
 logger = logging.getLogger(__name__)
 
@@ -399,16 +400,7 @@ def get_sync_status_message(
 
     if not can_modify and is_report_request:
         # Formater la date de clôture
-        date_formatted = ""
-        if date_cloture:
-            try:
-                if 'T' in str(date_cloture):
-                    date_obj = datetime.fromisoformat(str(date_cloture).replace('Z', '+00:00'))
-                else:
-                    date_obj = datetime.strptime(str(date_cloture), "%Y-%m-%d")
-                date_formatted = date_obj.strftime("%d/%m/%Y")
-            except Exception as e:
-                date_formatted = str(date_cloture)
+        date_formatted = format_date_for_display(date_cloture) or str(date_cloture or '')
 
         return f"""Votre inscription à l'examen VTC a été validée par la CMA et les inscriptions sont maintenant clôturées.
 
@@ -504,8 +496,6 @@ def get_crm_exam_date(
     Returns:
         Date formatée (dd/mm/yyyy) ou None
     """
-    from src.utils.date_utils import parse_date_flexible, format_date_for_display
-
     # Méthode préférée: utiliser les lookups enrichis
     if enriched_lookups and enriched_lookups.get('date_examen'):
         date_value = enriched_lookups['date_examen']
@@ -536,11 +526,9 @@ def get_crm_exam_date(
         if date_value:
             match = re.search(r'(\d{4}-\d{2}-\d{2})', str(date_value))
             if match:
-                try:
-                    date_obj = datetime.strptime(match.group(1), "%Y-%m-%d")
-                    return date_obj.strftime("%d/%m/%Y")
-                except Exception as e:
-                    pass
+                formatted = format_date_for_display(match.group(1))
+                if formatted:
+                    return formatted
 
     return None
 
@@ -573,11 +561,9 @@ def get_examt3p_exam_date(examt3p_data: Dict[str, Any]) -> Optional[str]:
 
     # Format yyyy-mm-dd (ISO)
     if '-' in date_str and len(date_str) == 10:
-        try:
-            date_obj = datetime.strptime(date_str, "%Y-%m-%d")
-            return date_obj.strftime("%d/%m/%Y")
-        except Exception as e:
-            pass
+        formatted = format_date_for_display(date_str)
+        if formatted:
+            return formatted
 
     # Format français "1 mars 2026" ou "15 février 2026"
     # Extraire jour, mois (texte), année

@@ -1538,7 +1538,6 @@ matrix:
     context_flags:
       intention_demande_convocation: true
       evalbox_refus_cma: true
-      show_documents_refuses: true
       show_statut_section: true
 
   "EVALBOX_REFUSE_CMA:REPORT_DATE":
@@ -1548,7 +1547,6 @@ matrix:
       intention_report_date: true
       evalbox_refus_cma: true
       report_deja_effectue: true
-      show_documents_refuses: true
 
   # --- DOSSIER_SYNCHRONIZED × DEMANDE_CONVOCATION ---
   "DOSSIER_SYNCHRONIZED:DEMANDE_CONVOCATION":
@@ -1602,8 +1600,6 @@ matrix:
     description: "Date passée + validé, candidat a manqué l'examen et veut se réinscrire"
     context_flags:
       intention_demande_reinscription: true
-      examen_manque: true
-      show_next_dates: true
 
   # --- EXAM_DATE_PAST_VALIDATED × DEMANDE_EXCEPTION ---
   # Candidat qui demande une exception mais la date est passée depuis trop longtemps
@@ -1613,8 +1609,6 @@ matrix:
     description: "Date passée + validé, candidat demande exception mais réinscription nécessaire"
     context_flags:
       intention_demande_exception: true
-      examen_manque: true
-      show_next_dates: true
 
   # --- REFUS_PARTAGE_CREDENTIALS (priorité maximale, s'applique à tout état) ---
   "*:REFUS_PARTAGE_CREDENTIALS":
@@ -1896,7 +1890,6 @@ matrix:
       intention_report_date: true
       report_bloque: true
       show_statut_section: false
-      show_elearning_section: false
 
   # VALIDE_CMA_WAITING_CONVOC (D-4) × DEMANDE_CONVOCATION
   # Candidat validé CMA qui demande sa convocation (examen futur)
@@ -1906,7 +1899,6 @@ matrix:
     context_flags:
       intention_demande_convocation: true
       show_statut_section: true
-      show_elearning_section: true
 
   # --- CONVOCATION_RECEIVED × Intentions ---
   "CONVOCATION_RECEIVED:DEMANDE_IDENTIFIANTS":
@@ -2130,7 +2122,6 @@ matrix:
     description: "Demande accès e-learning - tous états (inclut alertes critiques)"
     context_flags:
       intention_demande_elearning: true
-      show_elearning_section: true
       show_statut_section: true
 
   "*:DEMANDE_DATE_VISIO":
