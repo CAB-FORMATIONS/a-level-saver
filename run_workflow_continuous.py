@@ -30,6 +30,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from src.zoho_client import ZohoDeskClient
 from src.workflows.doc_ticket_workflow import DOCTicketWorkflow
+from batch_health_check import run_health_check
 
 PENDING_FILE = "doc_tickets_pending.json"
 PROCESSED_FILE = "doc_tickets_processed.json"
@@ -122,16 +123,39 @@ def save_processed_ticket(ticket_info, result):
     state_engine = response_result.get('state_engine', {})
     ctx = state_engine.get('context', {})
 
+    triage = result.get('triage_result', {})
+    validation = response_result.get('validation', {})
+    first_validation = next(iter(validation.values()), {}) if validation else {}
+
     processed.append({
         **ticket_info,
         'processed_at': datetime.now().isoformat(),
         'deal_id': analysis.get('deal_id'),
         'success': result.get('success', False),
         'workflow_stage': result.get('workflow_stage'),
-        'triage_action': result.get('triage_result', {}).get('action'),
+        # Triage
+        'triage_action': triage.get('action'),
+        'target_department': triage.get('target_department'),
+        'incoming_thread_count': triage.get('incoming_thread_count'),
         'primary_intent': analysis.get('primary_intent'),
+        'secondary_intents': triage.get('secondary_intents', []),
+        # State engine
         'state_id': state_engine.get('state_id'),
+        'state_name': state_engine.get('state_name'),
+        'template_used': state_engine.get('template_used'),
+        'evalbox': ctx.get('evalbox'),
+        'date_case': ctx.get('date_case'),
+        'dossier_termine': ctx.get('dossier_termine', False),
+        'resultat_category': ctx.get('resultat_category'),
+        # Delivery
         'draft_created': result.get('draft_created', False),
+        'reply_sent': result.get('reply_sent', False),
+        'delivery_method': result.get('delivery_method', 'none'),
+        'send_fallback_reason': result.get('send_fallback_reason'),
+        # Quality
+        'was_humanized': response_result.get('was_humanized', False),
+        'validation_compliant': first_validation.get('compliant'),
+        # CRM
         'crm_updated': result.get('crm_updated', False),
         'crm_updates': crm_updates if crm_updates else None,
         'error': result.get('error'),
@@ -185,10 +209,27 @@ def process_all_pending(workflow, cycle_num, delay_seconds=3.0):
             stage = result.get('workflow_stage', 'UNKNOWN')
             triage_action = result.get('triage_result', {}).get('action', 'N/A')
             intent = result.get('analysis_result', {}).get('primary_intent', 'N/A')
+            delivery = result.get('delivery_method', 'none')
 
             if success:
                 success_count += 1
-                log(f"    [OK] {stage} | {triage_action} | {intent}")
+                # Log enrichi selon le type d'action
+                if result.get('reply_sent'):
+                    tag = 'SENT'
+                elif result.get('draft_created'):
+                    tag = 'DRAFT'
+                elif triage_action == 'ROUTE':
+                    target = result.get('triage_result', {}).get('target_department', '?')
+                    tag = f'ROUTE→{target}'
+                elif stage.startswith('CLOSED_CMA'):
+                    tag = 'CMA_CLOSED'
+                elif stage.startswith('SKIPPED'):
+                    tag = 'SKIP'
+                elif stage == 'STOPPED_SPAM':
+                    tag = 'SPAM'
+                else:
+                    tag = stage
+                log(f"    [{tag}] {triage_action} | {intent}")
             else:
                 error_count += 1
                 log(f"    [ERREUR] {result.get('error', 'Unknown')}")
@@ -200,20 +241,69 @@ def process_all_pending(workflow, cycle_num, delay_seconds=3.0):
             analysis = result.get('analysis_result', {})
             response = result.get('response_result', {})
             triage = result.get('triage_result', {})
+            se = response.get('state_engine', {})
+            se_ctx = se.get('context', {})
+            validation = response.get('validation', {})
+            first_val = next(iter(validation.values()), {}) if validation else {}
+            humanizer = response.get('humanizer', {})
+            conv_state = analysis.get('conversation_state')
+
             results.append({
                 'ticket_id': ticket_id,
                 'success': success,
                 'stage': stage,
+                # Triage
                 'triage_action': triage_action,
+                'target_department': triage.get('target_department'),
+                'incoming_thread_count': triage.get('incoming_thread_count'),
                 'intent': intent,
+                'secondary_intents': triage.get('secondary_intents', []),
+                # State engine
+                'state_id': se.get('state_id'),
+                'state_name': se.get('state_name'),
+                'template_used': se.get('template_used'),
+                'evalbox': se_ctx.get('evalbox'),
+                'date_case': se_ctx.get('date_case'),
+                'dossier_termine': se_ctx.get('dossier_termine', False),
+                'resultat_category': se_ctx.get('resultat_category'),
+                # Delivery
                 'draft_created': result.get('draft_created', False),
+                'reply_sent': result.get('reply_sent', False),
+                'delivery_method': result.get('delivery_method', 'none'),
+                'send_fallback_reason': result.get('send_fallback_reason'),
+                # Quality — humanizer
+                'was_humanized': response.get('was_humanized', False),
+                'humanizer_failed': humanizer.get('validation_failed', False) or bool(humanizer.get('error')),
+                'humanizer_issues': humanizer.get('validation_issues', []),
+                # Quality — validation
+                'validation_compliant': first_val.get('compliant'),
+                'validation_errors': first_val.get('errors', []),
+                'validation_warnings': first_val.get('warnings', []),
+                # CRM
                 'crm_updated': result.get('crm_updated', False),
+                'crm_updates': response.get('crm_updates') or None,
+                'crm_updates_blocked': se.get('crm_updates_blocked') or None,
+                # Health check data
+                'valid_dates': response.get('valid_dates', []),
+                'template_response': (response.get('template_response') or '')[:3000],
+                # V3 conversation
+                'conversation_mode': getattr(conv_state, 'conversation_mode', None) if conv_state else None,
+                'response_mode': getattr(conv_state, 'response_mode', None) if conv_state else None,
+                # Context flags for health check
+                'ctx_flags': {
+                    'report_bloque': se_ctx.get('report_bloque', False),
+                    'can_modify_exam_date': se_ctx.get('can_modify_exam_date', True),
+                    'uber_cas_d': se_ctx.get('uber_cas_d', False),
+                    'uber_cas_e': se_ctx.get('uber_cas_e', False),
+                    'show_dates_section': se_ctx.get('show_dates_section'),
+                    'show_sessions_section': se_ctx.get('show_sessions_section'),
+                    'credentials_invalid': se_ctx.get('credentials_invalid', False),
+                } if se_ctx else None,
                 'error': result.get('error'),
-                # Contenu original et réponse pour analyse demande/réponse
-                # Fallback sur triage_result pour les tickets ROUTE/SPAM (analyse non faite)
+                # Contenu pour analyse demande/réponse
                 'ticket_subject': analysis.get('ticket_subject', '') or triage.get('ticket_subject', ''),
                 'customer_message': analysis.get('customer_message', '') or triage.get('customer_message', ''),
-                'draft_content': response.get('final_response', '') or response.get('raw_response', ''),
+                'draft_content': response.get('response_text', ''),
             })
 
             # Retirer de pending
@@ -234,9 +324,61 @@ def process_all_pending(workflow, cycle_num, delay_seconds=3.0):
         time.sleep(delay_seconds)
 
     # Sauvegarder les résultats du cycle
-    save_batch_results(results, cycle_num)
+    batch_file = save_batch_results(results, cycle_num)
 
-    log(f"Cycle {cycle_num} terminé: {success_count} OK, {error_count} erreurs")
+    # Summary enrichi
+    sent = sum(1 for r in results if r.get('reply_sent'))
+    drafts = sum(1 for r in results if r.get('draft_created'))
+    skipped = sum(1 for r in results if r.get('stage', '').startswith('SKIPPED'))
+    errors = sum(1 for r in results if r.get('error'))
+
+    # Routes par département
+    routes = {}
+    for r in results:
+        if r.get('triage_action') == 'ROUTE':
+            dept = r.get('target_department', '?')
+            routes[dept] = routes.get(dept, 0) + 1
+
+    # CMA auto-closed
+    cma_closed = sum(1 for r in results if r.get('stage', '').startswith('CLOSED_CMA'))
+
+    log(f"\n--- Cycle {cycle_num} Summary ---")
+    log(f"  Auto-send: {sent} | Drafts: {drafts} | CMA closed: {cma_closed} | Skipped: {skipped} | Errors: {error_count}")
+    if routes:
+        route_parts = [f"{dept}: {n}" for dept, n in sorted(routes.items(), key=lambda x: -x[1])]
+        log(f"  Routes: {' | '.join(route_parts)} (total: {sum(routes.values())})")
+    log(f"---")
+
+    # Health check automatique post-cycle
+    try:
+        report = run_health_check([batch_file])
+        summary = report.get('summary', {})
+        total_issues = summary.get('total_issues', 0)
+
+        if total_issues == 0:
+            log("  Health check: OK (0 issues)")
+        else:
+            parts = []
+            for sev in ['CRITICAL', 'ERROR', 'WARNING', 'INFO']:
+                count = summary.get(sev, 0)
+                if count > 0:
+                    parts.append(f"{sev}: {count}")
+            log(f"  Health check: {total_issues} issues ({', '.join(parts)})")
+
+            # Détail des checks avec issues
+            for check_id, info in report.get('checks', {}).items():
+                if info['severity'] in ('CRITICAL', 'ERROR'):
+                    log(f"    [{info['severity']}] {check_id}: {info['count']}x — {info['sample_message'][:80]}")
+
+        # Sauvegarder le rapport health check
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        hc_file = f"{RESULTS_DIR}/health_check_{timestamp}_cycle{cycle_num}.json"
+        with open(hc_file, 'w', encoding='utf-8') as f:
+            json.dump(report, f, ensure_ascii=False, indent=2)
+
+    except Exception as e:
+        log(f"  Health check: ERREUR — {str(e)}")
+
     return success_count, error_count
 
 def main():

@@ -5950,6 +5950,7 @@ Bien cordialement,
             ai_generator=ai_personalization_generator
         )
         response_text = template_result.get('response_text', '')
+        template_result['original_response_text'] = response_text  # Snapshot avant humanisation
 
         logger.info(f"  ✅ Réponse générée ({len(response_text)} caractères)")
         if template_result.get('template_used'):
@@ -6125,6 +6126,25 @@ Bien cordialement,
             if e.error_type == 'forbidden_term'
         ]
 
+        # Collect all valid dates for health check (dates that MAY appear in draft)
+        valid_dates_set = set()
+        for d in [ctx.get('date_examen'), ctx.get('date_cloture'),
+                  ctx.get('matched_session_start'), ctx.get('matched_session_end'),
+                  ctx.get('auto_assigned_exam_date'), ctx.get('new_exam_date'),
+                  ctx.get('original_exam_date'), ctx.get('repositioned_exam_date')]:
+            if d:
+                valid_dates_set.add(str(d))
+        for nd in proposed_dates:
+            if isinstance(nd, dict):
+                for dk in ('Date_Examen', 'date_cloture', 'Date_d_but', 'Date_fin'):
+                    if nd.get(dk):
+                        valid_dates_set.add(str(nd[dk]))
+        for sp in proposed_sessions:
+            if isinstance(sp, dict):
+                for sk in ('date_debut', 'date_fin', 'Date_d_but', 'Date_fin'):
+                    if sp.get(sk):
+                        valid_dates_set.add(str(sp[sk]))
+
         response_result = {
             'response_text': response_text,
             'detected_scenarios': [state_id],
@@ -6134,8 +6154,8 @@ Bien cordialement,
             'validation': {
                 state_id: {
                     'compliant': validation_result.valid,
-                    'errors': [e.message for e in validation_result.errors],
-                    'warnings': [w.message for w in validation_result.warnings],
+                    'errors': [{'type': e.error_type, 'message': e.message} for e in validation_result.errors],
+                    'warnings': [{'type': w.error_type, 'message': w.message} for w in validation_result.warnings],
                     'missing_blocks': [],
                     'forbidden_terms_found': forbidden_terms_found,
                 }
@@ -6148,6 +6168,8 @@ Bien cordialement,
                 'context': ctx,
                 'crm_updates_blocked': crm_update_result.updates_blocked,
                 'crm_updates_skipped': crm_update_result.updates_skipped,
+                'template_used': template_result.get('template_used'),
+                'template_file': template_result.get('template_file'),
             },
             # Multi-états / Multi-intentions metadata
             'states_used': template_result.get('states_used', []),
@@ -6158,6 +6180,17 @@ Bien cordialement,
             'primary_intent': template_result.get('primary_intent'),
             'secondary_intents': template_result.get('secondary_intents', []),
             'was_humanized': template_result.get('was_humanized', False),
+            # Humanizer metadata (for health check)
+            'humanizer': {
+                'attempts': humanize_result.get('attempts', 0),
+                'validation_failed': humanize_result.get('validation_failed', False),
+                'validation_issues': humanize_result.get('validation_issues', []),
+                'error': humanize_result.get('error'),
+            },
+            # Pre-humanization text (for diff analysis)
+            'template_response': template_result.get('original_response_text', ''),
+            # All valid dates (for hallucination detection)
+            'valid_dates': sorted(valid_dates_set),
         }
 
         return response_result
