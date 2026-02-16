@@ -1755,12 +1755,41 @@ Le candidat a un ancien dossier dont les frais CMA ({CMA_EXAM_FEE}€) ont déj�
             if direction == 'in':
                 content = get_clean_thread_content(thread)
 
-                # Strip quoted/forwarded content to avoid contamination
-                # (e.g., our own "Mot de passe", "@email", "241€" in Gmail/Outlook quotes)
-                try:
-                    content = BusinessRules.strip_forwarded_content(content)
-                except Exception:
-                    pass  # Graceful degradation
+                # Forward interne (Lamia, Fouad, etc.) : extraire le corps du
+                # message forwardé au lieu de tout supprimer.
+                # strip_forwarded_content() coupe tout après "---------- Forwarded
+                # message ---------", ce qui vide le contenu quand le message
+                # entier EST un forward.
+                from_email = (thread.get('fromEmailAddress') or '').lower()
+                is_internal_forward = any(
+                    domain in from_email
+                    for domain in ['@cab-formations.fr', '@formalogistics.com']
+                )
+
+                if is_internal_forward and 'forwarded message' in content.lower():
+                    # Extraire le body APRÈS les headers du forward
+                    # Format: "---------- Forwarded message ---------\nDe:...\nDate:...\nSubject:...\nTo:...\n\n<BODY>"
+                    import re
+                    fwd_match = re.search(
+                        r'------+\s*Forwarded message\s*------+.*?'
+                        r'(?:To|À|Cc)\s*:.*?\n\s*\n(.*)',
+                        content,
+                        flags=re.DOTALL | re.IGNORECASE
+                    )
+                    if fwd_match:
+                        content = fwd_match.group(1).strip()
+                        # Supprimer la signature de l'employé CAB en bas
+                        content = re.sub(
+                            r'\n--\s*\n.*$', '', content, flags=re.DOTALL
+                        )
+                        content = content.strip()
+                else:
+                    # Strip quoted/forwarded content to avoid contamination
+                    # (e.g., our own "Mot de passe", "@email", "241€" in Gmail/Outlook quotes)
+                    try:
+                        content = BusinessRules.strip_forwarded_content(content)
+                    except Exception:
+                        pass  # Graceful degradation
 
                 content_lower = content.lower()
 
