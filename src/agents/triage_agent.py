@@ -693,6 +693,9 @@ EXEMPLE PLAINTE - Message: "J'avais clairement indiqué mon choix pour une forma
             f"**Département actuel:** {current_department}"
         ])
 
+        # Initialisé ici car utilisé après le bloc if deal_data (ligne ~948)
+        rule_go_override = None
+
         # Ajouter les infos du deal si disponibles
         if deal_data:
             # Utiliser la vraie date d'examen (enrichie par le workflow depuis le module Sessions_d_examen)
