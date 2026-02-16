@@ -16,6 +16,7 @@ python-dateutil==2.8.2
 tenacity==8.2.3
 PyYAML==6.0.1
 pybars3==0.9.7
+PyMeta3==0.5.1
 gender-guesser==0.4.0
 
 # Web Server (for webhook)
