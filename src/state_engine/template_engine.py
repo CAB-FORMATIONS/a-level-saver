@@ -674,7 +674,7 @@ class TemplateEngine:
         deal_data = context.get('deal_data', {})
         contact_data = context.get('contact_data', {})  # Données du Contact lié (First_Name, Last_Name)
         examt3p_data = context.get('examt3p_data', {})
-        enriched_lookups = context.get('enriched_lookups', {})
+        enriched_lookups = context.get('enriched_lookups') or {}
         intent_context = context.get('intent_context', {})
 
         # Extraire le prénom et nom depuis Contact (pas Deal)
@@ -2319,14 +2319,14 @@ class TemplateEngine:
             or 'DEMANDE_CHANGEMENT_SESSION' in context.get('secondary_intents', [])
         )
 
-        enriched_lookups = context.get('enriched_lookups', {})
+        enriched_lookups = context.get('enriched_lookups') or {}
         date_examen_raw = enriched_lookups.get('date_examen') or context.get('date_examen_raw', '')
         exam_date = None
         if is_session_change and date_examen_raw:
             exam_date = parse_date_flexible(date_examen_raw)
 
         # Session actuelle du candidat (pour ne pas la re-proposer)
-        current_session_id = context.get('current_session_id') or enriched_lookups.get('session_record', {}).get('id', '')
+        current_session_id = context.get('current_session_id') or (enriched_lookups.get('session_record') or {}).get('id', '')
         today = datetime.now().date()
 
         result = {}
@@ -2744,7 +2744,7 @@ class TemplateEngine:
         is_session_change = primary_intent == 'DEMANDE_CHANGEMENT_SESSION' or 'DEMANDE_CHANGEMENT_SESSION' in context.get('secondary_intents', [])
         if is_session_change or has_session_assignment_error:
             # Récupérer la date d'examen confirmée du candidat
-            enriched_lookups = context.get('enriched_lookups', {})
+            enriched_lookups = context.get('enriched_lookups') or {}
             date_examen_raw = enriched_lookups.get('date_examen') or context.get('date_examen_raw', '')
 
             if date_examen_raw:
@@ -2813,7 +2813,7 @@ class TemplateEngine:
         # FILTRE 5 (ex-4): Pour session_assignment_error, filtrer par le type de session d'origine
         # (la session erronée indique la préférence du candidat)
         if has_session_assignment_error:
-            enriched_lookups = context.get('enriched_lookups', {})
+            enriched_lookups = context.get('enriched_lookups') or {}
             original_type = enriched_lookups.get('session_type')  # 'jour' ou 'soir'
             if original_type:
                 filtered = [s for s in all_sessions if s.get('type') == original_type]
