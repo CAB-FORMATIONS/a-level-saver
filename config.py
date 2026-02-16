@@ -49,6 +49,9 @@ class Settings(BaseSettings):
     escalation_agent_name: str = "Lamia Serbouty"
     rgpd_referent_email: str = "jc@cab-formations.fr"
 
+    # Render
+    render_api_key: Optional[str] = None
+
     # Logging
     log_level: str = "INFO"
 

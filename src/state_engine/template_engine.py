@@ -1162,6 +1162,9 @@ class TemplateEngine:
         # NOTE: deadline_passed_auto_reschedule garde intention_report_date=True car le partial l'utilise
         if report_possible or report_bloque or report_force_majeure:
             result['intention_report_date'] = False
+            # Supprimer direct_answer du triage car les partials report/*.html
+            # gèrent le contenu — le direct_answer peut contredire le blocage
+            result['direct_answer'] = ''
 
         # V3: Si date confirmée → le bloc report_possible V3 gère tout,
         # désactiver les intentions liées aux dates pour éviter duplication

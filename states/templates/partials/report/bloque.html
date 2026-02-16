@@ -1,4 +1,4 @@
-<!-- Partial: REPORT BLOQUE (VALIDE CMA + clôture passée) -->
+<!-- Partial: REPORT BLOQUE (VALIDE CMA / Convoc CMA reçue + clôture passée) -->
 {{#if date_examen_is_past}}
 <!-- Date PASSÉE → vrai absence, options force majeure ou réinscription -->
 <b>Concernant votre demande de report</b><br>
@@ -17,15 +17,19 @@ Pour demander un report, merci de nous transmettre votre justificatif par email 
 Nous soumettrons ensuite votre demande à la CMA. Sans justificatif valide, des frais de réinscription de {{frais_examen_complet}}€ seront à prévoir.<br>
 <br>
 {{else}}
-<!-- Date FUTURE → le candidat se trompe, rassurer avec la vraie date -->
-<b>Concernant votre examen</b><br>
-Votre examen est prevu le <b>{{date_examen_formatted}}</b> et n'a pas encore eu lieu.<br>
-{{#if evalbox_valide_cma}}
-Votre dossier est <b>valide par la CMA</b>. Vous recevrez votre convocation officielle environ <b>10 jours avant l'examen</b>, directement par email de la CMA.<br>
-{{/if}}
-{{#if evalbox_dossier_synchronise}}
-Votre dossier est en cours de verification par la CMA. Vous recevrez votre convocation une fois le dossier valide, environ <b>10 jours avant l'examen</b>.<br>
-{{/if}}
+<!-- Date FUTURE mais clôture passée → report bloqué, force majeure requise -->
+<b>Concernant votre demande de report</b><br>
+Nous comprenons votre situation et avons bien pris note de votre demande de changement de date.<br>
 <br>
-<b>Pensez a verifier regulierement vos spams</b> car il arrive que les emails de la CMA s'y retrouvent.<br>
+Votre examen est prevu le <b>{{date_examen_formatted}}</b>.{{#if evalbox_convoc_recue}} Votre convocation a deja ete emise par la CMA.{{/if}}{{#if evalbox_valide_cma}} Votre dossier a ete valide par la CMA.{{/if}} Les inscriptions etant cloturees, <b>un report n'est malheureusement plus possible a ce stade</b>.<br>
+<br>
+Un changement de date ne peut etre envisage qu'avec un <b>justificatif de force majeure</b> :<br>
+<ul>
+<li>Certificat medical</li>
+<li>Certificat de deces d'un proche</li>
+<li>Tout document attestant de l'impossibilite de vous presenter</li>
+</ul>
+Si vous disposez d'un tel justificatif, merci de nous le transmettre par email a <b>doc@cab-formations.fr</b>. Nous soumettrons votre demande a la CMA.<br>
+<br>
+Sans justificatif valide, nous vous invitons a vous presenter a l'examen le <b>{{date_examen_formatted}}</b>. En cas d'absence, des frais de reinscription de {{frais_examen_complet}}€ seront a prevoir.<br>
 {{/if}}
