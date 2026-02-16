@@ -960,6 +960,18 @@ python show_response.py <ticket_id>
 
 ## Documentation Détaillée
 
+### Documentation Handover (complète, autonome)
+
+| Document | Contenu |
+|----------|---------|
+| `docs/DEPLOYMENT.md` | Dockerfile, variables d'env, Zoho Desk config, monitoring, troubleshooting |
+| `docs/FUNCTIONAL_OVERVIEW.md` | Contexte métier, cycle Evalbox, 10 CAS dates, Uber, 50+ intentions, guard rails |
+| `docs/TECHNICAL_OVERVIEW.md` | Architecture, pipeline 8 étapes, tous les modules Python, State Engine, ThreadMemory |
+| `docs/DEVELOPER_GUIDE.md` | Setup local, checklists intention/état, debugging 12 scénarios, conventions |
+| `docs/API_REFERENCE.md` | Webhook endpoints, Zoho Desk/CRM API, Anthropic, ExamT3P Playwright, OAuth |
+
+### Documentation technique (référence interne)
+
 | Document | Contenu |
 |----------|---------|
 | `docs/ARCHITECTURE.md` | Structure projet, workflow 8 étapes, data structures |
