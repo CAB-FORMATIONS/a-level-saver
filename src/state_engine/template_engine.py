@@ -2773,7 +2773,7 @@ class TemplateEngine:
 
         # FILTRE 3: Sessions passées (date_debut <= aujourd'hui) et session actuelle du candidat
         today = datetime.now().date()
-        enriched_lookups_f3 = context.get('enriched_lookups', {})
+        enriched_lookups_f3 = context.get('enriched_lookups') or {}
         current_session_id = str(enriched_lookups_f3.get('session_record', {}).get('id', ''))
         filtered_past = []
         for s in all_sessions:
