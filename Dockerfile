@@ -14,8 +14,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Install Playwright Chromium browser
-ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright
-RUN playwright install chromium
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/render/.cache/ms-playwright
+RUN mkdir -p /opt/render/.cache/ms-playwright && playwright install chromium
 
 COPY . .
 
