@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Zoho Desk Webhook Server
-Receives webhook events from Zoho Desk and triggers automation workflows
+Receives webhook events from Zoho Desk and triggers DOCTicketWorkflow
 """
 
 import os
@@ -14,7 +14,8 @@ from flask import Flask, request, jsonify
 from datetime import datetime
 import traceback
 
-from src.orchestrator import ZohoAutomationOrchestrator
+from src.workflows.doc_ticket_workflow import DOCTicketWorkflow
+from src.constants.departments import DEPT_DOC
 from src.utils.logging_config import setup_logging
 
 # Setup logging
@@ -25,18 +26,12 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
 # Configuration
-WEBHOOK_SECRET = os.getenv('ZOHO_WEBHOOK_SECRET', '')  # HMAC secret for signature verification
-AUTO_DISPATCH = os.getenv('WEBHOOK_AUTO_DISPATCH', 'true').lower() == 'true'
-AUTO_LINK = os.getenv('WEBHOOK_AUTO_LINK', 'true').lower() == 'true'
-AUTO_RESPOND = os.getenv('WEBHOOK_AUTO_RESPOND', 'false').lower() == 'true'
-AUTO_UPDATE_TICKET = os.getenv('WEBHOOK_AUTO_UPDATE_TICKET', 'false').lower() == 'true'
-AUTO_UPDATE_DEAL = os.getenv('WEBHOOK_AUTO_UPDATE_DEAL', 'false').lower() == 'true'
-AUTO_ADD_NOTE = os.getenv('WEBHOOK_AUTO_ADD_NOTE', 'false').lower() == 'true'
+WEBHOOK_SECRET = os.getenv('ZOHO_WEBHOOK_SECRET', '')
 
 
 def verify_webhook_signature(payload: bytes, signature: str) -> bool:
     """
-    Verify HMAC-SHA256 signature from Zoho webhook
+    Verify HMAC-SHA256 signature from Zoho webhook.
 
     Args:
         payload: Raw request body as bytes
@@ -54,14 +49,12 @@ def verify_webhook_signature(payload: bytes, signature: str) -> bool:
         return False
 
     try:
-        # Compute HMAC-SHA256 signature
         computed_signature = hmac.new(
             WEBHOOK_SECRET.encode('utf-8'),
             payload,
             hashlib.sha256
         ).hexdigest()
 
-        # Compare signatures (constant-time comparison)
         is_valid = hmac.compare_digest(computed_signature, signature)
 
         if not is_valid:
@@ -78,21 +71,14 @@ def verify_webhook_signature(payload: bytes, signature: str) -> bool:
 
 def extract_ticket_id_from_payload(data: Dict[str, Any]) -> Optional[str]:
     """
-    Extract ticket ID from Zoho webhook payload
+    Extract ticket ID from Zoho webhook payload.
 
     Zoho can send different payload structures depending on event type.
     Common patterns:
     - data['ticket']['id']
     - data['id']
     - data['entityId']
-
-    Args:
-        data: Parsed webhook payload
-
-    Returns:
-        Ticket ID or None if not found
     """
-    # Try common patterns
     if 'ticket' in data and isinstance(data['ticket'], dict):
         return data['ticket'].get('id')
 
@@ -102,7 +88,6 @@ def extract_ticket_id_from_payload(data: Dict[str, Any]) -> Optional[str]:
     if 'entityId' in data:
         return data['entityId']
 
-    # Try nested structures
     if 'data' in data:
         if isinstance(data['data'], dict):
             return extract_ticket_id_from_payload(data['data'])
@@ -110,25 +95,38 @@ def extract_ticket_id_from_payload(data: Dict[str, Any]) -> Optional[str]:
     return None
 
 
+def extract_department_from_payload(data: Dict[str, Any]) -> Optional[str]:
+    """
+    Extract department name from Zoho webhook payload.
+
+    Returns department name or None if not found.
+    """
+    if 'ticket' in data and isinstance(data['ticket'], dict):
+        ticket = data['ticket']
+        if 'department' in ticket and isinstance(ticket['department'], dict):
+            return ticket['department'].get('name')
+        return ticket.get('departmentId')
+
+    if 'department' in data and isinstance(data['department'], dict):
+        return data['department'].get('name')
+
+    return data.get('departmentId')
+
+
 def parse_webhook_event(data: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Parse webhook event data and extract relevant information
-
-    Args:
-        data: Raw webhook payload
-
-    Returns:
-        Parsed event data with normalized fields
+    Parse webhook event data and extract relevant information.
     """
     event_info = {
         'event_type': data.get('event_type') or data.get('eventType') or 'unknown',
         'ticket_id': extract_ticket_id_from_payload(data),
+        'department': extract_department_from_payload(data),
         'timestamp': data.get('timestamp') or datetime.utcnow().isoformat(),
         'org_id': data.get('orgId'),
         'raw_data': data
     }
 
-    logger.info(f"Parsed webhook event: {event_info['event_type']} for ticket {event_info['ticket_id']}")
+    logger.info(f"Parsed webhook event: {event_info['event_type']} for ticket {event_info['ticket_id']} (dept: {event_info['department']})")
 
     return event_info
 
@@ -146,16 +144,11 @@ def health_check():
 @app.route('/webhook/zoho-desk', methods=['POST'])
 def handle_zoho_desk_webhook():
     """
-    Main webhook endpoint for Zoho Desk events
+    Main webhook endpoint for Zoho Desk events.
 
-    Expected event types:
-    - ticket.created
-    - ticket.updated
-    - ticket.status_changed
-    - ticket.assigned
-
-    Returns:
-        JSON response with success status
+    Processes DOC department tickets via DOCTicketWorkflow.
+    auto_send=True by default — the internal _can_auto_send() guard rail
+    decides: whitelisted scenarios → send, everything else → draft.
     """
     start_time = datetime.utcnow()
 
@@ -164,7 +157,6 @@ def handle_zoho_desk_webhook():
     signature = request.headers.get('X-Zoho-Signature', '')
 
     logger.info(f"Received webhook request from {request.remote_addr}")
-    logger.debug(f"Headers: {dict(request.headers)}")
 
     # Verify signature
     if not verify_webhook_signature(raw_payload, signature):
@@ -204,45 +196,53 @@ def handle_zoho_desk_webhook():
             'error': 'No ticket ID found in payload'
         }), 400
 
-    logger.info(f"Processing webhook for ticket {ticket_id}, event: {event_info['event_type']}")
-
-    # Process ticket with orchestrator
-    orchestrator = None
-    try:
-        orchestrator = ZohoAutomationOrchestrator()
-
-        result = orchestrator.process_ticket_complete_workflow(
-            ticket_id=ticket_id,
-            auto_dispatch=AUTO_DISPATCH,
-            auto_link=AUTO_LINK,
-            auto_respond=AUTO_RESPOND,
-            auto_update_ticket=AUTO_UPDATE_TICKET,
-            auto_update_deal=AUTO_UPDATE_DEAL,
-            auto_add_note=AUTO_ADD_NOTE
-        )
-
-        # Calculate processing time
-        processing_time = (datetime.utcnow() - start_time).total_seconds()
-
-        logger.info(f"✅ Webhook processed successfully in {processing_time:.2f}s")
-        logger.info(f"Summary: {result.get('summary', {})}")
-
+    # Department filter: only process DOC tickets
+    dept = event_info.get('department')
+    if dept and dept != DEPT_DOC:
+        logger.info(f"Skipping ticket {ticket_id} — department '{dept}' is not {DEPT_DOC}")
         return jsonify({
             'success': True,
+            'ticket_id': ticket_id,
+            'skipped': True,
+            'reason': f"Department '{dept}' is not {DEPT_DOC}"
+        }), 200
+
+    logger.info(f"Processing webhook for ticket {ticket_id}, event: {event_info['event_type']}")
+
+    # Process ticket with DOCTicketWorkflow
+    try:
+        workflow = DOCTicketWorkflow()
+        result = workflow.process_ticket(
+            ticket_id=ticket_id,
+            auto_create_draft=True,
+            auto_update_crm=True,
+            auto_update_ticket=True,
+            auto_send=True
+        )
+
+        processing_time = (datetime.utcnow() - start_time).total_seconds()
+
+        logger.info(f"Webhook processed in {processing_time:.2f}s — stage: {result.get('workflow_stage')}, delivery: {result.get('delivery_method')}")
+
+        return jsonify({
+            'success': result.get('success', False),
             'ticket_id': ticket_id,
             'event_type': event_info['event_type'],
             'processing_time_seconds': processing_time,
             'result': {
-                'dispatcher': result.get('dispatcher', {}).get('success'),
-                'deal_linking': result.get('deal_linking', {}).get('success'),
-                'desk_agent': result.get('desk_agent', {}).get('success'),
-                'crm_agent': result.get('crm_agent', {}).get('success'),
-                'summary': result.get('summary', {})
+                'workflow_stage': result.get('workflow_stage'),
+                'delivery_method': result.get('delivery_method'),
+                'draft_created': result.get('draft_created'),
+                'reply_sent': result.get('reply_sent'),
+                'crm_updated': result.get('crm_updated'),
+                'ticket_updated': result.get('ticket_updated'),
+                'skip_reason': result.get('skip_reason'),
+                'errors': result.get('errors', [])
             }
         }), 200
 
     except Exception as e:
-        logger.error(f"❌ Error processing webhook: {str(e)}")
+        logger.error(f"Error processing webhook: {str(e)}")
         logger.error(traceback.format_exc())
 
         return jsonify({
@@ -252,23 +252,22 @@ def handle_zoho_desk_webhook():
             'error_type': type(e).__name__
         }), 500
 
-    finally:
-        if orchestrator:
-            try:
-                orchestrator.close()
-            except:
-                pass
-
 
 @app.route('/webhook/test', methods=['POST'])
 def test_webhook():
     """
-    Test endpoint for manual webhook testing without signature verification
+    Test endpoint for manual webhook testing without signature verification.
 
     Usage:
         curl -X POST http://localhost:5000/webhook/test \
           -H "Content-Type: application/json" \
           -d '{"ticket_id": "198709000438366101"}'
+
+    Optional fields:
+        auto_send: bool (default True)
+        auto_create_draft: bool (default True)
+        auto_update_crm: bool (default True)
+        auto_update_ticket: bool (default True)
     """
     try:
         data = request.get_json(force=True)
@@ -282,26 +281,29 @@ def test_webhook():
 
         logger.info(f"Test webhook triggered for ticket {ticket_id}")
 
-        orchestrator = ZohoAutomationOrchestrator()
-        try:
-            result = orchestrator.process_ticket_complete_workflow(
-                ticket_id=ticket_id,
-                auto_dispatch=data.get('auto_dispatch', AUTO_DISPATCH),
-                auto_link=data.get('auto_link', AUTO_LINK),
-                auto_respond=data.get('auto_respond', AUTO_RESPOND),
-                auto_update_ticket=data.get('auto_update_ticket', AUTO_UPDATE_TICKET),
-                auto_update_deal=data.get('auto_update_deal', AUTO_UPDATE_DEAL),
-                auto_add_note=data.get('auto_add_note', AUTO_ADD_NOTE)
-            )
+        workflow = DOCTicketWorkflow()
+        result = workflow.process_ticket(
+            ticket_id=ticket_id,
+            auto_create_draft=data.get('auto_create_draft', True),
+            auto_update_crm=data.get('auto_update_crm', True),
+            auto_update_ticket=data.get('auto_update_ticket', True),
+            auto_send=data.get('auto_send', True)
+        )
 
-            return jsonify({
-                'success': True,
-                'ticket_id': ticket_id,
-                'result': result
-            }), 200
-
-        finally:
-            orchestrator.close()
+        return jsonify({
+            'success': result.get('success', False),
+            'ticket_id': ticket_id,
+            'result': {
+                'workflow_stage': result.get('workflow_stage'),
+                'delivery_method': result.get('delivery_method'),
+                'draft_created': result.get('draft_created'),
+                'reply_sent': result.get('reply_sent'),
+                'crm_updated': result.get('crm_updated'),
+                'ticket_updated': result.get('ticket_updated'),
+                'skip_reason': result.get('skip_reason'),
+                'errors': result.get('errors', [])
+            }
+        }), 200
 
     except Exception as e:
         logger.error(f"Test webhook error: {str(e)}")
@@ -314,21 +316,16 @@ def test_webhook():
 
 @app.route('/webhook/stats', methods=['GET'])
 def webhook_stats():
-    """
-    Get webhook statistics and configuration
-
-    Returns current configuration and status
-    """
+    """Get webhook configuration and status."""
     return jsonify({
         'service': 'a-level-saver-webhook',
         'status': 'running',
         'configuration': {
-            'auto_dispatch': AUTO_DISPATCH,
-            'auto_link': AUTO_LINK,
-            'auto_respond': AUTO_RESPOND,
-            'auto_update_ticket': AUTO_UPDATE_TICKET,
-            'auto_update_deal': AUTO_UPDATE_DEAL,
-            'auto_add_note': AUTO_ADD_NOTE,
+            'auto_create_draft': True,
+            'auto_update_crm': True,
+            'auto_update_ticket': True,
+            'auto_send': True,
+            'auto_send_note': 'Guarded by _can_auto_send() — only whitelisted scenarios send directly',
             'signature_verification': bool(WEBHOOK_SECRET)
         },
         'timestamp': datetime.utcnow().isoformat()
@@ -359,31 +356,23 @@ def internal_error(error):
 
 
 if __name__ == '__main__':
-    # Configuration
     host = os.getenv('WEBHOOK_HOST', '0.0.0.0')
     port = int(os.getenv('WEBHOOK_PORT', '5000'))
     debug = os.getenv('FLASK_DEBUG', 'false').lower() == 'true'
 
     logger.info("=" * 60)
-    logger.info("🚀 A-Level Saver Webhook Server Starting")
+    logger.info("A-Level Saver Webhook Server Starting")
     logger.info("=" * 60)
     logger.info(f"Host: {host}")
     logger.info(f"Port: {port}")
     logger.info(f"Debug: {debug}")
-    logger.info(f"Auto Dispatch: {AUTO_DISPATCH}")
-    logger.info(f"Auto Link: {AUTO_LINK}")
-    logger.info(f"Auto Respond: {AUTO_RESPOND}")
-    logger.info(f"Auto Update Ticket: {AUTO_UPDATE_TICKET}")
-    logger.info(f"Auto Update Deal: {AUTO_UPDATE_DEAL}")
-    logger.info(f"Auto Add Note: {AUTO_ADD_NOTE}")
     logger.info(f"Signature Verification: {'Enabled' if WEBHOOK_SECRET else 'Disabled (WARNING!)'}")
     logger.info("=" * 60)
 
     if not WEBHOOK_SECRET:
-        logger.warning("⚠️  ZOHO_WEBHOOK_SECRET not set - signature verification disabled!")
-        logger.warning("⚠️  This is INSECURE for production use!")
+        logger.warning("ZOHO_WEBHOOK_SECRET not set - signature verification disabled!")
+        logger.warning("This is INSECURE for production use!")
 
-    # Run Flask app
     app.run(
         host=host,
         port=port,

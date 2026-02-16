@@ -14,6 +14,8 @@ asyncio==3.4.3
 # Utilities
 python-dateutil==2.8.2
 tenacity==8.2.3
+PyYAML==6.0.1
+pybars3==0.9.7
 
 # Web Server (for webhook)
 Flask==3.0.0
