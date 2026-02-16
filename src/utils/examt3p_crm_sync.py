@@ -627,35 +627,43 @@ def sync_exam_date_from_examt3p(
     logger.info(f"  📊 Dates différentes: CRM={crm_date or 'VIDE'} → ExamT3P={examt3p_date}")
 
     # ================================================================
-    # 2b. VÉRIFIER RÈGLE DE BLOCAGE
+    # 2b. STATUT CMA CONFIRMÉ → ExamT3P GAGNE TOUJOURS
     # ================================================================
-    # Si ExamT3P a une date FUTURE → écraser CRM systématiquement (quel que soit Evalbox).
-    # Si ExamT3P a une date PASSÉE → bloquer sauf si Evalbox = "Convoc CMA reçue"
-    # (date passée ExamT3P = artefact, CRM est la source de vérité via auto-report).
+    # Si ExamT3P a un statut validé par la CMA ("Valide", "En attente de convocation"),
+    # la CMA a confirmé le candidat pour CETTE date. ExamT3P est source de vérité.
     current_evalbox = deal_data.get('Evalbox', '')
     examt3p_date_is_past = is_date_past(examt3p_date)
+    examt3p_statut = examt3p_data.get('statut_dossier', '')
+    CMA_CONFIRMED_STATUSES = {'Valide', 'VALIDE', 'En attente de convocation', 'EN ATTENTE DE CONVOCATION'}
 
-    if crm_date and examt3p_date_is_past and current_evalbox != 'Convoc CMA reçue':
-        logger.info(f"  🔒 BLOCAGE SYNC DATE: ExamT3P date passée ({examt3p_date}) + Evalbox={current_evalbox!r} ≠ 'Convoc CMA reçue' → CRM protégé ({crm_date})")
+    if examt3p_statut in CMA_CONFIRMED_STATUSES:
+        logger.info(
+            f"  ✅ SYNC FORCÉE: Statut ExamT3P={examt3p_statut!r} (confirmé CMA) "
+            f"→ date ExamT3P ({examt3p_date}) GAGNE sur CRM ({crm_date or 'VIDE'})"
+        )
+        # Passer directement à la recherche de session et mise à jour (pas de blocage)
+
+    # ================================================================
+    # 2c. DATE PASSÉE → ExamT3P stale (sauf CMA confirmé, traité ci-dessus)
+    # ================================================================
+    elif examt3p_date_is_past and crm_date:
+        logger.info(f"  🔒 BLOCAGE SYNC DATE: ExamT3P date passée ({examt3p_date}) + statut={examt3p_statut!r} (non confirmé CMA) → CRM protégé ({crm_date})")
         result['blocked'] = True
         result['blocked_reason'] = (
             f"Date ExamT3P ({examt3p_date}) est dans le passé et "
-            f"Evalbox={current_evalbox!r} n'est pas 'Convoc CMA reçue'. "
+            f"statut ExamT3P={examt3p_statut!r} n'est pas confirmé CMA. "
             f"La date CRM ({crm_date}) est protégée."
         )
         result['sync_performed'] = True
         return result
 
     # ================================================================
-    # 2c. VÉRIFIER CLÔTURE PASSÉE + CRM PLUS TARDIF (date ExamT3P stale)
+    # 2d. CLÔTURE PASSÉE + CRM PLUS TARDIF → vérifier date paiement
     # ================================================================
-    # Si ExamT3P date future MAIS sa clôture est passée ET le CRM a une date
-    # PLUS TARDIVE → le CRM a déjà été auto-reporté (CAS 8) → NE PAS sync.
-    # Cas couverts:
-    #   - Paiement fait APRÈS clôture → candidat jamais inscrit pour cette date
-    #   - Refus CMA survenu APRÈS clôture → candidat ne peut plus s'inscrire à temps
-    #   - Tout autre cas où la clôture est passée et CRM avancé
-    if not examt3p_date_is_past and crm_date and crm_date != examt3p_date:
+    # Même logique que date_examen_vtc_helper.py (paiement_avant_cloture).
+    # Si paiement AVANT clôture → candidat inscrit → ExamT3P gagne.
+    # Si paiement APRÈS clôture → CAS 8 auto-report correct → CRM protégé.
+    elif not examt3p_date_is_past and crm_date and crm_date != examt3p_date:
         try:
             _dept = (
                 examt3p_data.get('departement') or
@@ -668,29 +676,48 @@ def sync_exam_date_from_examt3p(
                 _session = find_exam_session_by_date_and_dept(crm_client, examt3p_date, _dept_num)
                 if _session:
                     _cloture_str = _session.get('Date_Cloture_Inscription')
-                    if _cloture_str:
-                        _date_cloture = parse_date_flexible(_cloture_str, "sync_cloture")
+                    if _cloture_str and is_date_past(_cloture_str):
                         _crm_date_obj = parse_date_flexible(crm_date, "sync_crm_date")
                         _examt3p_date_obj = parse_date_flexible(examt3p_date, "sync_examt3p_date")
-                        if _date_cloture and is_date_past(_cloture_str) and _crm_date_obj and _examt3p_date_obj and _crm_date_obj > _examt3p_date_obj:
-                            logger.info(
-                                f"  🔒 BLOCAGE SYNC DATE: Clôture ({_cloture_str}) de la date ExamT3P "
-                                f"({examt3p_date}) est passée ET CRM a une date plus tardive ({crm_date}) "
-                                f"→ ExamT3P stale (auto-report déjà effectué), CRM protégé"
-                            )
-                            result['blocked'] = True
-                            result['blocked_reason'] = (
-                                f"Clôture ({_cloture_str}) de la date ExamT3P ({examt3p_date}) est passée "
-                                f"et le CRM a déjà été reporté sur une date ultérieure ({crm_date}). "
-                                f"ExamT3P est stale."
-                            )
-                            result['sync_performed'] = True
-                            return result
-        except Exception as e:
-            logger.warning(f"  ⚠️ Erreur vérification clôture sync: {e}")
+                        if _crm_date_obj and _examt3p_date_obj and _crm_date_obj > _examt3p_date_obj:
+                            # Clôture passée + CRM plus tardif → vérifier date paiement
+                            paiement_cma = examt3p_data.get('paiement_cma', {})
+                            date_paiement_str = paiement_cma.get('date')
+                            _date_cloture = parse_date_flexible(_cloture_str, "sync_cloture")
 
-    if not examt3p_date_is_past:
-        logger.info(f"  ✅ Date ExamT3P future ({examt3p_date}) → sync autorisée (Evalbox={current_evalbox!r})")
+                            if date_paiement_str and _date_cloture:
+                                date_paiement = parse_date_flexible(date_paiement_str, "sync_paiement")
+                                if date_paiement and date_paiement <= _date_cloture:
+                                    # Paiement AVANT clôture → candidat inscrit → ExamT3P gagne
+                                    logger.info(
+                                        f"  ✅ Paiement CMA le {date_paiement_str} AVANT clôture ({_cloture_str}) "
+                                        f"→ candidat inscrit pour {examt3p_date}, sync autorisée"
+                                    )
+                                else:
+                                    # Paiement APRÈS clôture → CAS 8 correct → CRM protégé
+                                    logger.info(
+                                        f"  🔒 BLOCAGE SYNC DATE: Paiement CMA le {date_paiement_str} "
+                                        f"APRÈS clôture ({_cloture_str}) → CAS 8 auto-report correct, "
+                                        f"CRM protégé ({crm_date})"
+                                    )
+                                    result['blocked'] = True
+                                    result['blocked_reason'] = (
+                                        f"Paiement CMA ({date_paiement_str}) après clôture ({_cloture_str}). "
+                                        f"CAS 8 auto-report correct → CRM protégé ({crm_date})."
+                                    )
+                                    result['sync_performed'] = True
+                                    return result
+                            else:
+                                # Pas de date paiement disponible → ne pas bloquer (sync par défaut)
+                                logger.info(
+                                    f"  ⚠️ Pas de date paiement ExamT3P, clôture passée + CRM plus tardif "
+                                    f"→ sync autorisée par défaut (ExamT3P={examt3p_date})"
+                                )
+        except Exception as e:
+            logger.warning(f"  ⚠️ Erreur vérification clôture/paiement sync: {e}")
+
+    else:
+        logger.info(f"  ✅ Date ExamT3P ({examt3p_date}) → sync autorisée (statut={examt3p_statut!r})")
 
     # ================================================================
     # 3. RÉCUPÉRER LE DÉPARTEMENT

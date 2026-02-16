@@ -674,7 +674,13 @@ class ExamenT3PPlaywright:
         self.data['convocation'] = self.data['progression'].get('convocation', 'EN ATTENTE')
 
     async def _extract_examens(self):
-        """Extraction des données de Mes Examens."""
+        """Extraction des données de Mes Examens.
+
+        La page affiche un tableau avec colonnes :
+        N° de dossier | Type d'examen | Date de l'épreuve | Statut | Actions
+
+        La date apparaît en format français textuel : "24 février 2026"
+        """
         await self._safe_click('a:has-text("Mes Examens")')
         await asyncio.sleep(ACTION_DELAY)
 
@@ -682,10 +688,30 @@ class ExamenT3PPlaywright:
 
         self.data['examens'] = {}
 
-        # Date d'examen
-        match = re.search(r'Date\s*:\s*(\d{2}/\d{2}/\d{4})', text_content)
+        # Date d'examen — format français textuel "24 février 2026" (dans le tableau)
+        mois_fr = (
+            r'janvier|février|fevrier|mars|avril|mai|juin|'
+            r'juillet|août|aout|septembre|octobre|novembre|décembre|decembre'
+        )
+        match = re.search(rf'(\d{{1,2}})\s+({mois_fr})\s+(\d{{4}})', text_content, re.IGNORECASE)
         if match:
-            self.data['examens']['date'] = match.group(1)
+            jour = int(match.group(1))
+            mois_texte = match.group(2).lower()
+            annee = int(match.group(3))
+            mois_mapping = {
+                'janvier': 1, 'février': 2, 'fevrier': 2, 'mars': 3,
+                'avril': 4, 'mai': 5, 'juin': 6, 'juillet': 7,
+                'août': 8, 'aout': 8, 'septembre': 9, 'octobre': 10,
+                'novembre': 11, 'décembre': 12, 'decembre': 12
+            }
+            mois = mois_mapping.get(mois_texte)
+            if mois:
+                self.data['examens']['date'] = f"{jour:02d}/{mois:02d}/{annee}"
+        else:
+            # Fallback : format DD/MM/YYYY ou "Date : DD/MM/YYYY"
+            match = re.search(r'(\d{2}/\d{2}/\d{4})', text_content)
+            if match:
+                self.data['examens']['date'] = match.group(1)
 
         # Lieu d'examen
         match = re.search(r'Lieu\s*:\s*([^\n]+)', text_content)
