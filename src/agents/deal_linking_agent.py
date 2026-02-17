@@ -531,6 +531,42 @@ Always respond in JSON format with the following structure:
         normalized = ' '.join(normalized.lower().split())
         return normalized
 
+    def _filter_phone_deals_by_name(self, phone_deals: List[Dict], candidate_name: str) -> List[Dict]:
+        """
+        Filtre les deals trouvés par téléphone pour éliminer les faux positifs.
+        Garde uniquement les deals dont le nom du contact partage au moins un mot
+        significatif (>= 3 caractères) avec le candidat actuel.
+
+        Ex: "yihang cai" vs "Ali Anwar" → aucun mot commun → filtré
+            "Jean Dupont" vs "Jean Martin" → "jean" commun → gardé
+        """
+        if not candidate_name:
+            return phone_deals
+
+        candidate_words = set(self._normalize_name_for_comparison(candidate_name).split())
+        # Ignorer les mots courts (prépositions, particules) qui pourraient matcher par hasard
+        candidate_words = {w for w in candidate_words if len(w) >= 3}
+
+        if not candidate_words:
+            return phone_deals
+
+        filtered = []
+        for deal in phone_deals:
+            deal_contact = deal.get('Contact_Name', {})
+            deal_name = deal_contact.get('name', '') if isinstance(deal_contact, dict) else str(deal_contact or '')
+            deal_words = set(self._normalize_name_for_comparison(deal_name).split())
+            deal_words = {w for w in deal_words if len(w) >= 3}
+
+            # Au moins un mot en commun → même personne potentiellement
+            common = candidate_words & deal_words
+            if common:
+                logger.info(f"  📱 Filtre nom OK: '{candidate_name}' ↔ '{deal_name}' (mots communs: {common})")
+                filtered.append(deal)
+            else:
+                logger.info(f"  📱 Filtre nom REJETÉ: '{candidate_name}' ↔ '{deal_name}' (aucun mot commun)")
+
+        return filtered
+
     def _search_duplicate_by_name_and_identity(
         self,
         candidate_name: str,
@@ -1233,6 +1269,12 @@ Emails alternatifs trouvés:"""
                                             phone_deals = self._get_deals_for_contacts(new_phone_contact_ids)
                                             phone_deals_20_won = [d for d in phone_deals if d.get("Amount") == 20 and d.get("Stage") == "GAGNÉ"]
 
+                                            # FILTRE NOM: Éliminer les faux positifs (même téléphone, personne différente)
+                                            if phone_deals_20_won:
+                                                candidate_name_data = deal_data.get('Contact_Name', {})
+                                                candidate_name = candidate_name_data.get('name', '') if isinstance(candidate_name_data, dict) else str(candidate_name_data or '')
+                                                phone_deals_20_won = self._filter_phone_deals_by_name(phone_deals_20_won, candidate_name)
+
                                             if phone_deals_20_won:
                                                 existing_ids = {d.get("id") for d in all_deals}
                                                 for deal in phone_deals:
@@ -1247,7 +1289,7 @@ Emails alternatifs trouvés:"""
                                                 result["deals_found"] = len(all_deals)
                                                 logger.info(f"  ✅ DOUBLON DÉTECTÉ VIA TÉLÉPHONE: {len(phone_deals_20_won)} deal(s) 20€ GAGNÉ supplémentaire(s)")
                                             else:
-                                                logger.info(f"  📱 Pas de deal 20€ GAGNÉ supplémentaire via téléphone")
+                                                logger.info(f"  📱 Pas de deal 20€ GAGNÉ supplémentaire via téléphone (après filtre nom)")
                                         else:
                                             logger.info(f"  📱 Contacts téléphone = mêmes que contacts email")
                                     else:
@@ -1659,6 +1701,12 @@ Emails alternatifs trouvés:"""
                             phone_deals = self._get_deals_for_contacts(new_contact_ids)
                             phone_deals_20_won = [d for d in phone_deals if d.get("Amount") == 20 and d.get("Stage") == "GAGNÉ"]
 
+                            # FILTRE NOM: Éliminer les faux positifs (même téléphone, personne différente)
+                            if phone_deals_20_won:
+                                candidate_name_data = selected_deal.get('Contact_Name', {})
+                                candidate_name = candidate_name_data.get('name', '') if isinstance(candidate_name_data, dict) else str(candidate_name_data or '')
+                                phone_deals_20_won = self._filter_phone_deals_by_name(phone_deals_20_won, candidate_name)
+
                             if phone_deals_20_won:
                                 # Fusionner avec all_deals et deals_20_won
                                 existing_ids = {d.get("id") for d in all_deals}
@@ -1674,7 +1722,7 @@ Emails alternatifs trouvés:"""
                                 result["all_deals"] = all_deals
                                 logger.info(f"  ✅ DOUBLON DÉTECTÉ VIA TÉLÉPHONE: {len(phone_deals_20_won)} deal(s) 20€ GAGNÉ supplémentaire(s)")
                             else:
-                                logger.info(f"  📱 Pas de deal 20€ GAGNÉ supplémentaire via téléphone")
+                                logger.info(f"  📱 Pas de deal 20€ GAGNÉ supplémentaire via téléphone (après filtre nom)")
                         else:
                             logger.info(f"  📱 Contacts téléphone = mêmes que contacts email")
                     else:
