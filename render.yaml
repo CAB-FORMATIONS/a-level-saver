@@ -3,7 +3,7 @@ services:
     name: a-level-saver
     runtime: python
     buildCommand: "pip install -r requirements.txt && playwright install --with-deps chromium"
-    startCommand: "gunicorn webhook_server:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120"
+    startCommand: "gunicorn webhook_server:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120"
     healthCheckPath: /health
     envVars:
       - key: PYTHON_VERSION

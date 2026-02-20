@@ -21,4 +21,4 @@ COPY . .
 
 EXPOSE 10000
 
-CMD ["gunicorn", "webhook_server:app", "--bind", "0.0.0.0:10000", "--workers", "2", "--timeout", "120"]
+CMD ["gunicorn", "webhook_server:app", "--bind", "0.0.0.0:10000", "--workers", "1", "--timeout", "120"]
