@@ -15,13 +15,9 @@
 {{> salutation_personnalisee}}
 
 <!-- =====================================================================
-     RÉPONSE DIRECTE: Réponse à la question spécifique du candidat
-     (Générée par le triage, basée sur les données CRM)
+     RÉPONSE DIRECTE: Désactivé — le contenu est géré par les partials
+     d'intention et de statut (architecture déterministe)
      ===================================================================== -->
-{{#if direct_answer}}
-{{direct_answer}}<br>
-<br>
-{{/if}}
 
 <!-- =====================================================================
      CONTEXTE: Reconnaissance communication precedente (clarification/follow-up)

@@ -58,32 +58,6 @@ BLOCKS_PATH = STATES_PATH / "blocks"
 MATRIX_PATH = STATES_PATH / "state_intention_matrix.yaml"
 
 
-import re as _re
-
-# Termes CRM internes à ne jamais montrer au candidat
-# Remplacement par des termes compréhensibles côté candidat
-_CRM_INTERNAL_TERMS = [
-    (r'\bstatut\s+GAGN[ÉE]\b', 'statut confirmé'),
-    (r'\bGAGN[ÉE]\b', 'confirmé'),
-    (r'\bEN\s+ATTENTE\b', 'en cours'),
-    (r'\bPERDU\b', 'annulé'),
-    (r'\bDossier Synchronis[ée]\b', 'en cours de vérification par la CMA'),
-    (r'\bPret a payer\b', 'en attente de paiement'),
-    (r'\bRefus[ée] CMA\b', 'refusé par la CMA'),
-    (r'\bConvoc CMA reçue\b', 'convocation reçue'),
-    (r'\bVALIDE CMA\b', 'validé par la CMA'),
-]
-
-
-def _sanitize_direct_answer(text: str) -> str:
-    """Filtre les termes CRM internes du direct_answer du triage."""
-    if not text:
-        return text
-    for pattern, replacement in _CRM_INTERNAL_TERMS:
-        text = _re.sub(pattern, replacement, text, flags=_re.IGNORECASE)
-    return text
-
-
 class TemplateEngine:
     """
     Génère les réponses à partir des templates et de l'état détecté.
@@ -1067,9 +1041,9 @@ class TemplateEngine:
                 context.get('cab_proposals', {}).get('last_proposed_exam_date', '')
             ),
 
-            # Direct answer from triage (grounded in CRM data)
-            # Filtrer les termes CRM internes qui ne doivent jamais être montrés au candidat
-            'direct_answer': _sanitize_direct_answer(context.get('direct_answer', '')),
+            # direct_answer désactivé — le contenu est géré par les partials
+            # d'intention et de statut (pipeline déterministe)
+            'direct_answer': '',
 
             # Mode de communication du candidat (clarification vs request)
             'communication_mode': context.get('communication_mode', 'request'),
@@ -1191,23 +1165,6 @@ class TemplateEngine:
         # NOTE: deadline_passed_auto_reschedule garde intention_report_date=True car le partial l'utilise
         if report_possible or report_bloque or report_force_majeure:
             result['intention_report_date'] = False
-            # Supprimer direct_answer du triage car les partials report/*.html
-            # gèrent le contenu — le direct_answer peut contredire le blocage
-            result['direct_answer'] = ''
-
-        # Supprimer direct_answer quand un CAS Uber est actif
-        # Les partials uber/*.html gèrent déjà le contenu — le direct_answer
-        # du triage peut contredire (ex: "inscription finalisée" alors que CAS A = docs manquants)
-        is_uber_case = (
-            result.get('uber_cas_a', False)
-            or result.get('uber_cas_b', False)
-            or result.get('uber_doublon', False)
-            or result.get('uber_doublon_clarification', False)
-            or result.get('uber_doublon_recoverable', False)
-            or result.get('uber_prospect', False)
-        )
-        if is_uber_case:
-            result['direct_answer'] = ''
 
         # V3: Si date confirmée → le bloc report_possible V3 gère tout,
         # désactiver les intentions liées aux dates pour éviter duplication
