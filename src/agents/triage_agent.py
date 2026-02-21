@@ -338,6 +338,16 @@ INTENTIONS POSSIBLES (par ordre de spécificité - préfère les intentions spé
 - REMERCIEMENT: Simple remerciement sans autre demande
   Exemples: "merci beaucoup", "super merci", "c'est parfait merci"
 
+**Détection de MENTION D'INSCRIPTION PASSÉE:**
+Si le candidat mentionne avoir DÉJÀ été inscrit / avoir un ancien dossier → mettre mentions_previous_registration: true
+Keywords: "déjà inscrit", "ancien dossier", "inscription de 2023", "j'avais un dossier", "revenir", "reprendre mon inscription",
+          "j'étais inscrit", "anciennement inscrit", "mon ancien email", "ancien numéro", "ancienne inscription"
+Si le candidat donne EXPLICITEMENT un email ou téléphone comme ancien contact (dans SON message, pas l'en-tête):
+  → extraire dans provided_contact_info: {"email": "xxx@gmail.com", "phone": "0612345678"}
+  ⚠️ NE PAS extraire l'email de l'en-tête du ticket / signature — UNIQUEMENT si mentionné DANS le corps du message
+  ⚠️ Exemples: "mon ancien email était xxx@gmail.com" → provided_contact_info.email = "xxx@gmail.com"
+              "mon numéro à l'époque était 06 12 34 56 78" → provided_contact_info.phone = "0612345678"
+
 **Intentions liées aux DOUBLONS (clarification email):**
 - CONFIRMATION_DOUBLON: Le candidat CONFIRME qu'il s'agit bien de lui / même personne
   Exemples: "oui c'est bien moi", "c'est mon dossier", "oui c'est le même", "je confirme",
@@ -540,7 +550,12 @@ Réponds UNIQUEMENT en JSON valide:
             "wrong_dates_raw": "texte original" | null
         } | null,
         "probation_status": "completed" | "eligible" | "pending" | "question" | null,
-        "implicit_date_repositioning": true | false
+        "implicit_date_repositioning": true | false,
+        "mentions_previous_registration": true | false,
+        "provided_contact_info": {
+            "email": "xxx@gmail.com" | null,
+            "phone": "0612345678" | null
+        } | null
     },
     "direct_answer": "2-3 phrases qui répondent DIRECTEMENT à la question spécifique du candidat, basées uniquement sur les données CRM disponibles. Si tu ne peux pas répondre factuellement, dis-le honnêtement. null si le message n'est pas une question."
 }

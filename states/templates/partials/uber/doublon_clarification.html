@@ -1,6 +1,19 @@
 <!-- Partial: UBER DOUBLON - Demande de clarification (homonyme potentiel) -->
 <!-- Adapte le message selon l'intention du candidat -->
 
+{{#if identity_confirmation_no_deal}}
+<b>Recherche de votre dossier</b><br>
+<br>
+Vous mentionnez avoir déjà effectué une inscription chez nous, mais nous n'avons pas pu retrouver votre dossier avec vos coordonnées actuelles.<br>
+<br>
+Afin de retrouver votre dossier existant, merci de nous communiquer :<br>
+<ul>
+<li>L'adresse email utilisée lors de votre précédente inscription</li>
+<li>Le numéro de téléphone renseigné à l'époque</li>
+</ul>
+<br>
+<i>Ces informations nous permettront de rechercher votre dossier et de poursuivre votre inscription.</i><br>
+{{else}}
 {{#if intention_statut_dossier}}
 <b>Vérification avant consultation de votre dossier</b><br>
 <br>
@@ -55,4 +68,5 @@ Afin de nous assurer qu'il s'agit bien de vous et non d'un homonyme, merci de no
 {{#if duplicate_type_recoverable}}
 <i>Si c'est bien vous, nous pourrons reprendre votre dossier existant et poursuivre votre inscription.</i><br>
 <br>
+{{/if}}
 {{/if}}

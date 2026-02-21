@@ -246,16 +246,105 @@ class DOCTicketWorkflow:
         except Exception as e:
             logger.error(f"  ❌ Erreur mise à jour ticket: {e}")
 
+    def _search_deal_by_provided_contact(self, email: str = None, phone: str = None) -> Optional[Dict[str, Any]]:
+        """
+        Search for a 20€ GAGNÉ deal using contact info provided by the candidate.
+
+        Uses the DealLinkingAgent's existing contact search methods.
+
+        Args:
+            email: Email provided by the candidate
+            phone: Phone provided by the candidate
+
+        Returns:
+            The most recent 20€ GAGNÉ deal, or None
+        """
+        contacts = []
+
+        if email:
+            try:
+                found = self.deal_linker._search_contacts_by_email(email)
+                contacts.extend(found)
+            except Exception as e:
+                logger.warning(f"  ⚠️ Erreur recherche contact par email '{email}': {e}")
+
+        if phone:
+            try:
+                normalized = self.deal_linker._normalize_phone(phone)
+                if normalized:
+                    found = self.deal_linker._search_contacts_by_phone(normalized)
+                    # Dédupliquer par ID
+                    existing_ids = {c.get('id') for c in contacts}
+                    contacts.extend(c for c in found if c.get('id') not in existing_ids)
+            except Exception as e:
+                logger.warning(f"  ⚠️ Erreur recherche contact par téléphone '{phone}': {e}")
+
+        if not contacts:
+            logger.info(f"  🔍 Aucun contact trouvé pour email={email}, phone={phone}")
+            return None
+
+        # Search for 20€ GAGNÉ deals linked to these contacts
+        for contact in contacts:
+            contact_id = contact.get('id')
+            if not contact_id:
+                continue
+            try:
+                from config import settings
+                url = f"{settings.zoho_crm_api_url}/Contacts/{contact_id}/Deals"
+                deals_response = self.crm_client._make_request("GET", url)
+                deals = deals_response.get('data', [])
+
+                for deal in deals:
+                    amount = deal.get('Amount')
+                    stage = deal.get('Stage', '')
+                    if amount == 20 and stage.upper() in ('GAGNÉ', 'GAGNE', 'GAGNÉ '):
+                        logger.info(f"  ✅ Deal 20€ GAGNÉ trouvé via contact fourni: {deal.get('Deal_Name')} (ID: {deal.get('id')})")
+                        return deal
+            except Exception as e:
+                logger.warning(f"  ⚠️ Erreur recherche deals pour contact {contact_id}: {e}")
+
+        logger.info(f"  🔍 Pas de deal 20€ GAGNÉ trouvé via les coordonnées fournies")
+        return None
+
+    def _check_previous_verification(self, deal_id: str) -> bool:
+        """
+        Check if a duplicate deal has already been verified in a previous ticket.
+
+        Looks for [DUPLICATE_RESOLVED:VERIFIED] marker in the deal's CRM notes.
+
+        Args:
+            deal_id: The deal ID to check
+
+        Returns:
+            True if already verified, False otherwise
+        """
+        try:
+            notes_response = self.crm_client.get_deal_notes(deal_id)
+            notes = notes_response.get('data', [])
+
+            for note in notes:
+                content = note.get('Note_Content', '')
+                if '[DUPLICATE_RESOLVED:VERIFIED]' in content:
+                    logger.info(f"  ✅ Deal {deal_id} déjà vérifié précédemment (note trouvée)")
+                    return True
+
+            return False
+
+        except Exception as e:
+            logger.warning(f"  ⚠️ Erreur vérification notes deal {deal_id}: {e}")
+            return False
+
     def _check_pending_duplicate_clarification(self, ticket_id: str) -> Optional[Dict[str, Any]]:
         """
         Check if this ticket has a pending duplicate clarification.
 
-        Looks for internal notes containing [DUPLICATE_PENDING:deal_id] marker.
+        Looks for internal notes containing [DUPLICATE_PENDING:deal_id] or [IDENTITY_PENDING] marker.
         Also extracts the duplicate's email and phone for comparison.
 
         Returns:
             None if no pending clarification
             Dict with pending_deal_id, duplicate_type, duplicate_email, duplicate_phone
+            OR Dict with identity_pending=True (for previous registration search)
         """
         try:
             comments = self.desk_client.get_ticket_comments(
@@ -266,6 +355,20 @@ class DOCTicketWorkflow:
 
             for comment in comments:
                 content = comment.get('content', '')
+
+                # Check for [IDENTITY_PENDING] marker (previous registration search)
+                if '[IDENTITY_PENDING]' in content:
+                    logger.info(f"  📝 Recherche identité en attente trouvée (ancien dossier)")
+                    return {
+                        'identity_pending': True,
+                        'pending_deal_id': None,
+                        'duplicate_type': 'IDENTITY_SEARCH',
+                        'duplicate_email': '',
+                        'duplicate_phone': '',
+                        'original_intent': 'UNKNOWN',
+                        'comment_id': comment.get('id')
+                    }
+
                 # Look for the marker [DUPLICATE_PENDING:deal_id]
                 match = re.search(r'\[DUPLICATE_PENDING:(\d+)\]', content)
                 if match:
@@ -510,6 +613,113 @@ class DOCTicketWorkflow:
             result['triage_result'] = triage_result
 
             # ================================================================
+            # CHECK: Réponse à une recherche d'identité en attente ?
+            # [IDENTITY_PENDING] = candidat avait mentionné un ancien dossier sans détails
+            # On essaie d'extraire email/téléphone de sa réponse et de trouver le deal
+            # ================================================================
+            if pending_clarification and pending_clarification.get('identity_pending'):
+                logger.info(f"\n🔄 RÉPONSE À RECHERCHE IDENTITÉ (ancien dossier)")
+
+                try:
+                    threads_response = self.desk_client.get_ticket_threads(ticket_id)
+                    threads = threads_response.get('data', []) if isinstance(threads_response, dict) else threads_response
+                    latest_message = ''
+                    for thread in threads:
+                        if thread.get('direction') == 'in' or thread.get('isForward'):
+                            latest_message = thread.get('content', '') or thread.get('plainText', '')
+                            break
+
+                    if latest_message:
+                        # Extraire email et téléphone du message
+                        email_match = re.search(r'[\w.+-]+@[\w-]+\.[\w.-]+', latest_message)
+                        phone_pattern = re.compile(r'(?:(?:\+33|0033|33)|0)[67][\s.-]?\d{2}[\s.-]?\d{2}[\s.-]?\d{2}[\s.-]?\d{2}')
+                        phone_match = phone_pattern.search(re.sub(r'<[^>]+>', ' ', latest_message))
+
+                        extracted_email = email_match.group(0) if email_match else None
+                        extracted_phone = self.deal_linker._normalize_phone(phone_match.group(0)) if phone_match else None
+
+                        logger.info(f"  📧 Email extrait: {extracted_email or 'Aucun'}")
+                        logger.info(f"  📱 Téléphone extrait: {extracted_phone or 'Aucun'}")
+
+                        if extracted_email or extracted_phone:
+                            # Chercher un deal avec ces coordonnées
+                            found_deal = self._search_deal_by_provided_contact(
+                                email=extracted_email,
+                                phone=extracted_phone
+                            )
+
+                            if found_deal:
+                                # Deal trouvé → lier ticket au deal et continuer
+                                found_deal_id = found_deal.get('id', '')
+                                logger.info(f"  ✅ Ancien dossier trouvé: {found_deal.get('Deal_Name')} (ID: {found_deal_id})")
+
+                                # Mettre à jour cf_opportunite
+                                try:
+                                    deal_url = ZOHO_CRM_DEAL_URL.format(org_id='', deal_id=found_deal_id)
+                                    self.desk_client.update_ticket(ticket_id, {
+                                        'cf': {'cf_opportunite': deal_url}
+                                    })
+                                    logger.info(f"  ✅ cf_opportunite mis à jour vers deal retrouvé: {found_deal_id}")
+                                except Exception as e:
+                                    logger.warning(f"  ⚠️ Erreur mise à jour cf_opportunite: {e}")
+
+                                # Classifier le doublon
+                                duplicate_type = 'RECOVERABLE_NOT_PAID'
+                                if self.deal_linker._is_already_paid_to_cma(found_deal):
+                                    duplicate_type = 'RECOVERABLE_PAID'
+
+                                triage_result['action'] = 'DUPLICATE_RECOVERABLE'
+                                triage_result['duplicate_type'] = duplicate_type
+                                triage_result['duplicate_deals'] = [found_deal]
+                                triage_result['selected_deal'] = found_deal
+                                triage_result['deal_to_work_on'] = found_deal
+                                triage_result['already_paid_to_cma'] = self.deal_linker._is_already_paid_to_cma(found_deal)
+
+                                # Ajouter note de résolution
+                                resolution_note = (
+                                    f"✅ ANCIEN DOSSIER RETROUVÉ\n\n"
+                                    f"Email fourni: {extracted_email or 'N/A'}\n"
+                                    f"Téléphone fourni: {extracted_phone or 'N/A'}\n"
+                                    f"Deal retrouvé: {found_deal.get('Deal_Name')} (ID: {found_deal_id})\n\n"
+                                    f"[DUPLICATE_RESOLVED:VERIFIED]"
+                                )
+                                self._add_internal_note(ticket_id, resolution_note)
+
+                                # Note aussi sur le deal CRM
+                                try:
+                                    self.crm_client.add_deal_note(
+                                        deal_id=found_deal_id,
+                                        note_title="Doublon vérifié",
+                                        note_content=f"[DUPLICATE_RESOLVED:VERIFIED] via ticket {ticket_id}"
+                                    )
+                                except Exception as e:
+                                    logger.warning(f"  ⚠️ Erreur ajout note deal: {e}")
+
+                                logger.info("  → Continuation comme DUPLICATE_RECOVERABLE")
+                            else:
+                                # Pas de deal trouvé → traiter comme nouveau candidat
+                                logger.info("  🔍 Aucun ancien dossier trouvé avec ces coordonnées → nouveau candidat")
+                                triage_result['action'] = 'GO'
+
+                                self._add_internal_note(ticket_id,
+                                    f"🔍 RECHERCHE ANCIEN DOSSIER - AUCUN RÉSULTAT\n\n"
+                                    f"Email fourni: {extracted_email or 'Aucun'}\n"
+                                    f"Téléphone fourni: {extracted_phone or 'Aucun'}\n"
+                                    f"→ Traitement comme nouveau candidat\n\n"
+                                    f"[IDENTITY_SEARCH_COMPLETED]"
+                                )
+                        else:
+                            # Pas d'email/téléphone dans la réponse → le triage IA gère
+                            logger.info("  ⚠️ Pas d'email/téléphone dans la réponse du candidat")
+
+                except Exception as e:
+                    logger.error(f"  ❌ Erreur traitement réponse identité: {e}")
+                    result['errors'].append(f"Erreur traitement identité: {e}")
+
+                # Ne pas passer au bloc de vérification doublon standard
+                pending_clarification = None
+
+            # ================================================================
             # CHECK: Réponse à une clarification de doublon en attente ?
             # On vérifie si l'email ou téléphone fourni correspond au doublon
             # ================================================================
@@ -594,6 +804,18 @@ Le candidat a fourni des informations qui CORRESPONDENT au dossier doublon.
                                     )
                                 except Exception as e:
                                     logger.warning(f"  ⚠️ Erreur ajout note résolution: {e}")
+
+                                # Écrire aussi la note de vérification sur le deal CRM
+                                # pour que les prochains tickets puissent skip la clarification
+                                try:
+                                    self.crm_client.add_deal_note(
+                                        deal_id=pending_deal_id,
+                                        note_title="Doublon vérifié",
+                                        note_content=f"[DUPLICATE_RESOLVED:VERIFIED] via ticket {ticket_id}"
+                                    )
+                                    logger.info(f"  ✅ Note vérification ajoutée sur deal {pending_deal_id}")
+                                except Exception as e:
+                                    logger.warning(f"  ⚠️ Erreur ajout note deal: {e}")
 
                                 logger.info("  → Continuation comme DUPLICATE_RECOVERABLE")
 
@@ -2023,10 +2245,136 @@ Le candidat a un ancien dossier dont les frais CMA ({CMA_EXAM_FEE}€) ont déj�
         # → La logique doublon s'applique
         # ================================================================
 
+        # ================================================================
+        # CAS IDENTITÉ 1: Candidat mentionne une inscription passée
+        # Si le triage détecte mentions_previous_registration=true,
+        # on essaie de retrouver l'ancien dossier via les coordonnées fournies.
+        # ================================================================
+        intent_context = triage_result.get('intent_context', {})
+        mentions_prev_reg = intent_context.get('mentions_previous_registration', False)
+        provided_contact = intent_context.get('provided_contact_info') or {}
+
+        if mentions_prev_reg and not linking_result.get('needs_duplicate_confirmation'):
+            provided_email = provided_contact.get('email')
+            provided_phone = provided_contact.get('phone')
+
+            if provided_email or provided_phone:
+                # CAS A: Le candidat fournit un email/téléphone
+                logger.info(f"🔍 INSCRIPTION PASSÉE - Coordonnées fournies: email={provided_email}, phone={provided_phone}")
+
+                # Vérifier si elles matchent le deal déjà trouvé par le linking
+                deal_email = (selected_deal.get('Email') or '').lower().strip() if selected_deal else ''
+                match_current = False
+                if provided_email and deal_email and provided_email.lower().strip() == deal_email:
+                    match_current = True
+                    logger.info(f"  ✅ Email fourni correspond au deal actuel → continuer normalement")
+
+                if not match_current:
+                    # Chercher un deal via les coordonnées fournies
+                    found_deal = self._search_deal_by_provided_contact(
+                        email=provided_email,
+                        phone=provided_phone
+                    )
+
+                    if found_deal:
+                        # Deal trouvé → traiter comme NEEDS_CONFIRMATION avec ce deal
+                        found_deal_id = found_deal.get('id', '')
+                        logger.info(f"  🔄 Deal trouvé via coordonnées fournies: {found_deal.get('Deal_Name')} (ID: {found_deal_id})")
+
+                        # Récupérer les infos du contact pour comparaison
+                        dup_email = provided_email or ''
+                        dup_phone = provided_phone or ''
+                        duplicate_type = 'RECOVERABLE_NOT_PAID'
+                        if self.deal_linker._is_already_paid_to_cma(found_deal):
+                            duplicate_type = 'RECOVERABLE_PAID'
+
+                        triage_result['action'] = 'DUPLICATE_CLARIFICATION'
+                        triage_result['reason'] = "Ancien dossier trouvé via coordonnées fournies par le candidat - clarification requise"
+                        triage_result['method'] = 'previous_registration_contact_match'
+                        triage_result['duplicate_contact_info'] = {
+                            'duplicate_deal_name': found_deal.get('Deal_Name', ''),
+                            'duplicate_email': dup_email,
+                            'duplicate_phone': dup_phone,
+                        }
+                        triage_result['duplicate_type'] = duplicate_type
+                        triage_result['selected_deal'] = found_deal
+
+                        triage_result['uber_doublon_clarification'] = True
+                        triage_result['duplicate_deal_name'] = found_deal.get('Deal_Name', '')
+                        triage_result['duplicate_type_recoverable'] = duplicate_type in ['RECOVERABLE_REFUS_CMA', 'RECOVERABLE_NOT_PAID']
+                        triage_result['duplicate_type_refus_cma'] = duplicate_type == 'RECOVERABLE_REFUS_CMA'
+
+                        logger.info(f"   → Clarification doublon via coordonnées fournies")
+                        return triage_result
+                    else:
+                        # Pas de deal trouvé → continuer normalement
+                        logger.info(f"  🔍 Aucun deal trouvé via coordonnées fournies → workflow normal")
+
+            elif not selected_deal or not all_deals:
+                # CAS B: Candidat mentionne "ancien dossier" sans détails ET aucun deal trouvé
+                logger.info(f"🔍 INSCRIPTION PASSÉE - Pas de coordonnées fournies ET aucun deal trouvé")
+                logger.info(f"   → Demander email/téléphone de l'ancienne inscription")
+
+                triage_result['action'] = 'DUPLICATE_CLARIFICATION'
+                triage_result['reason'] = "Candidat mentionne une inscription passée mais aucun dossier trouvé - demande de coordonnées"
+                triage_result['method'] = 'previous_registration_no_deal'
+                triage_result['uber_doublon_clarification'] = True
+                triage_result['identity_confirmation_no_deal'] = True
+
+                # Stocker un marker [IDENTITY_PENDING] dans les notes internes
+                internal_note = (
+                    f"🔍 RECHERCHE ANCIEN DOSSIER\n\n"
+                    f"Le candidat mentionne avoir déjà été inscrit mais aucun dossier n'a été trouvé.\n"
+                    f"Demande de confirmation email/téléphone envoyée.\n\n"
+                    f"[IDENTITY_PENDING]"
+                )
+                self._add_internal_note(ticket_id, internal_note)
+
+                return triage_result
+
+        # ================================================================
+        # CAS IDENTITÉ 2: Match nom+prénom déjà vérifié dans un ticket précédent
+        # Si needs_duplicate_confirmation mais le deal a déjà [DUPLICATE_RESOLVED:VERIFIED]
+        # dans ses notes CRM → skip la clarification, traiter comme HIGH_CONFIDENCE.
+        # ================================================================
+        if linking_result.get('needs_duplicate_confirmation'):
+            duplicate_info = linking_result.get('duplicate_contact_info', {})
+            duplicate_deal_id = duplicate_info.get('duplicate_deal_id') or (selected_deal.get('id') if selected_deal else None)
+
+            if duplicate_deal_id and self._check_previous_verification(str(duplicate_deal_id)):
+                # Déjà vérifié → convertir en HIGH_CONFIDENCE, skip clarification
+                logger.info(f"  ✅ Doublon déjà vérifié précédemment → skip clarification, traiter comme DUPLICATE_RECOVERABLE")
+                duplicate_type = linking_result.get('duplicate_type', 'RECOVERABLE_NOT_PAID')
+
+                # Récupérer le deal complet
+                duplicate_deal = self.crm_client.get_deal(str(duplicate_deal_id))
+                if duplicate_deal:
+                    triage_result['action'] = 'DUPLICATE_RECOVERABLE'
+                    triage_result['duplicate_type'] = duplicate_type
+                    triage_result['duplicate_deals'] = [duplicate_deal]
+                    triage_result['selected_deal'] = duplicate_deal
+                    triage_result['deal_to_work_on'] = duplicate_deal
+                    triage_result['already_paid_to_cma'] = self.deal_linker._is_already_paid_to_cma(duplicate_deal)
+                    triage_result['reason'] = "Doublon vérifié précédemment - reprise directe"
+                    triage_result['method'] = 'duplicate_previously_verified'
+
+                    # Mettre à jour cf_opportunite
+                    try:
+                        deal_url = ZOHO_CRM_DEAL_URL.format(org_id='', deal_id=duplicate_deal_id)
+                        self.desk_client.update_ticket(ticket_id, {
+                            'cf': {'cf_opportunite': deal_url}
+                        })
+                        logger.info(f"  ✅ cf_opportunite mis à jour vers deal vérifié: {duplicate_deal_id}")
+                    except Exception as e:
+                        logger.warning(f"  ⚠️ Erreur mise à jour cf_opportunite: {e}")
+
+                    # Ne PAS retourner — continuer le workflow normal avec ce deal
+                    # (la logique en aval gèrera DUPLICATE_RECOVERABLE)
+
         # Rule #2.4b: VÉRIFICATION DOUBLON POTENTIEL (CLARIFICATION NÉCESSAIRE)
         # Si on détecte un doublon par nom+CP mais avec email/téléphone différents,
         # on demande confirmation au candidat pour éviter les homonymes
-        if linking_result.get('needs_duplicate_confirmation'):
+        if linking_result.get('needs_duplicate_confirmation') and triage_result.get('action') != 'DUPLICATE_RECOVERABLE':
             duplicate_info = linking_result.get('duplicate_contact_info', {})
             duplicate_type = linking_result.get('duplicate_type')
             logger.info(f"❓ DOUBLON POTENTIEL - Clarification nécessaire (type: {duplicate_type})")
@@ -5074,6 +5422,40 @@ Bien cordialement,
         duplicate_type = triage_result.get('duplicate_type', '')
         duplicate_deal_name = duplicate_contact_info.get('duplicate_deal_name', 'un dossier')
         detected_intent = triage_result.get('detected_intent', '')
+
+        # CAS SPÉCIAL: Candidat mentionne ancien dossier mais aucun deal trouvé
+        if triage_result.get('identity_confirmation_no_deal'):
+            response_text = f"""Bonjour,
+
+Je vous remercie pour votre message.
+
+Vous mentionnez avoir déjà effectué une inscription chez nous, mais nous n'avons pas pu retrouver votre dossier avec vos coordonnées actuelles.
+
+Afin de retrouver votre dossier existant, merci de nous communiquer :
+
+• L'adresse email utilisée lors de votre précédente inscription
+• Le numéro de téléphone renseigné à l'époque
+
+Ces informations nous permettront de rechercher votre dossier et de poursuivre votre inscription.
+
+Dans l'attente de votre retour, je reste à votre disposition.
+
+Bien cordialement,
+
+{COMPANY_SIGNATURE}"""
+
+            logger.info(f"✅ Réponse RECHERCHE IDENTITÉ générée ({len(response_text)} caractères)")
+
+            return {
+                'response_text': response_text,
+                'is_duplicate_clarification_response': True,
+                'duplicate_type': 'IDENTITY_SEARCH',
+                'is_recoverable': False,
+                'duplicate_contact_info': {},
+                'detected_intent': detected_intent,
+                'crm_updates': {},
+                'detected_scenarios': ['DUPLICATE_CLARIFICATION']
+            }
 
         # Déterminer si le doublon est récupérable
         is_recoverable = duplicate_type in ['RECOVERABLE_REFUS_CMA', 'RECOVERABLE_NOT_PAID', 'RECOVERABLE_PAID']
