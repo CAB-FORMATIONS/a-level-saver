@@ -287,7 +287,7 @@ NE JAMAIS utiliser de dates provenant du MESSAGE DU CANDIDAT. Les SEULES dates a
             humanized = _cleanup_line_breaks(humanized)
 
             # Validation : vérifier que les données critiques sont préservées
-            validation_result = _validate_humanized_response(template_response, humanized)
+            validation_result = _validate_humanized_response(template_response, humanized, candidate_message)
 
             if validation_result['valid']:
                 logger.info(f"✅ Response humanized successfully (attempt {attempt + 1}/{max_attempts})")
@@ -330,7 +330,7 @@ NE JAMAIS utiliser de dates provenant du MESSAGE DU CANDIDAT. Les SEULES dates a
         }
 
 
-def _validate_humanized_response(original: str, humanized: str) -> Dict[str, Any]:
+def _validate_humanized_response(original: str, humanized: str, candidate_message: str = "") -> Dict[str, Any]:
     """
     Valide que la réponse humanisée préserve les données critiques.
 
@@ -343,6 +343,10 @@ def _validate_humanized_response(original: str, humanized: str) -> Dict[str, Any
     date_pattern = r'\d{2}/\d{2}/\d{4}'
     original_dates = set(re.findall(date_pattern, original))
     humanized_dates_full = set(re.findall(date_pattern, humanized))
+
+    # Dates présentes dans le message du candidat — tolérées dans la réponse
+    # (le humanizer peut citer "suite à votre message du 17/02/2026")
+    candidate_dates = set(re.findall(date_pattern, candidate_message)) if candidate_message else set()
 
     # Aussi extraire les dates raccourcies DD/MM (le humaniser raccourcit souvent)
     short_date_pattern = r'(\d{2}/\d{2})(?!/\d)'  # DD/MM NOT followed by /YYYY
@@ -360,15 +364,18 @@ def _validate_humanized_response(original: str, humanized: str) -> Dict[str, Any
         issues.append(f"Dates manquantes: {missing_dates}")
 
     # Vérifier les dates INVENTÉES (dans humanized mais pas dans original)
+    # Tolérer les dates qui viennent du message du candidat (ex: "suite à votre message du 17/02")
     # Extraire les DD/MM des dates originales pour comparaison
     original_dates_short = {d[:5] for d in original_dates}  # {"31/03", "27/02", ...}
+    candidate_dates_short = {d[:5] for d in candidate_dates}
     invented_dates = set()
     for date_full in humanized_dates_full:
         if date_full not in original_dates:
             # Vérifier si c'est une date qui existe en format court dans l'original
-            # (le humaniser peut ajouter l'année à une date raccourcie du template)
             if date_full[:5] not in original_dates_short:
-                invented_dates.add(date_full)
+                # Tolérer si la date vient du message du candidat
+                if date_full not in candidate_dates and date_full[:5] not in candidate_dates_short:
+                    invented_dates.add(date_full)
 
     if invented_dates:
         issues.append(f"Dates inventées (hallucination): {invented_dates}")
