@@ -1513,6 +1513,7 @@ matrix:
     template: "response_master.html"
     description: "Report après convocation - bloqué (convoc CMA reçue = inscription finalisée)"
     context_flags:
+      intention_demande_identifiants: true
       report_bloque: true
       intention_report_date: true
       show_statut_section: true

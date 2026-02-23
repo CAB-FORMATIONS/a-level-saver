@@ -539,6 +539,59 @@ def analyze_exam_date_situation(
             result['date_examen_vtc'] = date_examen_vtc
 
     # ================================================================
+    # CORRECTION DÉSYNCHRONISATION CRM ↔ EXAMT3P
+    # ================================================================
+    # ExamT3P est la source de vérité pour la date d'examen.
+    # Si CRM et ExamT3P ont des dates différentes (ex: CRM=31/03, ExamT3P=25/02),
+    # on DOIT utiliser la date ExamT3P pour tout le reste de l'analyse,
+    # sinon la clôture sera celle de la mauvaise date et le CAS sera faux.
+    if examt3p_data and date_examen_vtc:
+        from src.utils.examt3p_crm_sync import get_examt3p_exam_date
+        examt3p_exam_date_str = get_examt3p_exam_date(examt3p_data)
+        if examt3p_exam_date_str:
+            # Comparer les dates (normaliser au format date object)
+            examt3p_date_obj = parse_date_flexible(examt3p_exam_date_str, "examt3p_exam_date")
+            crm_date_str = result.get('date_examen_info', {}).get('Date_Examen') if isinstance(result.get('date_examen_info'), dict) else None
+            crm_date_obj = parse_date_flexible(crm_date_str, "crm_exam_date") if crm_date_str else None
+
+            if examt3p_date_obj and crm_date_obj and examt3p_date_obj != crm_date_obj:
+                logger.warning(f"  ⚠️ DÉSYNCHRONISATION DATE: CRM={crm_date_str} ≠ ExamT3P={examt3p_exam_date_str}")
+                logger.warning(f"  📅 ExamT3P est la source de vérité → override de la date pour l'analyse CAS")
+
+                # Essayer de trouver la session CRM correspondant à la date ExamT3P
+                if crm_client and departement:
+                    from src.utils.examt3p_crm_sync import find_exam_session_by_date_and_dept
+                    examt3p_session = find_exam_session_by_date_and_dept(
+                        crm_client, examt3p_exam_date_str, departement
+                    )
+                    if examt3p_session:
+                        # Session CRM trouvée pour la date ExamT3P → utiliser ses infos
+                        result['date_examen_info'] = examt3p_session
+                        result['date_cloture'] = examt3p_session.get('Date_Cloture_Inscription')
+                        logger.info(f"  ✅ Session CRM trouvée pour ExamT3P date: clôture={result['date_cloture']}")
+                    else:
+                        # Pas de session CRM pour la date ExamT3P
+                        # Construire une info minimale avec la date ExamT3P
+                        logger.warning(f"  ⚠️ Pas de session CRM pour la date ExamT3P {examt3p_exam_date_str}")
+                        examt3p_date_iso = examt3p_date_obj.strftime("%Y-%m-%d")
+                        result['date_examen_info'] = {
+                            'Date_Examen': examt3p_date_iso,
+                            'source': 'examt3p',
+                            'Departement': departement,
+                        }
+                        # Pour une date passée ou imminente sans session CRM,
+                        # la clôture est forcément passée aussi
+                        if examt3p_date_obj <= datetime.now().date():
+                            result['date_cloture'] = examt3p_date_iso
+                            logger.info(f"  📅 Date ExamT3P passée/aujourd'hui → clôture forcée à {examt3p_date_iso}")
+                        else:
+                            # Date future sans session CRM → pas de clôture connue
+                            result['date_cloture'] = None
+                            logger.warning(f"  ⚠️ Date ExamT3P future mais pas de session CRM → clôture inconnue")
+
+                result['date_examen_crm_desync'] = True
+
+    # ================================================================
     # DÉTERMINATION DU CAS
     # ================================================================
 
