@@ -61,7 +61,7 @@ from src.constants.intents import (
     SESSION_CHANGE_INTENTS, FULL_RECAP_INTENTS,
 )
 from src.constants.keywords import (
-    ANNULATION_MARKERS, CMA_MARKERS, ANNULATION_KEYWORDS, SPAM_KEYWORDS,
+    ANNULATION_MARKERS, CMA_MARKERS, ANNULATION_KEYWORDS, SPAM_KEYWORDS, BOUNCE_KEYWORDS,
     CMA_EMAIL_DOMAINS, REPLY_MARKERS, BATCH_EXCLUSION, SALESIQ_MARKERS,
     NON_UBER_REGISTRATION, DUPLICATE_MARKERS, UBER_CONVERTED, INFO_REQUEST,
     OUT_OF_SCOPE, UBER_KEYWORDS, SKIP_PATTERNS, LOGO_SIGNATURE_PATTERNS,
@@ -940,6 +940,13 @@ Cordialement,<br>
                 result['workflow_stage'] = 'STOPPED_SPAM'
                 if auto_update_ticket:
                     self.desk_client.update_ticket(ticket_id, {"status": "Closed"})
+                result['success'] = True
+                return result
+
+            # Check if BOUNCE (adresse email invalide — ignorer silencieusement)
+            if triage_result.get('action') == 'BOUNCE':
+                logger.info("📬 BOUNCE → Ticket ignoré (reste ouvert pour vérification humaine)")
+                result['workflow_stage'] = 'SKIPPED_BOUNCE'
                 result['success'] = True
                 return result
 
@@ -2077,9 +2084,19 @@ Le candidat a un ancien dossier dont les frais CMA ({CMA_EXAM_FEE}€) ont déj�
             'incoming_thread_count': incoming_thread_count,
         }
 
+        # Rule #0.5: BOUNCE detection (Mail Delivery Subsystem, mailer-daemon, etc.)
+        # Un bounce = adresse email invalide, PAS du spam. On ignore silencieusement
+        # (pas de réponse, pas de fermeture) pour qu'un humain vérifie l'adresse.
+        combined_content = (subject + ' ' + last_thread_content).lower()
+        if any(kw in combined_content for kw in BOUNCE_KEYWORDS):
+            triage_result['action'] = 'BOUNCE'
+            triage_result['reason'] = 'Bounce email détecté (adresse invalide / notification de non-livraison)'
+            triage_result['method'] = 'bounce_filter'
+            logger.info("📬 BOUNCE détecté (Mail Delivery / mailer-daemon) → Ignoré silencieusement (ticket reste ouvert)")
+            return triage_result
+
         # Rule #1: SPAM detection (simple keywords - pas besoin d'IA)
         spam_keywords = SPAM_KEYWORDS
-        combined_content = (subject + ' ' + last_thread_content).lower()
         if any(kw in combined_content for kw in spam_keywords):
             triage_result['action'] = 'SPAM'
             triage_result['reason'] = 'Spam détecté'

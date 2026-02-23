@@ -33,6 +33,18 @@ spam_keywords:
   - prince nigerian
   - bitcoin gratuit
 
+bounce_keywords:
+  - "mail delivery subsystem"
+  - "mail delivery system"
+  - mailer-daemon
+  - "delivery status notification"
+  - "undeliverable"
+  - "delivery failure"
+  - "could not be delivered"
+  - "reporting-mta"
+  - "final-recipient"
+  - "diagnostic-code"
+
 cma_email_domains:
   - "@cma-"
   - "@cmar-"
