@@ -18,13 +18,14 @@ SYSTEM_EMAILS_TO_IGNORE = list(SYSTEM_EMAILS)
 INTERNAL_DOMAINS = list(CONST_INTERNAL_DOMAINS)
 
 # Patterns pour détecter un message transféré
+# Note: &nbsp; et \xa0 (espace insécable) sont fréquents dans les HTML forwards
 FORWARD_PATTERNS = [
     r'---------- Forwarded message ---------',
     r'---------- Message transféré ---------',
     r'----- Forwarded Message -----',
     r'----- Message transféré -----',
-    r'Begin forwarded message:',
-    r'Début du message transféré :',
+    r'Begin forwarded message\s*(?:&nbsp;)?\s*:',
+    r'Début du message transféré\s*(?:&nbsp;)?\s*:',
 ]
 
 # Patterns pour extraire l'email de l'expéditeur original dans un forward
