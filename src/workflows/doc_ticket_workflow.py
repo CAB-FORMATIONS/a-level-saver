@@ -2050,7 +2050,14 @@ Le candidat a un ancien dossier dont les frais CMA ({CMA_EXAM_FEE}€) ont déj�
                     # Strip quoted/forwarded content to avoid contamination
                     # (e.g., our own "Mot de passe", "@email", "241€" in Gmail/Outlook quotes)
                     try:
-                        content = BusinessRules.strip_forwarded_content(content)
+                        stripped = BusinessRules.strip_forwarded_content(content)
+                        # Si le stripping a vidé le contenu mais l'original avait du contenu,
+                        # c'est un forward sans message ajouté — garder l'original
+                        # (le candidat a forwardé un email pour qu'on le lise)
+                        if len(stripped.strip()) < 30 and len(content.strip()) >= 50:
+                            logger.info("  📨 Forward détecté sans message propre du candidat → contenu forwardé conservé")
+                        else:
+                            content = stripped
                     except Exception:
                         pass  # Graceful degradation
 

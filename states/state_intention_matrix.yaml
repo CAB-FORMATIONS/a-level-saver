@@ -1904,8 +1904,11 @@ matrix:
     template: "response_master.html"
     blocks:
       - identifiants_examt3p
-      - lien_telechargement_convoc
-      - instructions_jour_j
+    context_flags:
+      intention_demande_identifiants: true
+      has_required_action: false
+      suppress_elearning: true
+      show_statut_section: false
 
   "CONVOCATION_RECEIVED:DEMANDE_CONVOCATION":
     template: "response_master.html"

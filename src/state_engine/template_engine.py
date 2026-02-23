@@ -1148,6 +1148,11 @@ class TemplateEngine:
             **self._determine_required_actions(context, evalbox),
         }
 
+        # Rule 11: context_flags de la matrice priment sur les calculs dynamiques
+        for override_key in ('has_required_action', 'suppress_elearning'):
+            if override_key in context:
+                result[override_key] = context[override_key]
+
         # Récupérer l'intention principale
         primary_intent = context.get('primary_intent') or context.get('detected_intent', '')
 
