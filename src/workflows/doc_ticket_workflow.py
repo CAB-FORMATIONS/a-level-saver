@@ -1988,16 +1988,50 @@ Le candidat a un ancien dossier dont les frais CMA ({CMA_EXAM_FEE}€) ont déj�
                     for domain in ['@cab-formations.fr', '@formalogistics.com']
                 )
 
-                if is_internal_forward and 'forwarded message' in content.lower():
+                if is_internal_forward and any(
+                    marker in content.lower()
+                    for marker in ['forwarded message', 'message transféré', 'message transf']
+                ):
                     # Extraire le body APRÈS les headers du forward
-                    # Format: "---------- Forwarded message ---------\nDe:...\nDate:...\nSubject:...\nTo:...\n\n<BODY>"
+                    # Format Gmail: "---------- Forwarded message ---------\nDe:...\nTo:...\n\n<BODY>"
+                    # Format Apple Mail: "Début du message transféré :\nDe:...\nDate:...\nObjet:...\n\n<BODY>"
                     import re
+
+                    # Essai 1: Format Gmail plaintext
                     fwd_match = re.search(
                         r'------+\s*Forwarded message\s*------+.*?'
                         r'(?:To|À|Cc)\s*:.*?\n\s*\n(.*)',
                         content,
                         flags=re.DOTALL | re.IGNORECASE
                     )
+
+                    # Essai 2: Format Apple Mail plaintext
+                    if not fwd_match:
+                        fwd_match = re.search(
+                            r'(?:Début du message transféré|Begin forwarded message)\s*(?:&nbsp;)?\s*:.*?'
+                            r'(?:Objet|Subject)\s*:.*?\n\s*\n(.*)',
+                            content,
+                            flags=re.DOTALL | re.IGNORECASE
+                        )
+
+                    # Essai 3: Format HTML avec <blockquote> (Apple Mail via Zoho)
+                    # Le message du candidat est dans le dernier <blockquote>
+                    if not fwd_match:
+                        blockquote_matches = re.findall(
+                            r'<blockquote[^>]*>(.*?)</blockquote>',
+                            content,
+                            flags=re.DOTALL | re.IGNORECASE
+                        )
+                        if blockquote_matches:
+                            # Le dernier blockquote contient le message du candidat
+                            candidate_content = blockquote_matches[-1]
+                            # Nettoyer le HTML
+                            candidate_content = re.sub(r'<[^>]+>', ' ', candidate_content)
+                            candidate_content = re.sub(r'&nbsp;', ' ', candidate_content)
+                            candidate_content = re.sub(r'\s+', ' ', candidate_content).strip()
+                            if len(candidate_content) > 20:
+                                content = candidate_content
+
                     if fwd_match:
                         content = fwd_match.group(1).strip()
                         # Supprimer la signature de l'employé CAB en bas
