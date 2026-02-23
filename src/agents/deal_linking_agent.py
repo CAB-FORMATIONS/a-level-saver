@@ -246,6 +246,9 @@ Always respond in JSON format with the following structure:
         """
         Extract the original sender's email from a forwarded message.
 
+        Handles multi-level forwards (candidat → employé1 → employé2 → doc)
+        by finding ALL email matches and returning the first non-internal one.
+
         Looks for patterns like:
         - De : Nom <email@domain.com>
         - From : Nom <email@domain.com>
@@ -257,15 +260,23 @@ Always respond in JSON format with the following structure:
         if not self._is_forwarded_message(content):
             return None
 
-        # Try to extract email from forward header
+        # Collect ALL email matches across all patterns, then filter
+        # This handles multi-level forwards where the first De: is internal
+        all_emails = []
         for pattern in FORWARD_FROM_PATTERNS:
-            match = re.search(pattern, content, re.IGNORECASE)
-            if match:
+            for match in re.finditer(pattern, content, re.IGNORECASE):
                 email = match.group(1).lower().strip()
-                # Validate it's not an internal email
-                if not self._is_internal_email(email):
-                    logger.info(f"📧 Extracted forwarded email: {email}")
-                    return email
+                if email not in all_emails:
+                    all_emails.append(email)
+
+        # Return the first non-internal email found
+        for email in all_emails:
+            if not self._is_internal_email(email):
+                logger.info(f"📧 Extracted forwarded email: {email}")
+                return email
+
+        if all_emails:
+            logger.info(f"⚠️ All forwarded emails are internal: {all_emails}")
 
         return None
 
