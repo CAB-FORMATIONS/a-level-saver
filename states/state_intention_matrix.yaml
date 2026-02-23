@@ -1511,11 +1511,13 @@ matrix:
   # CONVOCATION_RECEIVED × Intentions
   "CONVOCATION_RECEIVED:REPORT_DATE":
     template: "response_master.html"
-    description: "Report après convocation - généralement bloqué"
+    description: "Report après convocation - bloqué (convoc CMA reçue = inscription finalisée)"
     context_flags:
       report_bloque: true
       intention_report_date: true
       show_statut_section: true
+      show_dates_section: false
+      show_sessions_section: false
 
   "CONVOCATION_RECEIVED:STATUT_DOSSIER":
     template: "response_master.html"
@@ -1909,6 +1911,22 @@ matrix:
       has_required_action: false
       suppress_elearning: true
       show_statut_section: false
+      show_dates_section: false
+      show_sessions_section: false
+
+  "CONVOCATION_RECEIVED:PROBLEME_CONNEXION_EXAMT3P":
+    template: "response_master.html"
+    description: "Problème connexion ExamT3P quand convocation reçue - focus identifiants"
+    blocks:
+      - identifiants_examt3p
+    context_flags:
+      credentials_invalid: true
+      intention_demande_identifiants: true
+      has_required_action: false
+      suppress_elearning: true
+      show_statut_section: false
+      show_dates_section: false
+      show_sessions_section: false
 
   "CONVOCATION_RECEIVED:DEMANDE_CONVOCATION":
     template: "response_master.html"

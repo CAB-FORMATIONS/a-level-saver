@@ -3497,6 +3497,15 @@ Deux comptes ExamenT3P fonctionnels ont été détectés pour ce candidat, et le
                 sync_result['date_sync'] = date_sync_result
             elif date_sync_result.get('error'):
                 logger.warning(f"  ⚠️ Erreur sync date: {date_sync_result['error']}")
+                # CRITIQUE: Même si la session CRM n'existe pas, la date ExamT3P
+                # est la source de vérité. Propager la date ExamT3P dans le contexte
+                # pour que le template utilise la bonne date (pas la date CRM fausse).
+                examt3p_exam_date = examt3p_data.get('examens', {}).get('date')
+                if examt3p_exam_date and date_sync_result.get('old_date') and examt3p_exam_date != date_sync_result['old_date']:
+                    enriched_lookups['date_examen'] = examt3p_exam_date
+                    enriched_lookups['date_examen_source'] = 'examt3p'
+                    enriched_lookups['date_examen_crm_desync'] = True
+                    logger.warning(f"  📅 DÉSYNCHRONISATION: CRM={date_sync_result['old_date']} ≠ ExamT3P={examt3p_exam_date} → utilisation date ExamT3P")
 
         # ================================================================
         # EXTRACTION CONFIRMATIONS DU TICKET
@@ -6258,6 +6267,17 @@ Bien cordialement,
                     logger.info(f"  ⚠️ can_modify_exam_date recalculé: False (clôture {date_cloture} passée)")
             else:
                 logger.warning(f"  ⚠️ Erreur parsing date_cloture: {date_cloture}")
+
+        # GUARD RAIL: Désynchronisation CRM ↔ ExamT3P → bloquer modification
+        # Si les dates CRM et ExamT3P diffèrent, la clôture du CRM est fausse.
+        # Pour les statuts validés (VALIDE CMA, Convoc CMA reçue), la CMA a déjà
+        # validé/envoyé la convoc pour la date ExamT3P → modification bloquée.
+        if date_examen_vtc_result.get('date_examen_crm_desync'):
+            evalbox = detected_state.context_data.get('evalbox', '')
+            if evalbox in BLOCKING_MODIFICATION:
+                detected_state.context_data['can_modify_exam_date'] = False
+                detected_state.context_data['cloture_passed'] = True
+                logger.warning(f"  🔒 DÉSYNC CRM↔ExamT3P + {evalbox} → can_modify_exam_date=False, cloture_passed=True")
 
         # LOAD next_dates si intention nécessite des dates alternatives mais dates vides
         # (CAS 7, 9 et autres cas ne chargent pas next_dates par défaut)
