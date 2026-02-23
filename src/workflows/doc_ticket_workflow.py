@@ -4848,6 +4848,65 @@ Cordialement,<br>
                 # Le candidat a exprimé une préférence mais on n'a pas pu matcher
                 logger.warning(f"  ⚠️ Préférence '{session_preference}' exprimée mais aucune session disponible")
 
+        # ================================================================
+        # DÉTECTION : Session demandée APRÈS la date d'examen (Rule 16)
+        # Si repositionnement possible → on confirme + on signale le décalage d'examen
+        # Si repositionnement impossible → on bloque
+        # ================================================================
+        session_after_exam = False
+        session_after_exam_can_reposition = False
+        # Vérifier si la session demandée/assignée se termine après l'examen
+        # On vérifie TOUTES les sources et on prend la date de fin la plus tardive
+        _exam_date_raw = enriched_lookups.get('date_examen') or date_examen_vtc_result.get('date_examen_info', {}).get('Date_Examen', '')
+        _exam_date_obj = parse_date_flexible(_exam_date_raw) if _exam_date_raw else None
+        if _exam_date_obj:
+            _session_end_candidates = []
+            # Source 1: session matchée par le candidat (CONFIRMATION_SESSION)
+            if matched_session_end:
+                _se = parse_date_flexible(matched_session_end)
+                if _se:
+                    _session_end_candidates.append(('matched', _se, matched_session_start, matched_session_end, matched_session_name))
+            # Source 2: dates demandées par le candidat (triage requested_training_dates)
+            _req_dates = intent.requested_training_dates
+            if _req_dates and _req_dates.get('end_date'):
+                _se = parse_date_flexible(_req_dates['end_date'])
+                if _se:
+                    _inferred_name = None
+                    if _req_dates.get('inferred_preference'):
+                        _inferred_name = f"Cours du {'jour' if _req_dates['inferred_preference'] == 'jour' else 'soir'}"
+                    _session_end_candidates.append(('requested', _se, _req_dates.get('start_date'), _req_dates['end_date'], _inferred_name))
+            # Source 3: session assignée dans le CRM
+            _crm_end = enriched_lookups.get('session_date_fin')
+            if _crm_end:
+                _se = parse_date_flexible(_crm_end)
+                if _se:
+                    _session_end_candidates.append(('crm', _se, enriched_lookups.get('session_date_debut'), _crm_end, None))
+
+            # Prendre la date de fin la plus tardive et vérifier si elle dépasse l'examen
+            _latest = None
+            for _src, _se_obj, _start, _end, _name in _session_end_candidates:
+                if _se_obj >= _exam_date_obj:
+                    if _latest is None or _se_obj > _latest[1]:
+                        _latest = (_src, _se_obj, _start, _end, _name)
+
+            if _latest:
+                session_after_exam = True
+                _evalbox = enriched_lookups.get('evalbox_status') or deal_data.get('Evalbox', '')
+                _cloture = date_examen_vtc_result.get('date_cloture')
+                _engagement = classify_engagement_level(_evalbox, _cloture, examt3p_data)
+                session_after_exam_can_reposition = _engagement.get('can_reposition', False)
+                _src, _se_obj, _start, _end, _name = _latest
+                logger.info(f"  ⚠️ RULE 16: Session (fin {_se_obj}, source={_src}) après examen ({_exam_date_obj}) — can_reposition={session_after_exam_can_reposition} (level={_engagement.get('level')})")
+                # Alimenter matched_session_start/end pour que le template affiche les bonnes dates
+                if _start:
+                    matched_session_start = _start
+                if _end:
+                    matched_session_end = _end
+                if _name and not matched_session_name:
+                    matched_session_name = _name
+            else:
+                logger.info(f"  🔍 RULE 16 check: exam={_exam_date_obj}, toutes sessions avant examen (candidates={len(_session_end_candidates)})")
+
         return {
             'contact_data': contact_data,  # Données du contact lié (First_Name, Last_Name)
             'deal_id': deal_id,
@@ -4904,6 +4963,9 @@ Cordialement,<br>
             'matched_session_start': matched_session_start,
             'matched_session_end': matched_session_end,
             'session_already_started': matched_session_already_started,
+            # Session après l'examen (Rule 16) — implique décalage date examen
+            'session_after_exam': session_after_exam,
+            'session_after_exam_can_reposition': session_after_exam_can_reposition,
             # Correction erreur CAB (DEMANDE_CHANGEMENT_SESSION avec plainte)
             'cab_error_corrected': session_data.get('cab_error_corrected', False) if session_data else False,
             'cab_error_corrected_session_id': session_data.get('cab_error_corrected_session_id') if session_data else None,
@@ -6132,6 +6194,9 @@ Bien cordialement,
             'matched_session_start': analysis_result.get('matched_session_start'),
             'matched_session_end': analysis_result.get('matched_session_end'),
             'session_already_started': analysis_result.get('session_already_started', False),
+            # Session après l'examen (Rule 16) — implique décalage date examen
+            'session_after_exam': analysis_result.get('session_after_exam', False),
+            'session_after_exam_can_reposition': analysis_result.get('session_after_exam_can_reposition', False),
 
             # Erreur de saisie session corrigée automatiquement (erreur d'année)
             'session_assignment_error': analysis_result.get('session_assignment_error', False),
@@ -6512,6 +6577,11 @@ Bien cordialement,
         detected_intent_for_mode = triage_result.get('primary_intent') or triage_result.get('detected_intent', '')
         if detected_intent_for_mode in FULL_RECAP_INTENTS and v3_response_mode != 'full':
             logger.info(f"  🔓 {detected_intent_for_mode}: override response_mode {v3_response_mode} → full (point complet)")
+            v3_response_mode = 'full'
+
+        # Session après examen: force full mode pour ne pas supprimer l'avertissement
+        if analysis_result.get('session_after_exam') and v3_response_mode != 'full':
+            logger.info(f"  🔓 session_after_exam: override response_mode {v3_response_mode} → full (avertissement critique)")
             v3_response_mode = 'full'
 
         # Si CAS D email reçu, nettoyer previous_response pour éviter que

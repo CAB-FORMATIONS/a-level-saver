@@ -28,6 +28,7 @@ Notre équipe va procéder à cette vérification et vous recontactera rapidemen
 {{/if}}
 {{else}}
 <b>Concernant votre session de formation</b><br>
+{{!-- Note: l'avertissement session_after_exam est géré dans response_master.html --}}
 {{#if session_confirmed}}
 {{#if session_finished}}
 Nous avons bien noté votre choix{{#if matched_session_name}} : <b>{{matched_session_name}}</b>{{/if}}{{#if matched_session_start}} du <b>{{matched_session_start}}</b> au <b>{{matched_session_end}}</b>{{/if}}. Cependant, cette session est <b>terminée</b>. Nous allons vous proposer une prochaine session disponible.<br>

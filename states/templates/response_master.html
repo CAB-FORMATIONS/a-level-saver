@@ -124,6 +124,22 @@
 {{/if}}
 
 <!-- =====================================================================
+     ALERTE: Session de formation APRÈS la date d'examen (Rule 16)
+     S'affiche quelle que soit l'intention détectée
+     ===================================================================== -->
+{{#if session_after_exam}}
+{{#if session_after_exam_can_reposition}}
+<b>⚠️ Important :</b> La session que vous avez choisie{{#if matched_session_start}} (du <b>{{matched_session_start}}</b> au <b>{{matched_session_end}}</b>){{/if}} se termine <b>après</b> votre date d'examen actuelle ({{date_examen_formatted}}). Votre date d'examen sera donc <b>décalée</b> à une date ultérieure pour vous permettre de suivre cette formation avant de passer l'examen.<br>
+Nous vous confirmerons votre nouvelle date d'examen prochainement.<br>
+<br>
+{{else}}
+<b>⚠️ Important :</b> La session demandée{{#if matched_session_start}} (du <b>{{matched_session_start}}</b> au <b>{{matched_session_end}}</b>){{/if}} se termine <b>après</b> votre date d'examen du <b>{{date_examen_formatted}}</b>.<br>
+Votre dossier étant déjà validé par la CMA, il n'est plus possible de décaler la date d'examen. La formation doit impérativement être suivie <b>avant</b> l'examen.<br>
+<br>
+{{/if}}
+{{/if}}
+
+<!-- =====================================================================
      SECTION 1: RÉPONDRE À L'INTENTION DU CANDIDAT
      (Masqué pour Uber CAS A - SAUF DEMANDE_ANNULATION qui prime sur CAS A)
      ===================================================================== -->
