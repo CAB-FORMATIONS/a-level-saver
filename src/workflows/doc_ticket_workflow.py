@@ -972,6 +972,15 @@ Cordialement,<br>
                 result['success'] = True
                 return result
 
+            # Noreply notifications (ExamT3P, Aircall, etc.) → clôturer d'office
+            if triage_result.get('action') == 'NOREPLY_NOTIFICATION':
+                logger.warning(f"📋 {triage_result.get('reason', 'NOREPLY')} → Clôture automatique")
+                result['workflow_stage'] = 'CLOSED_NOREPLY_NOTIFICATION'
+                if auto_update_ticket:
+                    self.desk_client.update_ticket(ticket_id, {"status": "Closed"})
+                result['success'] = True
+                return result
+
             # Check if DUPLICATE UBER 20€
             if triage_result.get('action') == 'DUPLICATE_UBER':
                 logger.warning("⚠️  DOUBLON UBER 20€ → Candidat a déjà bénéficié de l'offre")
@@ -2111,19 +2120,19 @@ Le candidat a un ancien dossier dont les frais CMA ({CMA_EXAM_FEE}€) ont déj�
             logger.info("🚫 SPAM détecté → Clôturer sans réponse")
             return triage_result
 
-        # Rule #1.5: CMA notification detection (dossier incomplet / validé)
-        # Les CMA envoient des notifications sur l'état des dossiers ExamT3P.
-        # On vérifie le FROM du thread le plus récent (pas ticket.email qui peut être
-        # un forward client). Si le thread le plus récent est d'un client → pas CMA.
-        cma_email_domains = CMA_EMAIL_DOMAINS
-
         # Identifier le FROM du thread le plus récent (= premier dans la liste, API newest first)
+        # Utilisé pour CMA, ExamT3P et d'autres détections par expéditeur
         most_recent_from = ''
         for _th in threads:
             if _th.get('direction') == 'in' and _th.get('status') != 'DRAFT':
                 most_recent_from = (_th.get('fromEmailAddress') or '').lower()
                 break
 
+        # Rule #1.5: CMA notification detection (dossier incomplet / validé)
+        # Les CMA envoient des notifications sur l'état des dossiers ExamT3P.
+        # On vérifie le FROM du thread le plus récent (pas ticket.email qui peut être
+        # un forward client). Si le thread le plus récent est d'un client → pas CMA.
+        cma_email_domains = CMA_EMAIL_DOMAINS
         is_cma_sender = bool(most_recent_from) and any(domain in most_recent_from for domain in cma_email_domains)
 
         if is_cma_sender:
@@ -2178,6 +2187,23 @@ Le candidat a un ancien dossier dont les frais CMA ({CMA_EXAM_FEE}€) ont déj�
                 triage_result['method'] = 'cma_notification_filter'
                 logger.info(f"🏛️ Email CMA détecté ({most_recent_from}) mais pas dossier incomplet/validé → reste dans DOC (pas de route Contact)")
                 return triage_result
+
+        # Rule #1.6: Notifications système à clôturer d'office
+        # - noreply@exament3p.fr : modifications données personnelles candidats
+        # - noreply@aircall.io : notifications téléphonie
+        # Ces emails arrivent dans DOC mais ne nécessitent aucune action.
+        noreply_auto_close = {
+            'noreply@exament3p.fr': 'ExamT3P',
+            'noreply@aircall.io': 'Aircall',
+            'noreply@zohocalendar.com': 'Zoho Calendar',
+        }
+        if most_recent_from in noreply_auto_close:
+            source_name = noreply_auto_close[most_recent_from]
+            triage_result['action'] = 'NOREPLY_NOTIFICATION'
+            triage_result['reason'] = f'Notification {source_name} ({most_recent_from})'
+            triage_result['method'] = 'noreply_notification_filter'
+            logger.info(f"📋 {source_name} NOTIFICATION → Clôture automatique")
+            return triage_result
 
         # Rule #2: Get deals from CRM for context
         linking_result = self.deal_linker.process({"ticket_id": ticket_id})
