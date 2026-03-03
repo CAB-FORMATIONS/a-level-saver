@@ -1326,25 +1326,31 @@ Le candidat a un ancien dossier dont les frais CMA ({CMA_EXAM_FEE}€) ont déj�
                                     cma_payment_mentioned = True
                                 break
 
-                    # 2. GARDE-FOU: Vérifier que le dernier message entrant parle
-                    # encore d'annulation/remboursement (pas une acceptation)
+                    # 2. GARDE-FOU: Le triage LLM a déjà détecté DEMANDE_ANNULATION
+                    # sur le message actuel. On fait confiance au LLM plutôt qu'à
+                    # des keywords fragiles ("donner suite", "ne plus souhaiter", etc.)
+                    # Le seul cas où on NE PAS escalader : si le candidat accepte
+                    # explicitement notre proposition (keywords d'acceptation).
                     if annulation_already_answered:
-                        annulation_keywords = ANNULATION_KEYWORDS
+                        acceptance_keywords = ['convient', 'accepte', 'ok pour', "d'accord", 'merci pour', 'parfait', 'je confirme']
                         last_inbound = next(
                             (t for t in threads if t.get('direction') == 'in'),
                             None
                         )
                         if last_inbound:
                             last_msg = get_clean_thread_content(last_inbound).lower()
-                            # Nettoyer le contenu cité pour ne garder que le message du candidat
                             last_msg = BusinessRules.strip_forwarded_content(last_msg).lower()
-                            candidate_still_wants_annulation = any(
-                                kw in last_msg for kw in annulation_keywords
+                            candidate_accepted = any(
+                                kw in last_msg for kw in acceptance_keywords
                             )
-                            if not candidate_still_wants_annulation:
-                                logger.info("  ✅ DEMANDE_ANNULATION: Le dernier message du candidat ne mentionne plus l'annulation → pas d'insistance")
+                            if candidate_accepted:
+                                logger.info("  ✅ DEMANDE_ANNULATION: Le candidat semble accepter la proposition → pas d'insistance")
+                                candidate_still_wants_annulation = False
+                            else:
+                                # Triage LLM dit DEMANDE_ANNULATION + déjà répondu = insistance
+                                candidate_still_wants_annulation = True
+                                logger.info("  🔴 DEMANDE_ANNULATION: Triage LLM + réponse précédente → insistance détectée")
                         else:
-                            # Pas de message entrant trouvé — ne pas escalader par sécurité
                             candidate_still_wants_annulation = False
 
                 except Exception as e:
@@ -1442,8 +1448,9 @@ Le candidat a un ancien dossier dont les frais CMA ({CMA_EXAM_FEE}€) ont déj�
                         for rec in thread_memory_result.previous_records
                     )
                     if previous_annulation:
-                        # Cross-ticket insistence detected — check if candidate still wants annulation
-                        candidate_still_wants = True  # Default: assume yes for cross-ticket
+                        # Cross-ticket insistence: triage LLM dit DEMANDE_ANNULATION
+                        # + META précédent aussi → insistance sauf si acceptation explicite
+                        candidate_still_wants = True
                         try:
                             threads = self.desk_client.get_all_threads_with_full_content(ticket_id)
                             last_inbound = next(
@@ -1453,10 +1460,12 @@ Le candidat a un ancien dossier dont les frais CMA ({CMA_EXAM_FEE}€) ont déj�
                                 last_msg = BusinessRules.strip_forwarded_content(
                                     get_clean_thread_content(last_inbound).lower()
                                 ).lower()
-                                annulation_keywords = ANNULATION_KEYWORDS
-                                candidate_still_wants = any(kw in last_msg for kw in annulation_keywords)
-                                if not candidate_still_wants:
-                                    logger.info("  ✅ CROSS-TICKET: Le dernier message ne mentionne plus l'annulation → pas d'insistance")
+                                acceptance_keywords = ['convient', 'accepte', 'ok pour', "d'accord", 'merci pour', 'parfait', 'je confirme']
+                                if any(kw in last_msg for kw in acceptance_keywords):
+                                    candidate_still_wants = False
+                                    logger.info("  ✅ CROSS-TICKET: Le candidat semble accepter → pas d'insistance")
+                                else:
+                                    logger.info("  🔴 CROSS-TICKET: Triage LLM + META précédent DEMANDE_ANNULATION → insistance")
                         except Exception as e:
                             logger.warning(f"  ⚠️ Erreur vérification cross-ticket insistance: {e}")
 
