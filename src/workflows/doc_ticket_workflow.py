@@ -6570,12 +6570,33 @@ Bien cordialement,
                     detected_state.context_data['no_dates_in_own_dept'] = True
                     logger.info(f"  ⚠️ Aucune date cross-département disponible non plus")
 
-        template_result = self.template_engine.generate_response_multi(
-            detected_states=detected_states,
-            triage_result=triage_result,
-            ai_generator=ai_personalization_generator
-        )
-        response_text = template_result.get('response_text', '')
+        try:
+            template_result = self.template_engine.generate_response_multi(
+                detected_states=detected_states,
+                triage_result=triage_result,
+                ai_generator=ai_personalization_generator
+            )
+            response_text = template_result.get('response_text', '')
+        except RuntimeError as e:
+            # pybars3 rendering failed — use triage direct_answer as safe fallback
+            logger.error(f"  ❌ Template rendering failed: {e}")
+            direct_answer = triage_result.get('direct_answer', '')
+            if direct_answer:
+                logger.warning(f"  🔄 Fallback: utilisation de la direct_answer du triage ({len(direct_answer)} chars)")
+                response_text = direct_answer
+                template_result = {
+                    'response_text': direct_answer,
+                    'template_used': 'FALLBACK_DIRECT_ANSWER',
+                    'states_used': [s.name for s in detected_states.all_states],
+                    'intents_handled': [triage_result.get('primary_intent', '')],
+                    'is_blocking': False,
+                }
+            else:
+                logger.error(f"  ❌ Pas de direct_answer disponible — abandon du workflow")
+                result['success'] = False
+                result['workflow_stage'] = 'TEMPLATE_RENDERING_FAILED'
+                result['error'] = str(e)
+                return result
         template_result['original_response_text'] = response_text  # Snapshot avant humanisation
 
         logger.info(f"  ✅ Réponse générée ({len(response_text)} caractères)")

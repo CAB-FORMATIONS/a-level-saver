@@ -6,19 +6,54 @@ parsing in TemplateEngine. It uses pybars3 library for robust template
 rendering with proper support for nested blocks, partials, and helpers.
 
 Architecture:
-- PybarsRenderer loads and compiles all partials at initialization
+- PybarsRenderer is a SINGLETON: initialized once, shared across all threads
+- This prevents PyMeta3 thread-safety issues during concurrent compilation
 - Templates are compiled once and cached by content hash
 - Context is prepared to handle None values (converted to empty strings)
 - Supports: {{variable}}, {{> partial}}, {{#if}}, {{#unless}}, {{#each}}
 """
 import logging
 import re
+import threading
 from pathlib import Path
 from typing import Dict, Any, Callable, Optional
 
 from pybars import Compiler
 
 logger = logging.getLogger(__name__)
+
+# Module-level lock for thread-safe singleton initialization
+_singleton_lock = threading.Lock()
+_singleton_instance: Optional['PybarsRenderer'] = None
+
+
+def get_renderer(states_path: Path) -> 'PybarsRenderer':
+    """
+    Get or create the singleton PybarsRenderer instance.
+
+    Thread-safe: uses double-checked locking pattern.
+    The first call initializes and compiles all partials.
+    Subsequent calls return the cached instance immediately.
+
+    Args:
+        states_path: Path to the states directory containing templates
+
+    Returns:
+        The shared PybarsRenderer singleton
+    """
+    global _singleton_instance
+    if _singleton_instance is not None:
+        return _singleton_instance
+
+    with _singleton_lock:
+        # Double-check after acquiring lock
+        if _singleton_instance is not None:
+            return _singleton_instance
+
+        instance = PybarsRenderer(states_path)
+        instance.load_all_partials()
+        _singleton_instance = instance
+        return _singleton_instance
 
 
 class PybarsRenderer:
@@ -27,6 +62,9 @@ class PybarsRenderer:
 
     This class provides a clean, library-based implementation of Handlebars
     template rendering to replace the fragile regex-based implementation.
+
+    IMPORTANT: Use get_renderer() to obtain the singleton instance.
+    Direct instantiation is allowed but not recommended in production.
     """
 
     def __init__(self, states_path: Path):
@@ -41,6 +79,7 @@ class PybarsRenderer:
         self._compiled_cache: Dict[int, Callable] = {}
         self._partials: Dict[str, Callable] = {}
         self._partial_sources: Dict[str, str] = {}  # For debugging
+        self._render_lock = threading.Lock()  # Protect concurrent renders
 
     def load_all_partials(self) -> int:
         """
@@ -163,41 +202,50 @@ class PybarsRenderer:
         """
         Render a template with the given context.
 
+        Thread-safe: uses a lock to prevent concurrent PyMeta3 parsing issues.
+
         Args:
             template_content: The Handlebars template string
             context: Data to render into the template
 
         Returns:
             Rendered template string
+
+        Raises:
+            RuntimeError: If template compilation or rendering fails completely
         """
         # Clean the template content
         cleaned = self._clean_content(template_content)
 
-        # Compile with caching (by content hash)
-        template_hash = hash(cleaned)
-        if template_hash not in self._compiled_cache:
+        # Thread-safe compilation and rendering
+        with self._render_lock:
+            # Compile with caching (by content hash)
+            template_hash = hash(cleaned)
+            if template_hash not in self._compiled_cache:
+                try:
+                    self._compiled_cache[template_hash] = self.compiler.compile(cleaned)
+                except Exception as e:
+                    logger.error(f"Failed to compile template: {e}")
+                    logger.debug(f"Template content:\n{cleaned[:500]}...")
+                    # CRITICAL: Do NOT return raw Handlebars — the humanizer would
+                    # hallucinate content from all {{#if}} blocks. Raise instead.
+                    raise RuntimeError(f"Template compilation failed: {e}") from e
+
+            template = self._compiled_cache[template_hash]
+
+            # Prepare context (handle None values)
+            prepared_context = self._prepare_context(context)
+
+            # Render with partials
             try:
-                self._compiled_cache[template_hash] = self.compiler.compile(cleaned)
+                result = template(prepared_context, partials=self._partials)
+                return result
             except Exception as e:
-                logger.error(f"Failed to compile template: {e}")
-                logger.debug(f"Template content:\n{cleaned[:500]}...")
-                # Return template as-is if compilation fails
-                return template_content
-
-        template = self._compiled_cache[template_hash]
-
-        # Prepare context (handle None values)
-        prepared_context = self._prepare_context(context)
-
-        # Render with partials
-        try:
-            result = template(prepared_context, partials=self._partials)
-            return result
-        except Exception as e:
-            logger.error(f"Failed to render template: {e}")
-            logger.debug(f"Context keys: {list(prepared_context.keys())}")
-            # Return cleaned template as fallback
-            return cleaned
+                logger.error(f"Failed to render template: {e}")
+                logger.debug(f"Context keys: {list(prepared_context.keys())}")
+                # CRITICAL: Do NOT return raw Handlebars as fallback.
+                # Raise so the caller can handle properly (use triage direct_answer).
+                raise RuntimeError(f"Template rendering failed: {e}") from e
 
     def get_partial(self, name: str) -> Optional[str]:
         """

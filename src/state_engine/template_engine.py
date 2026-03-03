@@ -92,11 +92,10 @@ class TemplateEngine:
         self.base_templates = self.matrix.get('base_templates', {})
         self.state_intention_matrix = self.matrix.get('matrix', {})
 
-        # Initialize pybars3 renderer if enabled
+        # Initialize pybars3 renderer if enabled (singleton — thread-safe)
         if PYBARS_ENABLED:
-            from .pybars_renderer import PybarsRenderer
-            self.pybars_renderer = PybarsRenderer(self.states_path)
-            self.pybars_renderer.load_all_partials()
+            from .pybars_renderer import get_renderer
+            self.pybars_renderer = get_renderer(self.states_path)
             logger.info("TemplateEngine: Using pybars3 renderer")
         else:
             self.pybars_renderer = None
@@ -3128,8 +3127,11 @@ class TemplateEngine:
                 # Mais pour une alerte standalone, on charge et rend directement
                 template_content = self._load_template('templates/partials/warnings/personal_account_warning.html')
                 if template_content:
-                    rendered = self.pybars_renderer.render(template_content, alert_context)
-                    return f"<hr>\n{rendered}\n<hr>"
+                    try:
+                        rendered = self.pybars_renderer.render(template_content, alert_context)
+                        return f"<hr>\n{rendered}\n<hr>"
+                    except RuntimeError:
+                        logger.warning("Failed to render personal_account_warning alert")
             return None
 
         if alert_type == 'session_assignment_error':
@@ -3145,8 +3147,11 @@ class TemplateEngine:
                 }
                 template_content = self._load_template('templates/partials/warnings/session_assignment_error.html')
                 if template_content:
-                    rendered = self.pybars_renderer.render(template_content, alert_context)
-                    return rendered  # Pas de <hr> car c'est le contenu principal
+                    try:
+                        rendered = self.pybars_renderer.render(template_content, alert_context)
+                        return rendered  # Pas de <hr> car c'est le contenu principal
+                    except RuntimeError:
+                        logger.warning("Failed to render session_assignment_error alert")
             return None
 
         return None

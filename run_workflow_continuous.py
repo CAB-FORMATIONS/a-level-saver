@@ -48,11 +48,10 @@ def sync_pending_from_zoho():
 
     Critères de sélection :
     - Ticket OUVERT dans département DOC
-    - BROUILLON AUTO = non (pas encore traité ou client a répondu)
+    - Pas de brouillon existant (vérifié via API threads)
 
-    Note: On ne vérifie plus processed_ids car le champ BROUILLON AUTO
-    est la source de vérité. Si un client répond, le ticket est réouvert
-    et BROUILLON AUTO reste décoché → sera re-traité.
+    Note: L'API list ne retourne pas les custom fields (cf_brouillon_auto),
+    donc on utilise has_existing_draft() comme source de vérité.
     """
     log("Synchronisation avec Zoho Desk...")
 
@@ -71,16 +70,19 @@ def sync_pending_from_zoho():
         if len(tickets) < 100 or from_index > 2500:
             break
 
-    # Filtrer: uniquement les tickets où BROUILLON AUTO n'est PAS coché
-    pending_tickets = []
-    for t in all_doc_tickets:
-        # cf = custom fields, cf_brouillon_auto = true/false ou absent
-        cf = t.get('cf', {})
-        brouillon_auto = cf.get('cf_brouillon_auto', False)
+    log(f"  {len(all_doc_tickets)} tickets DOC ouverts trouvés, vérification des brouillons...")
 
-        # Si BROUILLON AUTO est coché (true), on skip
-        if brouillon_auto:
-            continue
+    # Filtrer: uniquement les tickets SANS brouillon existant
+    pending_tickets = []
+    skipped_draft = 0
+    for i, t in enumerate(all_doc_tickets):
+        tid = str(t.get('id', ''))
+        try:
+            if client.has_existing_draft(tid):
+                skipped_draft += 1
+                continue
+        except Exception:
+            pass  # En cas d'erreur, inclure le ticket (le workflow re-vérifiera)
 
         pending_tickets.append({
             'id': t.get('id'),
@@ -91,11 +93,14 @@ def sync_pending_from_zoho():
             'status': t.get('status'),
         })
 
+        if (i + 1) % 100 == 0:
+            log(f"  Vérifié {i + 1}/{len(all_doc_tickets)}... ({len(pending_tickets)} sans draft)")
+
     # Sauvegarder
     with open(PENDING_FILE, 'w', encoding='utf-8') as f:
         json.dump(pending_tickets, f, ensure_ascii=False, indent=2)
 
-    log(f"Synchronisation terminée: {len(pending_tickets)} tickets en attente")
+    log(f"Synchronisation terminée: {len(pending_tickets)} tickets en attente ({skipped_draft} avec brouillon existant)")
     return len(pending_tickets)
 
 def load_pending():
