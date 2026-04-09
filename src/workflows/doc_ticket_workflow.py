@@ -680,6 +680,22 @@ class DOCTicketWorkflow:
             triage_result = self._run_triage(ticket_id, auto_transfer=auto_update_ticket, agent_hint=agent_hint)
             result['triage_result'] = triage_result
 
+            # Post-processing: enrichir les dates manquantes du triage
+            from src.utils.date_extractor import extract_dates_from_message
+            intent_context = triage_result.get('intent_context') or {}
+            customer_msg = triage_result.get('customer_message', '')
+            if customer_msg and not intent_context.get('requested_month'):
+                date_extraction = extract_dates_from_message(customer_msg)
+                if date_extraction.get('requested_month'):
+                    intent_context['requested_month'] = date_extraction['requested_month']
+                    logger.info(f"  📅 DateExtractor: requested_month={date_extraction['requested_month']} (triage l'avait oublié)")
+                if date_extraction.get('confirmed_new_exam_date') and not intent_context.get('confirmed_new_exam_date'):
+                    intent_context['confirmed_new_exam_date'] = date_extraction['confirmed_new_exam_date']
+                    logger.info(f"  📅 DateExtractor: confirmed_new_exam_date={date_extraction['confirmed_new_exam_date']}")
+                if date_extraction.get('mentioned_month') and not intent_context.get('mentioned_month'):
+                    intent_context['mentioned_month'] = date_extraction['mentioned_month']
+                triage_result['intent_context'] = intent_context
+
             # Marquer le hint comme consommé pour ne pas le réutiliser
             if agent_hint:
                 self._consume_agent_hint(ticket_id)
