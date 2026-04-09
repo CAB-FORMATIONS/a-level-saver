@@ -378,9 +378,10 @@ class StateDetector:
             'cab_account_email': examt3p_data.get('cab_account_email', ''),
             'cab_payment_date': examt3p_data.get('cab_payment_date', ''),
             'statut_dossier_examt3p': examt3p_data.get('statut_dossier', ''),
-            # Flags pour EXAMT3P_DOWN (A2)
+            # Flags pour EXAMT3P_DOWN (A2) et EXAMT3P_ACCESS_LOST (A6)
             'extraction_failed': examt3p_data.get('extraction_failed', False),
             'error_type': examt3p_data.get('error_type'),  # 'technical' ou 'credentials'
+            'credentials_login_failed': examt3p_data.get('credentials_login_failed', False),
 
             # Pièces refusées (pour templates Refus CMA)
             'pieces_refusees_details': examt3p_data.get('pieces_refusees_details', []),
@@ -770,10 +771,22 @@ class StateDetector:
         self, state_name: str, detection: Dict, context: Dict
     ) -> bool:
         """Match les états basés sur ExamT3P."""
-        # État A2: ExamT3P down
+        # État A2: ExamT3P down (erreur technique)
         if state_name == 'EXAMT3P_DOWN':
             examt3p = context.get('examt3p_data', {})
             return examt3p.get('extraction_failed') and examt3p.get('error_type') == 'technical'
+
+        # État A6: Accès ExamT3P perdu (mdp changé + dossier critique)
+        if state_name == 'EXAMT3P_ACCESS_LOST':
+            is_access_lost = (context.get('credentials_login_failed', False) and
+                              context.get('evalbox', '') in [
+                                  'Dossier Synchronisé', 'VALIDE CMA',
+                                  'Convoc CMA reçue', 'Refusé CMA'
+                              ])
+            if is_access_lost:
+                # Injecter le flag dans le context pour que le template engine le voie
+                context['examt3p_access_lost'] = True
+            return is_access_lost
 
         return False
 

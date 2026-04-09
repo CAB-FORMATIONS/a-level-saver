@@ -259,6 +259,29 @@ states:
     crm_updates: null
 
   # ---------------------------------------------------------------------------
+  # A6: ACCÈS EXAMT3P PERDU (mdp changé + dossier critique)
+  # ---------------------------------------------------------------------------
+  EXAMT3P_ACCESS_LOST:
+    id: "A6"
+    priority: 95
+    severity: "BLOCKING"
+    description: "Identifiants ExamT3P invalides + dossier en statut critique (paiement fait)"
+    category: "analysis"
+
+    detection:
+      method: "examt3p_agent"
+      conditions:
+        - "credentials_login_failed == true"
+        - "evalbox IN ['Dossier Synchronisé', 'VALIDE CMA', 'Convoc CMA reçue', 'Refusé CMA']"
+
+    workflow:
+      action: "RESPOND_AND_STOP"
+      skip_crm_updates: true
+
+    response:
+      template: "response_master.html"
+
+  # ---------------------------------------------------------------------------
   # A3: DOUBLE COMPTE PAYÉ
   # ---------------------------------------------------------------------------
   DOUBLE_ACCOUNT_PAID:

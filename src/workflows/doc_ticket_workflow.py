@@ -64,7 +64,7 @@ from src.constants.keywords import (
     CMA_EMAIL_DOMAINS, REPLY_MARKERS, BATCH_EXCLUSION, SALESIQ_MARKERS,
     NON_UBER_REGISTRATION, DUPLICATE_MARKERS, UBER_CONVERTED, INFO_REQUEST,
     OUT_OF_SCOPE, UBER_KEYWORDS, SKIP_PATTERNS, LOGO_SIGNATURE_PATTERNS,
-    DOCUMENT_KEYWORDS as DOC_KEYWORDS,
+    DOCUMENT_KEYWORDS as DOC_KEYWORDS, ACCEPTANCE_KEYWORDS,
 )
 from config import settings
 from business_rules import BusinessRules
@@ -1404,7 +1404,6 @@ Le candidat a un ancien dossier dont les frais CMA ({CMA_EXAM_FEE}€) ont déj�
                     # Le seul cas où on NE PAS escalader : si le candidat accepte
                     # explicitement notre proposition (keywords d'acceptation).
                     if annulation_already_answered:
-                        acceptance_keywords = ['convient', 'accepte', 'ok pour', "d'accord", 'merci pour', 'parfait', 'je confirme']
                         last_inbound = next(
                             (t for t in threads if t.get('direction') == 'in'),
                             None
@@ -1532,8 +1531,7 @@ Le candidat a un ancien dossier dont les frais CMA ({CMA_EXAM_FEE}€) ont déj�
                                 last_msg = BusinessRules.strip_forwarded_content(
                                     get_clean_thread_content(last_inbound).lower()
                                 ).lower()
-                                acceptance_keywords = ['convient', 'accepte', 'ok pour', "d'accord", 'merci pour', 'parfait', 'je confirme']
-                                if any(kw in last_msg for kw in acceptance_keywords):
+                                if any(kw in last_msg for kw in ACCEPTANCE_KEYWORDS):
                                     candidate_still_wants = False
                                     logger.info("  ✅ CROSS-TICKET: Le candidat semble accepter → pas d'insistance")
                                 else:
@@ -6730,7 +6728,7 @@ Bien cordialement,
             candidate_message=customer_message,
             candidate_name=candidate_name,
             previous_response=prev_resp_for_humanizer,
-            use_ai=True,  # Activer l'humanisation IA
+            use_ai=True,
             response_mode=v3_response_mode
         )
 

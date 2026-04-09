@@ -249,6 +249,19 @@ logo_signature_patterns:
   - footer
   - header
 
+acceptance_keywords:
+  - convient
+  - accepte
+  - ok pour
+  - "d'accord"
+  - merci pour
+  - parfait
+  - je confirme
+  - "c'est bon"
+  - entendu
+  - "ça marche"
+  - "très bien"
+
 document_keywords:
   - document
   - "pièce"

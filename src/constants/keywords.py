@@ -24,6 +24,7 @@ OUT_OF_SCOPE: list = _kw['out_of_scope']
 UBER_KEYWORDS: list = _kw['uber_keywords']
 SKIP_PATTERNS: list = _kw['skip_patterns']
 LOGO_SIGNATURE_PATTERNS: list = _kw['logo_signature_patterns']
+ACCEPTANCE_KEYWORDS: list = _kw['acceptance_keywords']
 DOCUMENT_KEYWORDS: list = _kw['document_keywords']
 
 del _kw, _f

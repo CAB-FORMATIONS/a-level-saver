@@ -914,8 +914,11 @@ class TemplateEngine:
             **self._generate_report_flags(context),
 
             # Problèmes d'identifiants
-            'credentials_invalid': context.get('credentials_invalid', False),
-            'credentials_inconnus': context.get('credentials_inconnus', False),
+            # Si access_lost (BLOCKING), on ne montre QUE le partial access_lost
+            # Pas de credentials_invalid, pas de statut dossier, rien d'autre
+            'examt3p_access_lost': context.get('examt3p_access_lost', False),
+            'credentials_invalid': context.get('credentials_invalid', False) and not context.get('examt3p_access_lost', False),
+            'credentials_inconnus': context.get('credentials_inconnus', False) and not context.get('examt3p_access_lost', False),
             'candidat_envoie_identifiants': (context.get('primary_intent') or context.get('detected_intent', '')) == 'ENVOIE_IDENTIFIANTS',
 
             # Blocage confirmation session (documents manquants ou credentials invalides)
@@ -1152,6 +1155,23 @@ class TemplateEngine:
             result['intention_report_date'] = False
             result['intention_question_processus'] = False
             logger.info(f"📚 V3: intentions date supprimées (date confirmée {v3_confirmed})")
+
+        # EXAMT3P_ACCESS_LOST: On ne sait RIEN du dossier → supprimer TOUT sauf le partial access_lost
+        if result.get('examt3p_access_lost', False):
+            result['show_dates_section'] = False
+            result['show_sessions_section'] = False
+            result['show_statut_section'] = False
+            result['show_confirmation_section'] = False
+            result['show_convocation_section'] = False
+            result['show_paiement_section'] = False
+            result['suppress_elearning'] = True
+            result['auto_assigned'] = False
+            result['credentials_invalid'] = False
+            result['credentials_inconnus'] = False
+            for key in list(result.keys()):
+                if key.startswith('intention_'):
+                    result[key] = False
+            logger.info("🚫 EXAMT3P_ACCESS_LOST: toutes sections supprimées sauf access_lost")
 
         # UBER CAS D/E: Candidat non éligible ou compte non vérifié
         # → Supprimer TOUTES les sections (dates, sessions, statut, e-learning, identifiants, credentials)

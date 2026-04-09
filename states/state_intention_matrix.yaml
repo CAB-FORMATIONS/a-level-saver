@@ -1559,6 +1559,15 @@ matrix:
       evalbox_dossier_synchronise: true
       show_statut_section: true
 
+  "DOSSIER_SYNCHRONIZED:DEMANDE_DATE_EXAMEN":
+    template: "response_master.html"
+    description: "Date deja assignee + dossier en cours — confirmer la date, pas proposer d'alternatives"
+    context_flags:
+      intention_demande_date: true
+      show_dates_section: false
+      show_sessions_section: false
+      show_statut_section: true
+
   # --- DEADLINE_RATEE × DEMANDE_CONVOCATION ---
   "DEADLINE_RATEE:DEMANDE_CONVOCATION":
     template: "response_master.html"
