@@ -13,8 +13,8 @@
 - ✅ **Cas 3** : Identifiants valides → Test connexion + extraction données
 
 ### 3. Compatibilité cross-platform
-- ✅ Chemin Chromium hardcodé supprimé (était `/usr/bin/chromium-browser`)
-- ✅ Playwright trouve automatiquement le navigateur installé (Windows/Linux/Mac)
+- ✅ Migration de Playwright (Chromium) vers httpx + BeautifulSoup (HTTP pur)
+- ✅ Plus besoin de navigateur installe (fonctionne sur Windows/Linux/Mac sans dependance systeme)
 
 ### 4. Scripts de test
 - ✅ `list_recent_tickets.py` : Lister les tickets valides
@@ -33,14 +33,9 @@ AGENT_MODEL=claude-sonnet-4-5-20250929
 ### 2. Installer/mettre à jour les dépendances
 
 ```bash
-# Installer les packages Python
+# Installer les packages Python (inclut httpx pour ExamT3P)
 pip install -r requirements.txt
-
-# Installer les navigateurs Playwright (IMPORTANT !)
-playwright install chromium
 ```
-
-**Note** : Si vous n'avez pas Playwright installé, le test de connexion ExamT3P échouera, MAIS le workflow continuera quand même grâce à la nouvelle logique.
 
 ### 3. Pull les derniers changements
 
@@ -131,17 +126,16 @@ python test_new_workflow.py <TICKET_ID> --full-workflow
 
 ## ⚠️ Problèmes potentiels et solutions
 
-### Erreur : "Module playwright non installé"
+### Erreur : "Module httpx non installé"
 
-**Cause** : Playwright n'est pas installé ou les navigateurs ne sont pas installés.
+**Cause** : httpx n'est pas installe.
 
 **Solution** :
 ```bash
-pip install playwright
-playwright install chromium
+pip install -r requirements.txt
 ```
 
-**Impact** : Le test de connexion ExamT3P échouera, mais le workflow continuera (identifiants marqués comme "non testés").
+**Impact** : Le test de connexion ExamT3P echouera, mais le workflow continuera (identifiants marques comme "non testes").
 
 ### Erreur : "404 Not Found" sur le modèle Claude
 
@@ -215,10 +209,9 @@ AGENT_MODEL=claude-sonnet-4-5-20250929
 **Le workflow VA fonctionner** si :
 - ✅ Vous avez mis à jour `.env` avec le bon modèle
 - ✅ Vous utilisez un ticket ID valide
-- ⚠️ Playwright installé (recommandé mais pas obligatoire)
+- ✅ httpx installe (inclus dans requirements.txt)
 
 **Le workflow continuera même si** :
-- ❌ Playwright n'est pas installé (test connexion échoué)
 - ❌ Identifiants ExamT3P absents (nouvelle logique)
 - ❌ Identifiants ExamT3P invalides (message généré)
 
@@ -231,13 +224,10 @@ git pull origin claude/zoho-ticket-automation-wb1xw
 # 2. Mettre à jour .env
 # AGENT_MODEL=claude-sonnet-4-5-20250929
 
-# 3. Installer Playwright (optionnel mais recommandé)
-playwright install chromium
-
-# 4. Lister tickets
+# 3. Lister tickets
 python list_recent_tickets.py
 
-# 5. Tester workflow complet
+# 4. Tester workflow complet
 python test_doc_workflow_with_examt3p.py <TICKET_ID>
 ```
 

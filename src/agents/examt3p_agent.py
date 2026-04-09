@@ -1,7 +1,7 @@
 """
-Agent pour extraire les données depuis exament3p.fr via Playwright.
+Agent pour extraire les données depuis exament3p.fr via HTTP (httpx).
 
-Utilise les scripts exament3p_playwright.py pour l'extraction automatique.
+Utilise exament3p_playwright.py (module HTTP, ex-Playwright) pour l'extraction.
 """
 import logging
 import sys
@@ -44,7 +44,7 @@ class ExamT3PAgent(BaseAgent):
             Dict avec toutes les données extraites
         """
         try:
-            # Import dynamique du module playwright
+            # Import dynamique du module d'extraction HTTP
             from exament3p_playwright import extract_exament3p_sync
 
             logger.info(f"Extracting data from exament3p.fr for {identifiant}")

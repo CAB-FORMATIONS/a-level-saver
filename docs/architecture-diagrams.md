@@ -360,7 +360,7 @@ graph TB
 
         CUA[<b>CRMUpdateAgent</b><br/>━━━━━━━━━━━━<br/>• Mapping string → ID<br/>• Règles de blocage<br/>• Updates sécurisés<br/>• Logging automatique]
 
-        ETA[<b>ExamT3PAgent</b><br/>━━━━━━━━━━━━<br/>• Extraction données CMA<br/>• Statut dossier<br/>• Documents/paiements<br/>• Playwright backup]
+        ETA[<b>ExamT3PAgent</b><br/>━━━━━━━━━━━━<br/>• Extraction données CMA<br/>• Statut dossier<br/>• Documents/paiements<br/>• HTTP extraction]
     end
 
     subgraph "Helpers Fonctionnels"
@@ -730,7 +730,7 @@ graph TB
         subgraph "Clients API"
             ZDC[ZohoDeskClient]
             ZCC[ZohoCRMClient]
-            ETA[ExamT3PAgent<br/>+ Playwright]
+            ETA[ExamT3PAgent<br/>+ httpx]
         end
 
         subgraph "Agents IA"

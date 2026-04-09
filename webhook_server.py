@@ -17,12 +17,35 @@ from flask import Flask, request, jsonify
 from datetime import datetime
 import traceback
 
+from collections import deque
 from src.workflows.doc_ticket_workflow import DOCTicketWorkflow
 from src.utils.logging_config import setup_logging
+
+# In-memory log buffer (last 2000 lines)
+LOG_BUFFER = deque(maxlen=2000)
+
+
+class BufferHandler(logging.Handler):
+    """Captures log records into an in-memory deque."""
+    def emit(self, record):
+        try:
+            LOG_BUFFER.append(self.format(record))
+        except Exception:
+            pass
+
 
 # Setup logging
 setup_logging()
 logger = logging.getLogger(__name__)
+
+# Attach buffer handler to root logger so ALL logs are captured
+_buf_handler = BufferHandler()
+_buf_handler.setLevel(logging.INFO)
+_buf_handler.setFormatter(logging.Formatter(
+    '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+))
+logging.getLogger().addHandler(_buf_handler)
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -192,6 +215,64 @@ def webhook_stats():
     })
 
 
+@app.route('/logs', methods=['GET'])
+def get_logs():
+    """
+    Return recent application logs from in-memory buffer.
+
+    Query params:
+      ?lines=200       — number of lines (default 200, max 2000)
+      ?level=ERROR     — filter by level (INFO, WARNING, ERROR)
+      ?q=keyword       — filter lines containing keyword (case-insensitive)
+      ?format=text     — return plain text instead of JSON
+    """
+    if not verify_secret(request):
+        return jsonify({'success': False, 'error': 'Unauthorized'}), 401
+
+    lines = min(int(request.args.get('lines', 200)), 2000)
+    level_filter = request.args.get('level', '').upper()
+    query = request.args.get('q', '').lower()
+    fmt = request.args.get('format', 'json')
+
+    result = list(LOG_BUFFER)
+
+    if level_filter:
+        result = [l for l in result if f' - {level_filter} - ' in l]
+    if query:
+        result = [l for l in result if query in l.lower()]
+
+    result = result[-lines:]
+
+    if fmt == 'text':
+        return '\n'.join(result), 200, {'Content-Type': 'text/plain; charset=utf-8'}
+
+    return jsonify({
+        'total_buffered': len(LOG_BUFFER),
+        'returned': len(result),
+        'filters': {'lines': lines, 'level': level_filter or None, 'query': query or None},
+        'logs': result
+    })
+
+
+@app.route('/logs/ticket/<ticket_id>', methods=['GET'])
+def get_ticket_logs(ticket_id):
+    """Return logs filtered for a specific ticket ID."""
+    if not verify_secret(request):
+        return jsonify({'success': False, 'error': 'Unauthorized'}), 401
+
+    fmt = request.args.get('format', 'json')
+    result = [l for l in LOG_BUFFER if ticket_id in l]
+
+    if fmt == 'text':
+        return '\n'.join(result), 200, {'Content-Type': 'text/plain; charset=utf-8'}
+
+    return jsonify({
+        'ticket_id': ticket_id,
+        'returned': len(result),
+        'logs': result
+    })
+
+
 @app.errorhandler(404)
 def not_found(error):
     return jsonify({
@@ -201,7 +282,9 @@ def not_found(error):
             'GET /health',
             'POST /webhook/zoho-desk',
             'POST /webhook/test',
-            'GET /webhook/stats'
+            'GET /webhook/stats',
+            'GET /logs',
+            'GET /logs/ticket/<ticket_id>'
         ]
     }), 404
 

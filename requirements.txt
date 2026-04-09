@@ -23,8 +23,8 @@ gender-guesser==0.4.0
 Flask==3.0.0
 gunicorn==21.2.0
 
-# Web Scraping
-playwright==1.40.0
+# Web Scraping (HTTP client + HTML parsing, no browser needed)
+httpx>=0.25.0
 beautifulsoup4==4.12.3
 lxml==5.1.0
 

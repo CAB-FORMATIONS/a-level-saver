@@ -149,6 +149,7 @@ Si tu ne trouves pas d'identifiants, réponds:
 def test_examt3p_connection(identifiant: str, mot_de_passe: str) -> Tuple[bool, Optional[str]]:
     """
     Test la connexion ExamT3P avec les identifiants fournis.
+    Utilise HTTP POST direct (pas de navigateur).
 
     Args:
         identifiant: IDENTIFIANT_EVALBOX
@@ -157,152 +158,45 @@ def test_examt3p_connection(identifiant: str, mot_de_passe: str) -> Tuple[bool, 
     Returns:
         Tuple (success: bool, error_message: str or None)
     """
-    import asyncio
-
-    try:
-        from playwright.async_api import async_playwright
-    except ImportError:
-        logger.error("Module playwright non installé")
-        return False, "Module playwright non installé - impossible de tester la connexion"
+    import httpx
 
     logger.info(f"Test de connexion ExamT3P pour {identifiant}...")
 
-    async def test_login():
-        """Test de login asynchrone."""
-        try:
-            async with async_playwright() as p:
-                # Lancer le navigateur en mode headless
-                # Note: Playwright trouvera automatiquement le navigateur installé (cross-platform)
-                browser = await p.chromium.launch(
-                    headless=True,
-                    args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
-                )
-
-                context = await browser.new_context(viewport={'width': 1280, 'height': 720})
-                context.set_default_timeout(30000)  # 30 secondes
-                page = await context.new_page()
-
-                try:
-                    # Accéder à la page de connexion
-                    await page.goto(EXAMT3P_LOGIN_URL, wait_until='networkidle', timeout=30000)
-                    await asyncio.sleep(3)  # Augmenté pour s'assurer que la page est chargée
-
-                    # Cliquer sur "Me connecter" pour ouvrir la modal
-                    try:
-                        me_connecter_btn = await page.wait_for_selector('button:has-text("Me connecter")', timeout=10000)
-                        if me_connecter_btn:
-                            await me_connecter_btn.click()
-                            await asyncio.sleep(1)
-                    except Exception as e:
-                        pass
-
-                    # Remplir le formulaire
-                    email_selectors = ['#loginEmail', 'input[type="email"]', 'input[name="email"]']
-                    email_filled = False
-                    for selector in email_selectors:
-                        try:
-                            await page.wait_for_selector(selector, state='visible', timeout=5000)
-                            await page.fill(selector, identifiant)
-                            email_filled = True
-                            break
-                        except Exception as e:
-                            continue
-
-                    if not email_filled:
-                        return False, "Champ email non trouvé"
-
-                    password_selectors = ['#loginPassword', 'input[type="password"]', 'input[name="password"]']
-                    password_filled = False
-                    for selector in password_selectors:
-                        try:
-                            await page.fill(selector, mot_de_passe)
-                            password_filled = True
-                            break
-                        except Exception as e:
-                            continue
-
-                    if not password_filled:
-                        return False, "Champ mot de passe non trouvé"
-
-                    # Cliquer sur le bouton de connexion
-                    submit_selectors = [
-                        '#loginModal button:has-text("Se connecter")',
-                        'button:has-text("Se connecter")',
-                        'button[type="submit"]'
-                    ]
-
-                    submitted = False
-                    for selector in submit_selectors:
-                        try:
-                            btn = await page.query_selector(selector)
-                            if btn:
-                                await btn.click()
-                                submitted = True
-                                break
-                        except Exception as e:
-                            continue
-
-                    if not submitted:
-                        await page.keyboard.press('Enter')
-
-                    # Attendre la navigation (augmenté pour laisser la page charger)
-                    await asyncio.sleep(5)
-
-                    # Vérifier si connecté - mêmes indicateurs que exament3p_playwright.py
-                    success_indicators = [
-                        "Vue d'ensemble",
-                        "Mon Espace Candidat",
-                        "Déconnexion",
-                        "Bienvenue",
-                        "monEspaceContainer"  # ID/class présent sur la page après login
-                    ]
-
-                    content = await page.content()
-                    for indicator in success_indicators:
-                        if indicator in content:
-                            return True, None
-
-                    # Vérifier l'URL
-                    current_url = page.url
-                    if "mon-espace" in current_url or "dashboard" in current_url or "espace-candidat" in current_url:
-                        return True, None
-
-                    # Vérifier si erreur de connexion visible
-                    error_indicators = [
-                        "Identifiant ou mot de passe incorrect",
-                        "invalid",
-                        "erreur",
-                        "échec",
-                        "Mot de passe oublié"  # Si on voit encore ce bouton, on n'est pas connecté
-                    ]
-                    content_lower = content.lower()
-                    for error in error_indicators:
-                        if error.lower() in content_lower and "Me connecter" in content:
-                            return False, "Identifiants invalides"
-
-                    # Si on ne trouve pas les indicateurs mais qu'on n'est plus sur la page de login
-                    if "Me connecter" not in content:
-                        # Probablement connecté mais page différente
-                        return True, None
-
-                    return False, "Connexion échouée - page d'accueil non détectée"
-
-                finally:
-                    await browser.close()
-
-        except Exception as e:
-            return False, f"Erreur lors du test de connexion: {str(e)}"
-
     try:
-        # Exécuter le test de login
-        success, error = asyncio.run(test_login())
+        with httpx.Client(
+            timeout=15.0,
+            follow_redirects=True,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            },
+        ) as client:
+            # 1. Init session PHP (PHPSESSID cookie)
+            client.get("https://www.exament3p.fr/id/14")
 
-        if success:
-            logger.info("✅ Test de connexion ExamT3P réussi")
-            return True, None
-        else:
-            logger.warning(f"❌ Test de connexion ExamT3P échoué: {error}")
-            return False, error
+            # 2. POST login
+            resp = client.post(
+                "https://www.exament3p.fr/Cma/UserAccount/login",
+                data={
+                    "email": identifiant,
+                    "password": mot_de_passe,
+                    "pageId": "14",
+                },
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+            resp.raise_for_status()
+
+            result = resp.json()
+            if result.get("success") == 1:
+                logger.info("✅ Test de connexion ExamT3P réussi")
+                return True, None
+
+            msg = result.get("message", "Identifiants invalides")
+            logger.warning(f"❌ Test de connexion ExamT3P échoué: {msg}")
+            return False, "Identifiants invalides"
+
+    except httpx.TimeoutException:
+        logger.error("❌ Timeout lors du test de connexion ExamT3P")
+        return False, "Timeout lors de la connexion à exament3p.fr"
 
     except Exception as e:
         logger.error(f"❌ Erreur lors du test de connexion ExamT3P: {e}")

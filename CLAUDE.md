@@ -968,7 +968,7 @@ python show_response.py <ticket_id>
 | `docs/FUNCTIONAL_OVERVIEW.md` | Contexte métier, cycle Evalbox, 10 CAS dates, Uber, 50+ intentions, guard rails |
 | `docs/TECHNICAL_OVERVIEW.md` | Architecture, pipeline 8 étapes, tous les modules Python, State Engine, ThreadMemory |
 | `docs/DEVELOPER_GUIDE.md` | Setup local, checklists intention/état, debugging 12 scénarios, conventions |
-| `docs/API_REFERENCE.md` | Webhook endpoints, Zoho Desk/CRM API, Anthropic, ExamT3P Playwright, OAuth |
+| `docs/API_REFERENCE.md` | Webhook endpoints, Zoho Desk/CRM API, Anthropic, ExamT3P HTTP/httpx, OAuth |
 
 ### Documentation technique (référence interne)
 

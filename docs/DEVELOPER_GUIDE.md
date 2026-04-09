@@ -20,9 +20,6 @@ cd a-level-saver
 
 # Installer les dependances
 pip install -r requirements.txt
-
-# Installer Playwright (scraping ExamT3P)
-playwright install chromium
 ```
 
 ### Configuration `.env`

@@ -26,7 +26,7 @@ Le systeme A-Level Saver est deploye sur **Render** en tant que Web Service Dock
                     v                 v                 v
            +-------------+   +-------------+   +----------------+
            | Zoho CRM    |   | Anthropic   |   | ExamT3P        |
-           | Zoho Desk   |   | Claude API  |   | (Playwright)   |
+           | Zoho Desk   |   | Claude API  |   | (HTTP/httpx)   |
            | (REST API)  |   | (LLM)       |   | (Web scraping) |
            +-------------+   +-------------+   +----------------+
 ```
@@ -40,7 +40,7 @@ Le systeme A-Level Saver est deploye sur **Render** en tant que Web Service Dock
 | **Zoho Desk Client** | API REST pour tickets, threads, brouillons | `src/zoho_client.py` |
 | **Zoho CRM Client** | API REST pour deals, contacts, notes | `src/zoho_client.py` |
 | **Anthropic Client** | Triage, humanisation, analyse conversation | API Claude |
-| **ExamT3P Scraper** | Extraction donnees portail CMA | Playwright + Chromium |
+| **ExamT3P Scraper** | Extraction donnees portail CMA | httpx + BeautifulSoup |
 
 ---
 
@@ -54,31 +54,11 @@ FROM python:3.11-slim
 Image de base Python 3.11 minimale. La version slim evite les dependances inutiles.
 
 ```dockerfile
-# Install Playwright system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libnss3 libnspr4 libdbus-1-3 libatk1.0-0 libatk-bridge2.0-0 \
-    libcups2 libdrm2 libxkbcommon0 libatspi2.0-0 libxcomposite1 \
-    libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 \
-    libcairo2 libasound2 libwayland-client0 \
-    && rm -rf /var/lib/apt/lists/*
-```
-Librairies systeme requises par Chromium (Playwright). Sans ces dependances, le navigateur headless ne peut pas demarrer. Le `rm -rf /var/lib/apt/lists/*` reduit la taille de l'image.
-
-```dockerfile
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 ```
-Installation des dependances Python. Le `--no-cache-dir` evite de stocker le cache pip dans l'image.
-
-```dockerfile
-# Install Playwright Chromium browser
-ENV PLAYWRIGHT_BROWSERS_PATH=/opt/render/.cache/ms-playwright
-RUN mkdir -p /opt/render/.cache/ms-playwright && playwright install chromium
-```
-Installe le navigateur Chromium de Playwright. Le chemin `/opt/render/.cache/ms-playwright` est le chemin par defaut utilise par Render pour le cache Playwright. Cette variable d'environnement est **critique** : sans elle, Playwright cherche le navigateur dans un chemin different et echoue au lancement.
-
-**Historique** : Ce chemin a fait l'objet de plusieurs fixes (commits `8da7cb3`, `dfedd9b`, `4b5de26`). La version Docker n'utilise pas `--with-deps` car les dependances systeme sont deja installees manuellement ci-dessus.
+Installation des dependances Python. Le `--no-cache-dir` evite de stocker le cache pip dans l'image. Plus besoin de dependances systeme (Chromium, libnss3, etc.) depuis la migration vers httpx.
 
 ```dockerfile
 COPY . .
@@ -87,7 +67,7 @@ CMD ["gunicorn", "webhook_server:app", "--bind", "0.0.0.0:10000", "--workers", "
 ```
 - **Port 10000** : port par defaut de Render pour les Web Services
 - **2 workers** : suffisant pour le volume de tickets (traitement asynchrone en background thread)
-- **Timeout 120s** : les workflows peuvent prendre 30-60s (scraping ExamT3P + appels LLM)
+- **Timeout 120s** : les workflows peuvent prendre 30-60s (extraction ExamT3P + appels LLM)
 
 ### Dependances critiques dans requirements.txt
 
@@ -95,7 +75,8 @@ CMD ["gunicorn", "webhook_server:app", "--bind", "0.0.0.0:10000", "--workers", "
 |---------|---------|------|
 | `Flask` | 3.0.0 | Serveur webhook |
 | `gunicorn` | 21.2.0 | Serveur WSGI production |
-| `playwright` | 1.40.0 | Scraping ExamT3P (navigateur headless) |
+| `httpx` | >=0.27.0 | Client HTTP pour extraction ExamT3P |
+| `beautifulsoup4` | >=4.12.0 | Parsing HTML des pages ExamT3P |
 | `anthropic` | >=0.40.0 | API Claude (triage, humanisation) |
 | `pybars3` | 0.9.7 | Moteur de templates Handlebars |
 | `PyMeta3` | ==0.5.1 | Dependance de pybars3 — **version pionnee** |
@@ -154,20 +135,17 @@ CMD ["gunicorn", "webhook_server:app", "--bind", "0.0.0.0:10000", "--workers", "
 | Variable | Description | Defaut | Fichier source |
 |----------|-------------|--------|----------------|
 | `SKIP_DRAFT_CHECK` | Ignorer la verification de brouillon existant | non defini | `doc_ticket_workflow.py` |
-| `PLAYWRIGHT_BROWSERS_PATH` | Chemin vers les navigateurs Playwright | `/opt/render/.cache/ms-playwright` | `Dockerfile` |
 
 ### Configuration sur Render
 
 Sur Render, les variables d'environnement sont configurees dans le dashboard du service (`Environment` tab). Les variables sensibles (cles API, secrets OAuth) doivent etre ajoutees comme **Secret Environment Variables**.
 
-Le fichier `render.yaml` definit deux variables supplementaires au niveau du build :
+Le fichier `render.yaml` definit la version Python au niveau du build :
 
 ```yaml
 envVars:
   - key: PYTHON_VERSION
     value: "3.11.8"
-  - key: PLAYWRIGHT_BROWSERS_PATH
-    value: /opt/render/.cache/ms-playwright
 ```
 
 ---
@@ -256,17 +234,15 @@ services:
   - type: web
     name: a-level-saver
     runtime: python
-    buildCommand: "pip install -r requirements.txt && playwright install --with-deps chromium"
+    buildCommand: "pip install -r requirements.txt"
     startCommand: "gunicorn webhook_server:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120"
     healthCheckPath: /health
     envVars:
       - key: PYTHON_VERSION
         value: "3.11.8"
-      - key: PLAYWRIGHT_BROWSERS_PATH
-        value: /opt/render/.cache/ms-playwright
 ```
 
-**Note** : Ce fichier est utilise pour le deploiement natif (sans Docker). Le deploiement actuel utilise le **Dockerfile**, qui est prefere car il donne un controle plus fin sur les dependances systeme de Playwright. Le `render.yaml` est conserve comme reference.
+**Note** : Ce fichier est utilise pour le deploiement natif (sans Docker). Le deploiement actuel utilise le **Dockerfile**. Depuis la migration de Playwright vers httpx, le `render.yaml` est simplifie (plus besoin de `playwright install --with-deps chromium` ni de `PLAYWRIGHT_BROWSERS_PATH`).
 
 Avec le Dockerfile, Render detecte automatiquement sa presence et l'utilise pour le build. Le `healthCheckPath: /health` dans `render.yaml` configure le health check automatique de Render.
 
@@ -277,7 +253,6 @@ Avec le Dockerfile, Render detecte automatiquement sa presence et l'utilise pour
 ### Prerequis
 
 - Python 3.11+
-- Playwright et Chromium installes
 - Fichier `.env` configure (copier `.env.example`)
 
 ### Installation
@@ -289,9 +264,6 @@ cd a-level-saver
 
 # Installer les dependances
 pip install -r requirements.txt
-
-# Installer Chromium pour Playwright
-playwright install chromium
 
 # Configurer les variables d'environnement
 cp .env.example .env
@@ -440,31 +412,7 @@ python batch_health_check.py --latest
 
 ## Troubleshooting
 
-### 1. Playwright / Chromium ne demarre pas
-
-**Symptome** : `Error: Browser not found` ou `Failed to launch chromium`
-
-**Causes possibles** :
-- `PLAYWRIGHT_BROWSERS_PATH` ne pointe pas vers le bon repertoire
-- Les dependances systeme manquent
-
-**Solution** :
-```bash
-# Verifier le chemin
-echo $PLAYWRIGHT_BROWSERS_PATH
-ls -la /opt/render/.cache/ms-playwright/
-
-# Reinstaller
-playwright install chromium
-```
-
-**Historique** :
-- Commit `4b5de26` : Alignement du chemin avec le defaut Render (`/opt/render/.cache/ms-playwright`)
-- Commit `dfedd9b` : Ajout du Dockerfile avec installation manuelle des dependances
-- Commit `8da7cb3` : Ajout de `--with-deps` pour le mode natif (render.yaml)
-- Commit `b16451c` : Retrait de `--with-deps` (remplace par le Dockerfile)
-
-### 2. PyMeta3 / pybars3 — erreur de compilation des partials
+### 1. PyMeta3 / pybars3 — erreur de compilation des partials
 
 **Symptome** : `Failed to compile partial` ou templates rendus en `{{> partials/...}}` brut
 
@@ -479,14 +427,13 @@ pip show PyMeta3
 
 **Historique** : Commit `f86c176` — les versions plus recentes de PyMeta3 cassent la compilation des grammaires Handlebars.
 
-### 3. Health check echoue sur Render
+### 2. Health check echoue sur Render
 
 **Symptome** : Le service redemarre en boucle, statut "Unhealthy" sur le dashboard.
 
 **Causes possibles** :
 - Le port n'est pas 10000 (defaut Render pour Docker)
 - Erreur au demarrage de Flask (variable d'environnement manquante)
-- Timeout au demarrage (Playwright download trop lent)
 
 **Verification** :
 ```bash
@@ -498,7 +445,7 @@ pip show PyMeta3
 # Chercher: "pydantic_settings.SettingsError"
 ```
 
-### 4. Erreur OAuth Zoho "Invalid refresh token"
+### 3. Erreur OAuth Zoho "Invalid refresh token"
 
 **Symptome** : `401 Unauthorized` sur les appels API Zoho
 
@@ -519,7 +466,7 @@ self._crm_client_secret = settings.zoho_crm_client_secret or settings.zoho_clien
 self._crm_refresh_token = settings.zoho_crm_refresh_token or settings.zoho_refresh_token
 ```
 
-### 5. Webhook non declenche depuis Zoho Desk
+### 4. Webhook non declenche depuis Zoho Desk
 
 **Symptome** : Les tickets arrivent dans le departement DOC mais le webhook n'est pas appele.
 
@@ -529,7 +476,7 @@ self._crm_refresh_token = settings.zoho_crm_refresh_token or settings.zoho_refre
 3. Verifier le `X-Webhook-Secret` dans le script Deluge
 4. Consulter les logs Deluge dans Zoho Desk (Setup > Automation > Actions log)
 
-### 6. Timeout Gunicorn
+### 5. Timeout Gunicorn
 
 **Symptome** : `[CRITICAL] WORKER TIMEOUT` dans les logs
 
@@ -539,7 +486,7 @@ self._crm_refresh_token = settings.zoho_crm_refresh_token or settings.zoho_refre
 
 Si le timeout se produit sur `/webhook/test` (endpoint synchrone), c'est normal pour des tickets complexes. Utiliser plutot `/webhook/zoho-desk` en production.
 
-### 7. Crash lors de l'enrichissement de donnees
+### 6. Crash lors de l'enrichissement de donnees
 
 **Symptome** : `NoneType has no attribute 'get'` dans `template_engine.py`
 
@@ -551,7 +498,7 @@ Si le timeout se produit sur `/webhook/test` (endpoint synchrone), c'est normal 
 - Commit `b840a10` : Crash `enriched_lookups None` + `rule_go_override UnboundLocalError`
 - Commit `867526c` : `rule_go_override UnboundLocalError` quand pas de deal data
 
-### 8. Erreur d'encodage (Windows)
+### 7. Erreur d'encodage (Windows)
 
 **Symptome** : `UnicodeEncodeError` avec des emojis dans les logs
 
@@ -574,18 +521,18 @@ Chronologie des commits lies au deploiement (du plus ancien au plus recent) :
 
 | Commit | Description | Probleme resolu |
 |--------|-------------|-----------------|
-| `76ccf65` | Ajout ExamT3PAgent avec Playwright | Premiere integration Playwright |
+| `76ccf65` | Ajout ExamT3PAgent avec Playwright | Premiere integration ExamT3P |
 | `cc6798e` | Ajout scripts exament3p_playwright | Scripts d'extraction ExamT3P |
 | `170c46f` | Fix Playwright Chromium path | Retrait du `executable_path` hardcode |
-| `09f320c` | Script de test connexion Playwright | Test minimal de connexion ExamT3P |
+| `09f320c` | Script de test connexion ExamT3P | Test minimal de connexion ExamT3P |
 | `58f3088` | Migration vers pybars3 | Remplacement du parsing regex Handlebars |
 | `73ad7b6` | Webhook server + deploiement Render | Premiere mise en production |
-| `b16451c` | Ajout gender-guesser + fix Playwright | Retrait de `--with-deps` (passe au Dockerfile) |
+| `b16451c` | Ajout gender-guesser + fix deploiement | Retrait de `--with-deps` (passe au Dockerfile) |
 | `4e1b2e0` | Webhook async + auth par header | Traitement background + X-Webhook-Secret |
 | `f86c176` | Pin PyMeta3==0.5.1 | Fix compilation pybars3 sur Render |
-| `8da7cb3` | Ajout --with-deps a playwright install | Fix dependances Playwright mode natif |
+| `8da7cb3` | Ajout --with-deps a playwright install | Fix dependances mode natif (legacy) |
 | `dfedd9b` | Ajout Dockerfile | Controle precis des dependances systeme |
-| `4b5de26` | Alignement chemin Playwright | Fix `PLAYWRIGHT_BROWSERS_PATH` pour Render |
+| `4b5de26` | Alignement chemin Playwright | Fix chemin navigateur pour Render (legacy) |
 
 ### Modeles IA utilises
 
@@ -622,7 +569,7 @@ a-level-saver/
     zoho_client.py              # Clients API Zoho (Desk + CRM)
     utils/
       logging_config.py         # Configuration des logs
-      exament3p_playwright.py   # Scraping ExamT3P via Playwright
+      exament3p_http_client.py   # Extraction ExamT3P via httpx + BeautifulSoup
     workflows/
       doc_ticket_workflow.py    # Orchestrateur principal
     constants/

@@ -17,7 +17,7 @@ A-Level Saver est un systeme d'automatisation du traitement des tickets Zoho Des
 | Date Exam Helper (`date_examen_vtc_helper.py`) | 1 453 |
 | Session Helper (`session_helper.py`) | 1 362 |
 | Triage Agent (`triage_agent.py`) | 1 059 |
-| ExamT3P Playwright (`exament3p_playwright.py`) | 1 017 |
+| ExamT3P HTTP Client (`exament3p_http_client.py`) | ~350 |
 | Thread Memory (`thread_memory.py`) | 957 |
 | Zoho Client (`zoho_client.py`) | 899 |
 | Partials HTML | 93 fichiers |
@@ -62,8 +62,8 @@ A-Level Saver est un systeme d'automatisation du traitement des tickets Zoho Des
        v              v              v              v
   +---------+   +-----------+  +-----------+  +-----------+
   |  Zoho   |   |  Zoho     |  | Anthropic |  |  ExamT3P  |
-  |  Desk   |   |  CRM      |  |  Claude   |  | Playwright|
-  |  API    |   |  API v3   |  |  API      |  | Scraping  |
+  |  Desk   |   |  CRM      |  |  Claude   |  | HTTP/httpx|
+  |  API    |   |  API v3   |  |  API      |  | Extraction|
   +---------+   +-----------+  +-----------+  +-----------+
 ```
 
@@ -79,7 +79,7 @@ Ticket Zoho Desk
      v
 [2] _run_analysis() -------> 7 sources de donnees:
      |                        - CRM Deal + Contact + Enriched Lookups
-     |                        - ExamT3P (Playwright scraping)
+     |                        - ExamT3P (HTTP extraction via httpx)
      |                        - Date d'examen (10 cas)
      |                        - Sessions de formation
      |                        - Uber eligibilite (CAS A/B/D/E)
@@ -185,7 +185,7 @@ Ticket Zoho Desk
 | # | Source | API / Methode | Donnees Extraites |
 |---|--------|---------------|-------------------|
 | 1 | CRM Zoho | `DealLinkingAgent`, `get_deal()`, `get_contact()` | Deal, Contact, enriched lookups |
-| 2 | ExamT3P | `ExamT3PAgent` + `exament3p_playwright.py` (Playwright) | Statut dossier, documents, paiements |
+| 2 | ExamT3P | `ExamT3PAgent` + `exament3p_http_client.py` (httpx) | Statut dossier, documents, paiements |
 | 3 | Date examen | `analyze_exam_date_situation()` | CAS 1-10, dates futures, clotures |
 | 4 | Sessions | `analyze_session_situation()`, `get_sessions_for_exam_date()` | Options CDJ/CDS, filtrage par date |
 | 5 | Uber eligibilite | `analyze_uber_eligibility()` | CAS A/B/D/E, prospect, eligible |
@@ -215,7 +215,7 @@ Ticket Zoho Desk
         'session_date_debut': '2026-04-13',
         'session_date_fin': '2026-04-24',
     },
-    'examt3p_data': Dict,                     # Donnees Playwright
+    'examt3p_data': Dict,                     # Donnees ExamT3P (HTTP)
     'date_examen_vtc_result': {
         'case': int,                           # CAS 1 a 10
         'case_description': str,
@@ -468,7 +468,7 @@ Classe abstraite `BaseAgent` dont heritent tous les agents. Fournit :
 
 #### `examt3p_agent.py` (152 lignes)
 
-`ExamT3PAgent(BaseAgent)` -- Orchestration de l'extraction ExamT3P via Playwright.
+`ExamT3PAgent(BaseAgent)` -- Orchestration de l'extraction ExamT3P via HTTP (httpx + BeautifulSoup).
 
 #### `desk_agent.py` (278 lignes) / `crm_agent.py` (291 lignes)
 
@@ -796,24 +796,27 @@ Verification de l'eligibilite a l'offre Uber 20EUR.
 - **CAS E** : ELIGIBLE = false (non eligible Uber, apres J+4)
 - **ELIGIBLE** : Toutes les verifications OK
 
-#### `exament3p_playwright.py` (1 017 lignes)
+#### `exament3p_http_client.py` (~350 lignes)
 
-Extraction automatique des donnees ExamT3P via Playwright (Chromium headless).
+Extraction automatique des donnees ExamT3P via HTTP (httpx + BeautifulSoup).
 
-**Classe :** `ExamenT3PPlaywright`
+**Classe :** `ExamT3PHttpClient`
 
 **Donnees extraites :**
-- Vue d'ensemble : statut dossier, progression, actions requises
-- Mes Examens : dates, convocation
-- Mes Documents : statut de chaque piece justificative
-- Mon Compte : informations personnelles
-- Mes Paiements : historique complet
-- Messages : echanges avec la CMA
+- Dashboard : statut dossier, progression, actions requises
+- Dates d'examen et convocation
+- Statut de chaque piece justificative
+- Informations personnelles
+- Historique des paiements
+- Messages avec la CMA (via endpoint JSON)
 
 **Features :**
+- Login via `POST /Cma/UserAccount/login`
+- Dashboard via `GET /mon-espace` (HTML parse par BeautifulSoup)
+- Messages via `GET /Cmacandidate/getMessages` (JSON natif)
+- Support multi-dossier via parametre `?dossier={id}`
 - Retry automatique (3 tentatives, delai 2s)
-- Timeouts configurables (page 30s, element 10s)
-- Deploye dans Docker avec Chromium (`PLAYWRIGHT_BROWSERS_PATH=/opt/render/.cache/ms-playwright`)
+- Timeout 10s pour toutes les requetes
 
 #### `ticket_info_extractor.py` (716 lignes)
 
@@ -1120,13 +1123,16 @@ Chaque niveau degrade gracieusement si le precedent echoue. Les erreurs ne bloqu
 
 **Cout total estime par ticket :** ~0.05-0.06 USD
 
-### ExamT3P (Playwright)
+### ExamT3P (HTTP/httpx)
 
 **URL :** `https://www.exament3p.fr`
 
-**Technologie :** Playwright Chromium headless
+**Technologie :** httpx (client HTTP) + BeautifulSoup (parsing HTML)
 
-**Deploiement :** Docker (`PLAYWRIGHT_BROWSERS_PATH=/opt/render/.cache/ms-playwright`)
+**Endpoints :**
+- `POST /Cma/UserAccount/login` -- Authentification
+- `GET /mon-espace` -- Dashboard candidat (HTML)
+- `GET /Cmacandidate/getMessages` -- Messages CMA (JSON)
 
 **Donnees extraites :**
 - Statut du dossier (progression, actions requises)
@@ -1157,8 +1163,7 @@ ZOHO_WEBHOOK_SECRET
 
 ```dockerfile
 FROM python:3.11-slim
-# Dependances Playwright (libnss3, libatk, etc.)
-# pip install + playwright install chromium
+# pip install (httpx, beautifulsoup4, etc.)
 EXPOSE 10000
 CMD ["gunicorn", "webhook_server:app", "--bind", "0.0.0.0:10000",
      "--workers", "2", "--timeout", "120"]

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Script de test pour l'extraction ExamT3P via Playwright.
+Script de test pour l'extraction ExamT3P via HTTP (httpx).
 
 Usage:
     python test_examt3p_extraction.py <identifiant> <password>

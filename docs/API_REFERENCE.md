@@ -13,7 +13,7 @@ Documentation exhaustive de toutes les integrations API du projet A-Level Saver.
 | **Zoho CRM v8** | `https://www.zohoapis.{dc}/crm/v8` | OAuth2 (Bearer token) | Idem v3 | `src/zoho_client.py` |
 | **Zoho OAuth** | `https://accounts.zoho.{dc}/oauth/v2` | Client credentials | 2s min entre refreshes | `src/zoho_token_manager.py` |
 | **Anthropic (Claude)** | `https://api.anthropic.com` | API Key (Bearer) | Geree par le SDK | `src/agents/*.py`, `src/utils/*.py` |
-| **ExamT3P** | `https://www.exament3p.fr` | Login/Password (Playwright) | 1s entre actions, 30s timeout | `src/utils/exament3p_playwright.py` |
+| **ExamT3P** | `https://www.exament3p.fr` | Login/Password (HTTP POST) | 10s timeout | `src/utils/exament3p_http_client.py` |
 
 > **Note** : `{dc}` = datacenter Zoho, configure via `settings.zoho_datacenter` (defaut: `com`).
 
@@ -655,52 +655,41 @@ response = self.client.messages.create(
 
 ---
 
-## 5. ExamT3P (Playwright)
+## 5. ExamT3P (HTTP/httpx)
 
-**Fichiers** : `src/utils/exament3p_playwright.py`, `src/utils/examt3p_credentials_helper.py`, `src/agents/examt3p_agent.py`
+**Fichiers** : `src/utils/exament3p_http_client.py`, `src/utils/examt3p_credentials_helper.py`, `src/agents/examt3p_agent.py`
 
 ### 5.1 Architecture
 
-ExamT3P est un portail web (`https://www.exament3p.fr`) sans API publique. L'extraction se fait via **Playwright** (Chromium headless).
+ExamT3P est un portail web (`https://www.exament3p.fr`) sans API publique. L'extraction se fait via **httpx** (client HTTP) + **BeautifulSoup** (parsing HTML).
 
 ```
 ExamT3PAgent (orchestrateur)
-    └── exament3p_playwright.py (extracteur Playwright)
-            └── ExamenT3PPlaywright (classe principale)
-                    ├── _login()               → Connexion
-                    ├── _extract_overview()     → Vue d'ensemble
-                    ├── _extract_examens()      → Mes Examens
-                    ├── _extract_documents()    → Mes Documents
-                    ├── _extract_compte()       → Mon Compte
-                    ├── _extract_paiements()    → Mes Paiements
-                    └── _extract_messages()     → Messages
+    └── exament3p_http_client.py (extracteur HTTP)
+            └── ExamT3PHttpClient (classe principale)
+                    ├── _login()               → POST /Cma/UserAccount/login
+                    ├── _extract_dashboard()   → GET /mon-espace (HTML parsing)
+                    ├── _extract_messages()     → GET /Cmacandidate/getMessages (JSON)
+                    └── Supporte ?dossier={id}  → Multi-dossier
 ```
 
-### 5.2 Configuration du navigateur
+### 5.2 Configuration HTTP
 
 ```python
-browser = await p.chromium.launch(
-    headless=True,
-    args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+client = httpx.Client(
+    base_url="https://www.exament3p.fr",
+    timeout=10.0,
+    follow_redirects=True
 )
-context = await browser.new_context(viewport={'width': 1280, 'height': 720})
-context.set_default_timeout(30000)  # 30 secondes
 ```
 
-**Timeouts** :
-- `PAGE_LOAD_TIMEOUT = 30000` (30s)
-- `ELEMENT_TIMEOUT = 10000` (10s)
-- `ACTION_DELAY = 1` (1s entre actions)
+**Timeout** : 10s pour toutes les requetes HTTP.
 
 ### 5.3 Flux d'authentification
 
-1. Navigation vers `https://www.exament3p.fr/id/14`
-2. Clic sur "Me connecter" pour ouvrir la modale
-3. Remplissage de l'email (selecteurs : `#loginEmail`, `input[type="email"]`, `input[name="email"]`)
-4. Remplissage du mot de passe (selecteurs : `#loginPassword`, `input[type="password"]`)
-5. Clic "Se connecter" ou `Enter`
-6. Verification de la connexion via indicateurs : "Vue d'ensemble", "Mon Espace Candidat", "Deconnexion"
-7. Verification d'URL : "mon-espace", "dashboard", "espace-candidat"
+1. `POST /Cma/UserAccount/login` avec `email` + `password` (form data)
+2. Le serveur retourne un cookie de session
+3. Verification de la connexion via `GET /mon-espace` (status 200 + contenu attendu)
 
 ### 5.4 Pages visitees et donnees extraites
 
@@ -878,8 +867,7 @@ Ce mecanisme est **partage entre toutes les instances** (class-level lock + clas
 |-----------|---------|
 | Appels Zoho API | 30s (`_make_request`) |
 | Appels OAuth | 30s (`requests.post`) |
-| Playwright page load | 30s (`PAGE_LOAD_TIMEOUT`) |
-| Playwright elements | 10s (`ELEMENT_TIMEOUT`) |
+| ExamT3P HTTP requests | 10s (`httpx.Client timeout`) |
 | Conversation Analyzer LLM | 15s (`timeout=15.0`) |
 
 ---
