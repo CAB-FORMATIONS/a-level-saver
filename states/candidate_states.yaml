@@ -337,6 +337,35 @@ states:
 
     crm_updates: null  # La correction doit être faite manuellement
 
+  # ---------------------------------------------------------------------------
+  # A6: ACCÈS EXAMT3P PERDU (mot de passe changé par le candidat)
+  # ---------------------------------------------------------------------------
+  EXAMT3P_ACCESS_LOST:
+    id: "A6"
+    priority: 90  # Plus haute que A1/A2 — on doit demander les accès AVANT tout
+    severity: "BLOCKING"  # On ne peut pas répondre correctement sans les données
+    description: "Identifiants ExamT3P présents dans le CRM mais connexion impossible (mot de passe changé)"
+    category: "analysis"
+
+    detection:
+      method: "examt3p_agent"
+      condition: "credentials_login_failed == true AND (has_exam_date OR critical_evalbox)"
+
+    workflow:
+      action: "RESPOND"
+      # Pas de skip_date_analysis car on veut montrer les infos CRM qu'on a
+
+    response:
+      template: "response_master.html"
+      context_flags:
+        intention_demande_identifiants: true
+        show_statut_section: true
+        show_dates_section: false
+        show_sessions_section: false
+        examt3p_access_lost: true
+
+    crm_updates: null
+
 # =============================================================================
 # ÉTATS ÉLIGIBILITÉ UBER (Priorité 200-299)
 # =============================================================================

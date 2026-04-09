@@ -53,6 +53,9 @@ class DetectedState:
     # Intention détectée (si applicable)
     detected_intent: Optional[str] = None
     intent_context: Dict[str, Any] = field(default_factory=dict)
+    # Qualité du match matrice : 'exact', 'wildcard', 'fallback'
+    # Défini par template_engine lors de la sélection du template
+    match_quality: str = 'unknown'
 
 
 @dataclass
@@ -381,6 +384,8 @@ class StateDetector:
             # Flags pour EXAMT3P_DOWN (A2)
             'extraction_failed': examt3p_data.get('extraction_failed', False),
             'error_type': examt3p_data.get('error_type'),  # 'technical' ou 'credentials'
+            # Flags pour EXAMT3P_ACCESS_LOST (A6)
+            'credentials_login_failed': examt3p_data.get('credentials_login_failed', False),
 
             # Pièces refusées (pour templates Refus CMA)
             'pieces_refusees_details': examt3p_data.get('pieces_refusees_details', []),
@@ -774,6 +779,20 @@ class StateDetector:
         if state_name == 'EXAMT3P_DOWN':
             examt3p = context.get('examt3p_data', {})
             return examt3p.get('extraction_failed') and examt3p.get('error_type') == 'technical'
+
+        # État A6: Accès ExamT3P perdu (mot de passe changé par le candidat)
+        if state_name == 'EXAMT3P_ACCESS_LOST':
+            if not context.get('credentials_login_failed'):
+                return False
+            # Pertinent seulement si le candidat a une date ou un dossier avancé
+            # (sinon CREDENTIALS_INVALID suffit)
+            has_exam_date = bool(context.get('date_examen'))
+            evalbox = context.get('evalbox', '')
+            critical_evalbox = evalbox in {
+                'Dossier Synchronisé', 'VALIDE CMA', 'Convoc CMA reçue',
+                'Refusé CMA', 'Pret a payer', 'Dossier créé',
+            }
+            return has_exam_date or critical_evalbox
 
         return False
 

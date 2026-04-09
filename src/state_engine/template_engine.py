@@ -144,6 +144,7 @@ class TemplateEngine:
             result = self.generate_response(detected_states.blocking_state, ai_generator)
             result['states_used'] = [detected_states.blocking_state.name]
             result['is_blocking'] = True
+            result['match_quality'] = detected_states.blocking_state.match_quality
             return result
 
         # 2. Sinon, combiner les flags de tous les états et intentions
@@ -182,6 +183,7 @@ class TemplateEngine:
         result['primary_intent'] = triage_result.get('primary_intent')
         result['secondary_intents'] = triage_result.get('secondary_intents', [])
         result['is_blocking'] = False
+        result['match_quality'] = primary_state.match_quality
 
         intents_handled = []
         if triage_result.get('primary_intent'):
@@ -332,6 +334,7 @@ class TemplateEngine:
             # 0a. D'abord essayer match exact STATE:INTENTION
             matrix_key = f"{state.name}:{intention}"
             config = self.state_intention_matrix.get(matrix_key)
+            _match_quality = 'exact'
 
             # 0b. Si pas de match exact, essayer wildcard *:INTENTION
             if not config:
@@ -339,14 +342,19 @@ class TemplateEngine:
                 if wildcard_key in self.state_intention_matrix:
                     config = self.state_intention_matrix[wildcard_key]
                     matrix_key = wildcard_key  # Pour le logging
+                    _match_quality = 'wildcard'
                     logger.info(f"✅ Template sélectionné via wildcard: {wildcard_key}")
 
             if config:
                 template_file = config.get('template', '')
                 # Extraire le nom du template sans extension
                 template_key = template_file.replace('.html', '').replace('.md', '')
-                if matrix_key != f"*:{intention}":  # Ne pas doubler le log pour wildcard
+                if _match_quality == 'exact':
                     logger.info(f"✅ Template sélectionné via matrice: {matrix_key} -> {template_file}")
+
+                # Propager match_quality dans le contexte et sur l'état
+                context['match_quality'] = _match_quality
+                state.match_quality = _match_quality
 
                 # Injecter les context_flags dans le contexte global ET dans state.context_data
                 # Ces flags permettent aux templates hybrides de savoir quelle intention traiter
@@ -372,6 +380,11 @@ class TemplateEngine:
                     'crm_update': crm_update_config,
                     'context_flags': context_flags,
                 }
+
+            # Intention présente mais aucune entrée matrice (ni exact ni wildcard)
+            context['match_quality'] = 'fallback'
+            state.match_quality = 'fallback'
+            logger.warning(f"⚠️ Aucune entrée matrice pour {state.name}:{intention} (fallback)")
 
         # PASS 1: Templates avec intention (priorité haute)
         for template_key, config in self.base_templates.items():
@@ -438,9 +451,19 @@ class TemplateEngine:
         # FALLBACK FINAL: TOUJOURS utiliser response_master.html
         # Architecture moderne : matrice STATE:INTENTION + response_master.html
         logger.info(f"📝 Utilisation de response_master.html pour {state.name}:{intention}")
+
+        # Appliquer les context_flags définis dans le YAML de l'état si présents
+        # (utile quand l'état est BLOCKING et aucune entrée matrice n'a matché)
+        yaml_context_flags = state.response_config.get('context_flags', {})
+        if yaml_context_flags:
+            context.update(yaml_context_flags)
+            state.context_data.update(yaml_context_flags)
+            logger.info(f"📌 Context flags YAML injectés (fallback): {list(yaml_context_flags.keys())}")
+
         return 'response_master', {
             'file': 'templates/response_master.html',
             'description': f'Template master pour {state.name}',
+            'context_flags': yaml_context_flags,
         }
 
     def _inject_context_flags(
@@ -822,6 +845,8 @@ class TemplateEngine:
             'session_is_soir': enriched_lookups.get('session_type') == 'soir',
             'compte_existe': context.get('compte_existe', False),
             'personal_account_warning': context.get('personal_account_warning', False),
+            # Accès ExamT3P perdu (A6) — mot de passe changé par le candidat
+            'examt3p_access_lost': context.get('examt3p_access_lost', False),
             # Erreur de saisie session (A5)
             'session_assignment_error': context.get('session_assignment_error', False),
             'session_error_dates': context.get('session_error_dates', ''),

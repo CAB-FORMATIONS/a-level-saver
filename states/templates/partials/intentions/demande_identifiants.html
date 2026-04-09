@@ -1,4 +1,21 @@
 <!-- Partial: Réponse à l'intention DEMANDE_IDENTIFIANTS / ENVOIE_IDENTIFIANTS -->
+{{#if examt3p_access_lost}}
+<!-- Cas A6: Mot de passe ExamT3P changé par le candidat — on a perdu l'accès -->
+<b>Accès à votre dossier ExamT3P</b><br>
+<br>
+Nous ne pouvons pas accéder à votre compte ExamT3P car les identifiants que nous avons enregistrés ne fonctionnent plus. Cela arrive généralement lorsque le mot de passe a été modifié directement sur la plateforme.<br>
+<br>
+<b>Sans accès à votre dossier, nous ne pouvons pas :</b><br>
+→ Vérifier l'état de votre inscription<br>
+→ Vous communiquer votre date d'examen exacte<br>
+→ Suivre l'avancement de vos démarches<br>
+<br>
+<b>Pour que nous puissions reprendre le suivi de votre dossier, merci de nous communiquer :</b><br>
+→ Votre <b>identifiant ExamT3P</b> (adresse email utilisée sur <a href="https://www.exament3p.fr">exament3p.fr</a>)<br>
+→ Votre <b>nouveau mot de passe</b><br>
+<br>
+<i>⚠️ Une fois les accès récupérés, nous vous demanderons de ne plus modifier ces identifiants afin que nous puissions assurer le suivi complet de votre dossier.</i><br>
+{{else}}
 {{#if personal_account_warning}}
 <!-- Cas spécial: le candidat a envoyé ses propres identifiants mais on a déjà un compte CAB payé -->
 <b>À propos de vos identifiants ExamT3P</b><br>
@@ -48,6 +65,7 @@ Si vous n'avez pas reçu le lien de connexion, vérifiez vos spams ou contactez-
 Vous recevrez le lien d'invitation à la visioconférence par email avant le début de la formation.<br>
 {{/if}}
 {{/unless}}
+{{/if}}
 {{/if}}
 {{/if}}
 {{/if}}

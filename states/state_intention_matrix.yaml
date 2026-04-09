@@ -1501,6 +1501,16 @@ matrix:
       intention_statut_dossier: true
       show_statut_section: true
 
+  "DOSSIER_SYNCHRONIZED:DEMANDE_DATE_EXAMEN":
+    template: "response_master.html"
+    description: "Dossier en instruction CMA - date déjà assignée, pas de nouvelles dates à proposer"
+    context_flags:
+      intention_statut_dossier: true
+      show_statut_section: true
+      show_dates_section: false
+      show_sessions_section: false
+      evalbox_dossier_synchronise: true
+
   "DOSSIER_SYNCHRONIZED:CONFIRMATION_SESSION":
     template: "response_master.html"
     context_flags:
@@ -1535,6 +1545,16 @@ matrix:
       show_statut_section: true
 
   # --- EVALBOX_REFUSE_CMA × Intentions ---
+  "EVALBOX_REFUSE_CMA:DEMANDE_DATE_EXAMEN":
+    template: "response_master.html"
+    description: "Dossier refusé CMA - pas de nouvelles dates à proposer, expliquer la situation"
+    context_flags:
+      intention_statut_dossier: true
+      evalbox_refus_cma: true
+      show_statut_section: true
+      show_dates_section: false
+      show_sessions_section: false
+
   "EVALBOX_REFUSE_CMA:DEMANDE_CONVOCATION":
     template: "response_master.html"
     description: "Demande convocation mais dossier refusé CMA"
@@ -1805,6 +1825,48 @@ matrix:
       uber_cas_b: true
       intention_statut_dossier: true
       show_statut_section: true
+
+  # --- EXAMT3P_ACCESS_LOST × Intentions ---
+  # A6: Identifiants présents mais connexion impossible (mot de passe changé)
+  "EXAMT3P_ACCESS_LOST:DEMANDE_IDENTIFIANTS":
+    template: "response_master.html"
+    description: "Accès perdu - demander le nouveau mot de passe"
+    context_flags:
+      examt3p_access_lost: true
+      intention_demande_identifiants: true
+      show_statut_section: true
+      show_dates_section: false
+      show_sessions_section: false
+
+  "EXAMT3P_ACCESS_LOST:PROBLEME_CONNEXION_EXAMT3P":
+    template: "response_master.html"
+    description: "Problème connexion - expliquer qu'on a perdu l'accès, demander le mot de passe"
+    context_flags:
+      examt3p_access_lost: true
+      intention_demande_identifiants: true
+      show_statut_section: true
+      show_dates_section: false
+      show_sessions_section: false
+
+  "EXAMT3P_ACCESS_LOST:DEMANDE_DATE_EXAMEN":
+    template: "response_master.html"
+    description: "Demande de date - impossible sans accès ExamT3P, demander le mot de passe"
+    context_flags:
+      examt3p_access_lost: true
+      intention_demande_identifiants: true
+      show_statut_section: true
+      show_dates_section: false
+      show_sessions_section: false
+
+  "EXAMT3P_ACCESS_LOST:STATUT_DOSSIER":
+    template: "response_master.html"
+    description: "Demande statut - on ne peut pas vérifier sans accès, demander le mot de passe"
+    context_flags:
+      examt3p_access_lost: true
+      intention_demande_identifiants: true
+      show_statut_section: false
+      show_dates_section: false
+      show_sessions_section: false
 
   # --- EXAMT3P_CREDENTIALS_INVALIDES × Intentions ---
   "EXAMT3P_CREDENTIALS_INVALIDES:DEMANDE_IDENTIFIANTS":

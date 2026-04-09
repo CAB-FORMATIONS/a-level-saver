@@ -6822,6 +6822,7 @@ Bien cordialement,
                 'crm_updates_skipped': crm_update_result.updates_skipped,
                 'template_used': template_result.get('template_used'),
                 'template_file': template_result.get('template_file'),
+                'match_quality': template_result.get('match_quality', 'unknown'),
             },
             # Multi-états / Multi-intentions metadata
             'states_used': template_result.get('states_used', []),
@@ -7453,6 +7454,11 @@ Génère maintenant la personnalisation (1-3 phrases):"""
             parts.append(f"proposed_dates={','.join(conv_state.proposed_dates)}")
         if conv_state and hasattr(conv_state, 'response_mode') and conv_state.response_mode:
             parts.append(f"response_mode={conv_state.response_mode}")
+
+        # Qualité du match matrice (exact/wildcard/fallback)
+        match_quality = state_engine.get('match_quality') or 'unknown'
+        if match_quality and match_quality != 'unknown':
+            parts.append(f"match={match_quality}")
 
         return f"[META] {' | '.join(parts)}"
 
