@@ -1169,7 +1169,7 @@ class TemplateEngine:
             result['credentials_invalid'] = False
             result['credentials_inconnus'] = False
             for key in list(result.keys()):
-                if key.startswith('intention_'):
+                if key.startswith('intention_') or key.startswith('action_'):
                     result[key] = False
             logger.info("🚫 EXAMT3P_ACCESS_LOST: toutes sections supprimées sauf access_lost")
 
