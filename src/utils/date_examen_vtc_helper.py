@@ -223,9 +223,9 @@ def get_earlier_dates_other_departments(
         min_days_before_cloture = 1  # Minimum 1 jour avant la clôture
 
         for session in all_sessions:
-            # Vérifier le département
-            session_dept = session.get('Departement', '')
-            if session_dept == current_departement:
+            # Vérifier le département (zfill pour normaliser int→str: 1→"01")
+            session_dept = str(session.get('Departement', '')).zfill(2)
+            if session_dept == str(current_departement).zfill(2):
                 continue  # Exclure le département actuel
 
             # Vérifier la date de clôture (doit être dans au moins 2 jours)
@@ -556,7 +556,6 @@ def analyze_exam_date_situation(
 
             if examt3p_date_obj and crm_date_obj and examt3p_date_obj != crm_date_obj:
                 logger.warning(f"  ⚠️ DÉSYNCHRONISATION DATE: CRM={crm_date_str} ≠ ExamT3P={examt3p_exam_date_str}")
-                logger.warning(f"  📅 ExamT3P est la source de vérité → override de la date pour l'analyse CAS")
 
                 # Essayer de trouver la session CRM correspondant à la date ExamT3P
                 if crm_client and departement:
@@ -566,30 +565,21 @@ def analyze_exam_date_situation(
                     )
                     if examt3p_session:
                         # Session CRM trouvée pour la date ExamT3P → utiliser ses infos
+                        logger.info(f"  📅 ExamT3P confirmé par calendrier CRM → override de la date")
                         result['date_examen_info'] = examt3p_session
                         result['date_cloture'] = examt3p_session.get('Date_Cloture_Inscription')
                         logger.info(f"  ✅ Session CRM trouvée pour ExamT3P date: clôture={result['date_cloture']}")
+                        result['date_examen_crm_desync'] = True
                     else:
                         # Pas de session CRM pour la date ExamT3P
-                        # Construire une info minimale avec la date ExamT3P
-                        logger.warning(f"  ⚠️ Pas de session CRM pour la date ExamT3P {examt3p_exam_date_str}")
-                        examt3p_date_iso = examt3p_date_obj.strftime("%Y-%m-%d")
-                        result['date_examen_info'] = {
-                            'Date_Examen': examt3p_date_iso,
-                            'source': 'examt3p',
-                            'Departement': departement,
-                        }
-                        # Pour une date passée ou imminente sans session CRM,
-                        # la clôture est forcément passée aussi
-                        if examt3p_date_obj <= datetime.now().date():
-                            result['date_cloture'] = examt3p_date_iso
-                            logger.info(f"  📅 Date ExamT3P passée/aujourd'hui → clôture forcée à {examt3p_date_iso}")
-                        else:
-                            # Date future sans session CRM → pas de clôture connue
-                            result['date_cloture'] = None
-                            logger.warning(f"  ⚠️ Date ExamT3P future mais pas de session CRM → clôture inconnue")
-
-                result['date_examen_crm_desync'] = True
+                        # La date ExamT3P n'existe pas dans le calendrier Zoho →
+                        # c'est probablement une erreur ExamT3P. On garde la date CRM.
+                        logger.warning(f"  ⚠️ Date ExamT3P {examt3p_exam_date_str} N'EXISTE PAS dans le calendrier CRM (dept {departement})")
+                        logger.info(f"  📅 CRM reste la source de vérité → date {crm_date_str} conservée")
+                        result['date_examen_crm_desync'] = True
+                        result['examt3p_date_not_in_calendar'] = True
+                else:
+                    result['date_examen_crm_desync'] = True
 
     # ================================================================
     # DÉTERMINATION DU CAS

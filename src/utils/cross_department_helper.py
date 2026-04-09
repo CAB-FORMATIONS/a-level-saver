@@ -51,8 +51,9 @@ def get_cross_department_alternatives(
     logger.info(f"🔍 Cross-department search: dept={current_dept}, ref_date={reference_date}, compte={compte_existe}")
 
     # Recuperer toutes les dates plus tot (fonction existante)
+    # limit=100 pour ne pas couper les dates same_region qui arrivent après les other_region
     all_earlier = get_earlier_dates_other_departments(
-        crm_client, current_dept, reference_date, limit=20
+        crm_client, current_dept, reference_date, limit=100
     )
 
     if not all_earlier:
@@ -70,7 +71,7 @@ def get_cross_department_alternatives(
     closest_closure_days = 999
 
     for date_info in all_earlier:
-        dept = str(date_info.get('Departement', ''))
+        dept = str(date_info.get('Departement', '')).zfill(2)
 
         # Calculer jours jusqu'a cloture
         cloture_str = date_info.get('Date_Cloture_Inscription', '')

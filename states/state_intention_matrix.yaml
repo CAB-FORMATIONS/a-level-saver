@@ -1904,6 +1904,14 @@ matrix:
 
   # VALIDE_CMA_WAITING_CONVOC (D-4) × DEMANDE_CONVOCATION
   # Candidat validé CMA qui demande sa convocation (examen futur)
+  "VALIDE_CMA_WAITING_CONVOC:CONFIRMATION_SESSION":
+    template: "response_master.html"
+    description: "CMA validee — confirmer session actuelle, pas proposer d'alternatives"
+    context_flags:
+      intention_confirmation_session: true
+      show_statut_section: true
+      show_sessions_section: false
+
   "VALIDE_CMA_WAITING_CONVOC:DEMANDE_CONVOCATION":
     template: "response_master.html"
     description: "Dossier validé CMA, convocation à venir"
