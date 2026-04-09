@@ -277,6 +277,7 @@ INTENTIONS POSSIBLES (par ordre de spécificité - préfère les intentions spé
   Exemples: "comment obtenir ma carte VTC", "demande de carte", "carte professionnelle"
 - QUESTION_EXAMEN_PRATIQUE: Question sur l'examen/formation pratique (hors offre Uber 20€)
   Exemples: "examen pratique", "formation pratique", "partie pratique", "pratique incluse", "théorique et pratique", "conduite", "véhicule double commande"
+  ⚠️ Si le candidat a une date d'examen future → action GO (dossier actif, on répond en DOC). ROUTE vers Contact uniquement si PAS de date d'examen.
 
 **Autres intentions:**
 - QUESTION_PROCESSUS: Question sur le processus
@@ -666,7 +667,8 @@ EXEMPLE PLAINTE - Message: "J'avais clairement indiqué mon choix pour une forma
         deal_data: Optional[Dict[str, Any]] = None,
         current_department: str = DEPT_DOC,
         conversation_summary: Optional[str] = None,
-        deal_journey: Optional[str] = None
+        deal_journey: Optional[str] = None,
+        agent_hint: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Analyse un ticket et détermine l'action de triage + intention du candidat.
@@ -850,6 +852,17 @@ EXEMPLE PLAINTE - Message: "J'avais clairement indiqué mon choix pour une forma
                     'intent_context': {'for_france_travail': True}
                 }
 
+        # Injecter le hint de l'agent humain (@agent) s'il existe
+        if agent_hint:
+            context_parts.append(
+                f"**INSTRUCTION DE L'AGENT HUMAIN (prioritaire) :**\n"
+                f"L'agent humain a relu le brouillon et demande une correction :\n"
+                f"\"{agent_hint}\"\n"
+                f"Tiens compte de cette instruction pour déterminer l'intention du candidat.\n"
+                f"Si l'agent indique un nom d'intention explicite (ex: DEMANDE_DATE_PLUS_TOT), utilise-la."
+            )
+            logger.info(f"  📝 @agent hint injecté dans le contexte triage: {agent_hint[:80]}")
+
         context = "\n\n".join(context_parts)
 
         # Appeler Claude pour l'analyse
@@ -1010,6 +1023,39 @@ EXEMPLE PLAINTE - Message: "J'avais clairement indiqué mon choix pour une forma
                         if llm_primary not in llm_result['secondary_intents']:
                             llm_result['secondary_intents'].append(llm_primary)
                             logger.info(f"     LLM primary '{llm_primary}' ajouté aux secondary_intents")
+
+            # ================================================================
+            # Post-LLM override: QUESTION_EXAMEN_PRATIQUE + date examen future → GO
+            # Le LLM route systématiquement vers Contact pour "examen pratique"
+            # mais si le candidat a un dossier actif (date examen future), on reste en DOC.
+            # ================================================================
+            if (llm_result.get('action') == 'ROUTE'
+                    and llm_result.get('primary_intent') == 'QUESTION_EXAMEN_PRATIQUE'
+                    and deal_data):
+                from datetime import datetime as _dt, date as _date
+                has_future_exam = False
+                real_exam_date = deal_data.get('_real_exam_date')
+                if real_exam_date:
+                    try:
+                        exam_dt = _dt.strptime(str(real_exam_date), '%Y-%m-%d').date()
+                        has_future_exam = exam_dt > _date.today()
+                    except ValueError:
+                        pass
+                elif deal_data.get('Date_examen_VTC'):
+                    date_vtc = deal_data['Date_examen_VTC']
+                    date_name = date_vtc.get('name', '') if isinstance(date_vtc, dict) else str(date_vtc)
+                    import re as _re
+                    date_match = _re.search(r'(\d{4}-\d{2}-\d{2})', date_name)
+                    if date_match:
+                        try:
+                            exam_dt = _dt.strptime(date_match.group(1), '%Y-%m-%d').date()
+                            has_future_exam = exam_dt > _date.today()
+                        except ValueError:
+                            pass
+                if has_future_exam:
+                    logger.info(f"  🔄 Post-LLM override: QUESTION_EXAMEN_PRATIQUE + date examen future → GO (dossier actif)")
+                    llm_result['action'] = 'GO'
+                    llm_result['target_department'] = current_department
 
             return llm_result
 
