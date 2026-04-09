@@ -210,6 +210,58 @@ def sync_examt3p_to_crm(
         logger.info("  ℹ️ Pas de données ExamT3P à synchroniser")
         return result
 
+    # ================================================================
+    # 0. GUARD RAIL RÉINSCRIPTION TE — NE PAS SYNC SI DOSSIER TE != CRM
+    # ================================================================
+    # Quand un candidat échoue, la CMA ajoute un suffixe TEn au dossier
+    # et remet le statut à "En attente du paiement". Si on sync aveuglément,
+    # on downgrade le CRM (ex: Convoc CMA reçue → Pret a payer).
+    crm_num_dossier = deal_data.get('NUM_DOSSIER_EVALBOX', '').strip()
+    examt3p_num_dossier = examt3p_data.get('num_dossier', '').strip()
+
+    if crm_num_dossier and examt3p_num_dossier:
+        import re as _re
+        crm_has_te = bool(_re.search(r'TE\d+$', crm_num_dossier))
+        examt3p_has_te = bool(_re.search(r'TE\d+$', examt3p_num_dossier))
+        crm_base = _re.sub(r'TE\d+$', '', crm_num_dossier).lstrip('0')
+        examt3p_base = _re.sub(r'TE\d+$', '', examt3p_num_dossier).lstrip('0')
+
+        if crm_base == examt3p_base and examt3p_has_te and not crm_has_te:
+            # ExamT3P a un TEn que le CRM n'a pas → réinscription après échec
+            te_suffix = _re.search(r'(TE\d+)$', examt3p_num_dossier).group(1)
+            logger.warning(f"  🚫 RÉINSCRIPTION DÉTECTÉE: CRM={crm_num_dossier} vs ExamT3P={examt3p_num_dossier} ({te_suffix})")
+            logger.warning(f"     → Sync Evalbox/Date BLOQUÉE (le CRM reflète l'ancien dossier)")
+            logger.info(f"     → Candidat a échoué à l'examen, Resultat → NON ADMISSIBLE")
+
+            result['reinscription_detected'] = True
+            result['reinscription_suffix'] = te_suffix
+            result['examt3p_num_dossier'] = examt3p_num_dossier
+
+            # Mettre à jour Resultat = NON ADMISSIBLE (même logique que convoc_sync mcp)
+            # On ne touche PAS à Evalbox ni Date_examen_VTC
+            current_resultat = deal_data.get('Resultat', '')
+            if current_resultat not in ('NON ADMISSIBLE', 'NON ADMIS', 'ABSENT TH', 'ABSENT PR'):
+                result['changes_made'].append({
+                    'field': 'Resultat',
+                    'old_value': current_resultat,
+                    'new_value': 'NON ADMISSIBLE',
+                    'source': f'reinscription_{te_suffix}'
+                })
+                if not dry_run and crm_client:
+                    try:
+                        crm_client.update_deal(deal_id, {'Resultat': 'NON ADMISSIBLE'})
+                        result['crm_updated'] = True
+                        logger.info(f"  ✅ Resultat mis à jour: '{current_resultat}' → 'NON ADMISSIBLE'")
+                    except Exception as e:
+                        logger.error(f"  ❌ Échec mise à jour Resultat: {e}")
+
+            result['blocked_changes'].append({
+                'field': 'Evalbox',
+                'reason': f'Réinscription {te_suffix} détectée — Evalbox/Date protégés',
+                'examt3p_statut': examt3p_data.get('statut_dossier', ''),
+            })
+            return result
+
     updates_to_apply = {}
     current_evalbox = deal_data.get('Evalbox', '')
     current_date_cloture = None
