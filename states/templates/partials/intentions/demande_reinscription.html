@@ -1,6 +1,6 @@
 <!-- Partial: DEMANDE_REINSCRIPTION -->
 {{#if resultat_non_admis}}
-<!-- Cas NON ADMIS: empathie + règles repassage + options (autonome / CPF pratique) -->
+<!-- Cas NON ADMIS (pratique): empathie + règles repassage + options (autonome / CPF pratique) -->
 <b>Concernant votre demande de réinscription</b><br>
 Ne vous découragez pas, l'examen pratique VTC est exigeant et beaucoup de candidats ont besoin de plusieurs tentatives pour réussir.<br>
 <br>
@@ -23,6 +23,34 @@ Souhaitez-vous être {{#if is_female}}recontactée{{else}}recontacté{{/if}} par
 <br>
 <b>Bonne nouvelle :</b> vous pouvez refaire notre formation e-learning <b>gratuitement</b> pour rafraîchir vos connaissances.<br>
 {{else}}
+{{#if resultat_non_admissible}}
+<!-- Cas NON ADMISSIBLE (théorique): empathie + réinscription rapide + prochaine date -->
+<b>Concernant votre réinscription à l'examen</b><br>
+Ne vous découragez pas, l'examen VTC est exigeant et beaucoup de candidats le réussissent au deuxième essai.<br>
+<br>
+{{#if uber_20}}
+<b>Information importante :</b> L'offre Uber ayant pris en charge les frais de votre première inscription, celle-ci n'est malheureusement <b>pas renouvelable</b>.<br>
+<br>
+{{/if}}
+<b>Pour vous réinscrire au plus vite :</b><br>
+<ol>
+<li>Connectez-vous sur <a href="https://www.exament3p.fr">www.exament3p.fr</a></li>
+<li>Sélectionnez une nouvelle date d'examen</li>
+<li>Procédez au paiement des frais d'inscription ({{frais_examen_complet}}€)</li>
+</ol>
+{{#if has_next_dates}}
+<b>Prochaine date d'examen disponible :</b><br>
+{{#each next_dates}}
+&nbsp;&nbsp;→ <b>{{this.date_examen_formatted}}</b>{{#if this.date_cloture_formatted}} (inscriptions avant le {{this.date_cloture_formatted}}){{/if}}<br>
+{{/each}}
+<br>
+<b>Ne tardez pas</b>, les places sont limitées et les clôtures d'inscription approchent.<br>
+{{/if}}
+<br>
+<b>Bonne nouvelle :</b> vous pouvez refaire notre formation e-learning <b>gratuitement</b> pour rafraîchir vos connaissances via la plateforme.<br>
+<br>
+Ces formations sont également <b>finançables via votre CPF</b>. Souhaitez-vous être {{#if is_female}}recontactée{{else}}recontacté{{/if}} par un conseiller ? Si oui, répondez simplement à ce mail.<br>
+{{else}}
 <!-- Cas générique: réinscription standard (contexte inconnu) -->
 <b>Concernant votre demande de réinscription</b><br>
 Vous souhaitez vous réinscrire à l'examen VTC. C'est tout à fait possible.<br>
@@ -37,5 +65,13 @@ Vous souhaitez vous réinscrire à l'examen VTC. C'est tout à fait possible.<br
 <li>Sélectionnez une nouvelle date d'examen</li>
 <li>Procédez au paiement des frais d'inscription ({{frais_examen_complet}}€)</li>
 </ol>
+{{#if has_next_dates}}
+<b>Prochaine date d'examen disponible :</b><br>
+{{#each next_dates}}
+&nbsp;&nbsp;→ <b>{{this.date_examen_formatted}}</b>{{#if this.date_cloture_formatted}} (inscriptions avant le {{this.date_cloture_formatted}}){{/if}}<br>
+{{/each}}
+<br>
+{{/if}}
 <b>Bonne nouvelle :</b> vous pouvez refaire notre formation <b>gratuitement</b> pour rafraîchir vos connaissances via la plateforme e-learning.<br>
+{{/if}}
 {{/if}}

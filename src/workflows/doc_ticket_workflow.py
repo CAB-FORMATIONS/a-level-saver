@@ -3562,7 +3562,18 @@ Deux comptes ExamenT3P fonctionnels ont été détectés pour ce candidat, et le
                 crm_client=self.crm_client,
                 dry_run=False
             )
-            if sync_result.get('crm_updated'):
+            if sync_result.get('reinscription_detected'):
+                # Réinscription TE détectée — le candidat a échoué à l'examen
+                # Forcer Resultat dans deal_data pour que _classify_resultat le voie dans ce ticket
+                te_suffix = sync_result.get('reinscription_suffix', 'TE?')
+                logger.warning(f"  🚫 RÉINSCRIPTION {te_suffix} DÉTECTÉE — candidat NON ADMISSIBLE")
+                deal_data['Resultat'] = 'NON ADMISSIBLE'
+                if sync_result.get('crm_updated'):
+                    # Recharger deal_data après mise à jour Resultat
+                    updated_deal = self.crm_client.get_deal(deal_id)
+                    if updated_deal:
+                        deal_data = updated_deal
+            elif sync_result.get('crm_updated'):
                 logger.info("  ✅ CRM synchronisé avec ExamT3P")
                 # Recharger deal_data après mise à jour
                 updated_deal = self.crm_client.get_deal(deal_id)
@@ -6010,6 +6021,23 @@ Bien cordialement,
         # Log intentions (multi-intentions)
         primary_intent = triage_result.get('primary_intent') or triage_result.get('detected_intent')
         secondary_intents = triage_result.get('secondary_intents', [])
+
+        # SWAP: Si candidat NON ADMISSIBLE + DEMANDE_REINSCRIPTION en secondaire → promouvoir en primary
+        # On veut pousser le candidat à se réinscrire vite (prochaine date + clôture)
+        dossier_termine = analysis_result.get('dossier_termine', False)
+        resultat_category = analysis_result.get('resultat_category', '')
+        if (dossier_termine and resultat_category in ('post_exam', 'mid_exam')
+                and 'DEMANDE_REINSCRIPTION' in secondary_intents
+                and primary_intent != 'DEMANDE_REINSCRIPTION'):
+            old_primary = primary_intent
+            secondary_intents.remove('DEMANDE_REINSCRIPTION')
+            secondary_intents.insert(0, old_primary)
+            primary_intent = 'DEMANDE_REINSCRIPTION'
+            triage_result['primary_intent'] = primary_intent
+            triage_result['detected_intent'] = primary_intent
+            triage_result['secondary_intents'] = secondary_intents
+            logger.info(f"  🔄 SWAP: {old_primary} → DEMANDE_REINSCRIPTION (candidat {resultat_category}, priorité réinscription)")
+
         if primary_intent:
             logger.info(f"  🎯 Intention principale: {primary_intent}")
         if secondary_intents:

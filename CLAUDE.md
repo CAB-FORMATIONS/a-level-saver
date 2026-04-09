@@ -733,6 +733,29 @@ if evalbox == 'Dossier Synchronisé' and date_cloture_is_past:
 
 ---
 
+## Résultats d'examen et réinscription
+
+### Théorique vs Pratique — règles différentes
+
+| Résultat | Type | Dates connues | Frais | Règles |
+|----------|------|--------------|-------|--------|
+| `NON ADMISSIBLE` | Théorique | ✅ Oui (Dates_Examens_VTC_TAXI) | 241€ complet | Repasse tout |
+| `ABSENT TH` | Théorique | ✅ Oui | 241€ complet | Repasse tout |
+| `NON ADMIS` | Pratique | ❌ Non (dates gérées par CMA) | Frais réduits | 3 tentatives max / 1 an |
+| `ABSENT PR` | Pratique | ❌ Non | Frais réduits | 3 tentatives max / 1 an |
+
+**IMPORTANT** : Les dates dans le CRM (`Dates_Examens_VTC_TAXI`) sont uniquement les dates de l'examen **théorique**. Les dates d'examen pratique sont gérées directement par la CMA sur ExamT3P.
+
+### Réinscription TE (suffixe dossier)
+
+Quand un candidat échoue, la CMA ajoute un suffixe TEn au dossier :
+- `00045386` → `00045386TE1` (1ère réinscription)
+- Le dossier TE est remis à "En attente du paiement"
+
+**Guard rail** : Si ExamT3P montre un dossier TEn que le CRM n'a pas → **NE PAS sync Evalbox/Date** (protège le CRM). Mettre `Resultat=NON ADMISSIBLE` si pas déjà défini.
+
+---
+
 ## DEBUGGING : Pistes d'Investigation
 
 ### 7. Template non affiché / Partial manquant

@@ -915,12 +915,26 @@ def analyze_exam_date_situation(
             # Vérifier s'il y a des indices dans les threads que l'examen n'a pas été passé
             has_indices_not_passed = check_threads_for_exam_not_passed(threads) if threads else False
 
+            # Si Resultat indique un échec THÉORIQUE → charger prochaines dates pour réinscription
+            # NON ADMIS / ABSENT PR = échec pratique → dates pratiques non connues (gérées par CMA)
+            resultat = deal_data.get('Resultat', '')
+            ECHEC_THEORIQUE = {'NON ADMISSIBLE', 'ABSENT TH'}
+            if resultat in ECHEC_THEORIQUE and crm_client:
+                logger.info(f"  📅 CAS 7 + Resultat={resultat} → chargement prochaines dates pour réinscription")
+                dept = extract_departement_from_cma(deal_data.get('CMA_de_depot', ''))
+                if dept:
+                    next_dates = get_next_exam_dates(crm_client, dept, limit=3)
+                    if next_dates:
+                        result['next_dates'] = next_dates
+                        result['should_include_in_response'] = True
+                        logger.info(f"  ✅ {len(next_dates)} date(s) disponibles pour réinscription (dept {dept})")
+
             if has_indices_not_passed:
                 result['should_include_in_response'] = True
-            else:
+            elif not result.get('next_dates'):
                 result['should_include_in_response'] = False
 
-            logger.info(f"  ➡️ CAS 7: Date passée + validé (indices non passé: {has_indices_not_passed})")
+            logger.info(f"  ➡️ CAS 7: Date passée + validé (indices non passé: {has_indices_not_passed}, resultat: {resultat or 'N/A'})")
             return result
 
         # CAS 2: Date passée + statuts pré-validation (N/A, Dossier créé, Pret a payer, Dossier Synchronisé)
