@@ -4755,6 +4755,53 @@ Cordialement,<br>
                 logger.info(f"  ✅ {len(session_data['proposed_options'])} option(s) de session proposée(s)")
 
             # ================================================================
+            # FILTRAGE SESSIONS PAR MOIS DEMANDÉ (requested_training_dates.month)
+            # Si le candidat demande "session d'avril" sans dates précises,
+            # filtrer les sessions proposées pour ne garder que ce mois
+            # ================================================================
+            _req_training = intent.requested_training_dates
+            _req_training_month = _req_training.get('month') if _req_training else None
+            if _req_training_month and not intent.has_date_range_request:
+                proposed = session_data.get('proposed_options', [])
+                if proposed:
+                    filtered_options = []
+                    for option in proposed:
+                        filtered_sessions = []
+                        for sess in option.get('sessions', []):
+                            date_debut = sess.get('Date_d_but', '')
+                            if date_debut:
+                                d = parse_date_flexible(date_debut, 'filter_session_month')
+                                if d and d.month == _req_training_month:
+                                    filtered_sessions.append(sess)
+                        if filtered_sessions:
+                            filtered_options.append({**option, 'sessions': filtered_sessions})
+
+                    month_names = ['', 'janvier', 'février', 'mars', 'avril', 'mai', 'juin',
+                                   'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre']
+                    if filtered_options:
+                        session_data['proposed_options'] = filtered_options
+                        logger.info(f"  📅 Sessions filtrées par mois {month_names[_req_training_month]}: {sum(len(o.get('sessions',[])) for o in proposed)} → {sum(len(o.get('sessions',[])) for o in filtered_options)}")
+                    else:
+                        # Aucune session du mois demandé dans les options existantes
+                        # → Charger les sessions de ce mois spécifiquement
+                        logger.info(f"  📅 Aucune session en {month_names[_req_training_month]} dans les options actuelles — recherche CRM...")
+                        from src.utils.session_helper import search_sessions_by_month
+                        month_sessions = search_sessions_by_month(
+                            crm_client=self.crm_client,
+                            month=_req_training_month,
+                            year=datetime.now().year if _req_training_month >= datetime.now().month else datetime.now().year + 1,
+                            session_type=triage_session_pref,
+                        )
+                        if month_sessions:
+                            session_data['proposed_options'] = [{'exam_info': {}, 'sessions': month_sessions}]
+                            session_data['sessions_from_requested_month'] = True
+                            logger.info(f"  ✅ {len(month_sessions)} session(s) trouvée(s) en {month_names[_req_training_month]}")
+                        else:
+                            logger.info(f"  ⚠️ Aucune session en {month_names[_req_training_month]} — on garde toutes les sessions")
+                            session_data['no_session_for_requested_month'] = True
+                            session_data['requested_session_month_name'] = month_names[_req_training_month]
+
+            # ================================================================
             # CASCADE D'ALTERNATIVES (DEMANDE_CHANGEMENT_SESSION)
             # ================================================================
             if is_session_change_request and not has_specific_dates and not is_session_complaint:

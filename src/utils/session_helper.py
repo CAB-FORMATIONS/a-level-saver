@@ -208,6 +208,94 @@ def get_sessions_for_exam_date(
         return []
 
 
+def search_sessions_by_month(
+    crm_client,
+    month: int,
+    year: int = None,
+    session_type: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Recherche les sessions de formation pour un mois donné.
+    Utilisé quand le candidat demande "session d'avril" sans dates précises.
+
+    Args:
+        crm_client: Client Zoho CRM
+        month: Mois recherché (1-12)
+        year: Année (défaut: année en cours ou suivante)
+        session_type: 'jour', 'soir', ou None pour les deux
+
+    Returns:
+        Liste des sessions Uber Visio trouvées pour ce mois
+    """
+    from config import settings
+
+    if not year:
+        year = datetime.now().year
+        if month < datetime.now().month:
+            year += 1
+
+    # Plage: du 1er au dernier jour du mois
+    start = f"{year}-{month:02d}-01"
+    if month == 12:
+        end = f"{year + 1}-01-01"
+    else:
+        end = f"{year}-{month + 1:02d}-01"
+
+    # Ne pas chercher des sessions déjà commencées depuis plus de 3 jours
+    three_days_ago = (datetime.now() - timedelta(days=3)).strftime('%Y-%m-%d')
+
+    logger.info(f"🔍 Recherche sessions en {month:02d}/{year} (Date_d_but entre {start} et {end})")
+
+    try:
+        url = f"{settings.zoho_crm_api_url}/Sessions1/search"
+        criteria = (
+            f"((Date_d_but:greater_equal:{start})"
+            f"and(Date_d_but:less_than:{end})"
+            f"and(Date_d_but:greater_equal:{three_days_ago}))"
+        )
+
+        all_sessions = []
+        page = 1
+        while page <= 5:
+            params = {"criteria": criteria, "page": page, "per_page": 200}
+            response = crm_client._make_request("GET", url, params=params)
+            sessions = response.get("data", [])
+            if not sessions:
+                break
+            all_sessions.extend(sessions)
+            if len(sessions) < 200:
+                break
+            page += 1
+
+        if not all_sessions:
+            logger.info(f"  Aucune session trouvée pour {month:02d}/{year}")
+            return []
+
+        # Filtrer Uber Visio uniquement
+        uber_sessions = [
+            s for s in all_sessions
+            if is_uber_visio_session(
+                s.get('Lieu_de_formation', {}).get('name', '')
+                if isinstance(s.get('Lieu_de_formation'), dict)
+                else str(s.get('Lieu_de_formation', ''))
+            )
+        ]
+
+        # Filtrer par type si demandé
+        if session_type and uber_sessions:
+            type_prefix = SESSION_TYPE_JOUR if session_type == 'jour' else SESSION_TYPE_SOIR
+            filtered = [s for s in uber_sessions if s.get('Name', '').lower().startswith(type_prefix)]
+            if filtered:
+                uber_sessions = filtered
+
+        logger.info(f"  ✅ {len(uber_sessions)} session(s) Uber Visio en {month:02d}/{year}")
+        return uber_sessions
+
+    except Exception as e:
+        logger.error(f"❌ Erreur recherche sessions par mois: {e}")
+        return []
+
+
 def get_sessions_for_multiple_exam_dates(
     crm_client,
     exam_dates: List[Dict[str, Any]],
