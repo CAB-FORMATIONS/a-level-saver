@@ -524,35 +524,6 @@ class TemplateEngine:
             logger.error(f"Erreur lecture template {template_path}: {e}")
             return None
 
-    def _load_block(self, block_name: str) -> Optional[str]:
-        """Charge un bloc depuis le cache ou le fichier."""
-        if block_name in self.blocks_cache:
-            return self.blocks_cache[block_name]
-
-        # Chercher dans le registry
-        block_config = self.blocks_registry.get(block_name, {})
-        block_file = block_config.get('file', f'blocks/{block_name}.md')
-
-        # Construire le chemin
-        full_path = self.states_path / block_file
-
-        if not full_path.exists():
-            # Essayer avec le path direct dans blocks/
-            full_path = self.blocks_path / f"{block_name}.md"
-            if not full_path.exists():
-                logger.warning(f"Bloc non trouvé: {block_name}")
-                return None
-
-        try:
-            content = full_path.read_text(encoding='utf-8')
-            # Nettoyer le contenu: supprimer commentaires HTML et espaces inutiles
-            content = self._clean_block_content(content)
-            self.blocks_cache[block_name] = content
-            return content
-        except Exception as e:
-            logger.error(f"Erreur lecture bloc {block_name}: {e}")
-            return None
-
     def _clean_block_content(self, content: str) -> str:
         """Nettoie le contenu d'un bloc en supprimant commentaires et espaces inutiles."""
         import re

@@ -37,7 +37,6 @@ load_dotenv(project_root / ".env")
 
 from src.agents.deal_linking_agent import DealLinkingAgent
 from src.agents.examt3p_agent import ExamT3PAgent
-from src.agents.dispatcher_agent import TicketDispatcherAgent
 from src.agents.crm_update_agent import CRMUpdateAgent
 from src.agents.triage_agent import TriageAgent
 from src.zoho_client import ZohoDeskClient, ZohoCRMClient
@@ -138,8 +137,7 @@ class DOCTicketWorkflow:
             desk_client=self.desk_client,
             crm_client=self.crm_client
         )
-        self.examt3p_agent = ExamT3PAgent()  # Uses Playwright, not Zoho API
-        self.dispatcher = TicketDispatcherAgent(desk_client=self.desk_client)
+        self.examt3p_agent = ExamT3PAgent()  # Uses HTTP extraction (httpx)
         self.crm_update_agent = CRMUpdateAgent(crm_client=self.crm_client)
         self.triage_agent = TriageAgent()  # Uses Anthropic API, not Zoho API
 
@@ -414,6 +412,69 @@ class DOCTicketWorkflow:
             logger.warning(f"  ⚠️ Erreur vérification clarification en attente: {e}")
             return None
 
+    def _check_agent_hint(self, ticket_id: str) -> Optional[str]:
+        """
+        Check if an agent left a @agent hint in the ticket's internal comments.
+
+        Looks for the most recent private comment containing '@agent' and extracts
+        the hint text that follows. This allows human agents to guide the triage
+        when the LLM misclassifies intent.
+
+        One-shot: After using the hint, _consume_agent_hint() adds a
+        [AGENT_HINT_USED] marker. If that marker appears before (= more recent
+        than) the @agent comment, the hint is considered consumed.
+
+        Returns:
+            The hint text (stripped of HTML), or None if no hint found.
+        """
+        try:
+            comments = self.desk_client.get_ticket_comments(
+                ticket_id=ticket_id,
+                include_public=False,
+                include_private=True
+            )
+
+            # Comments are returned newest-first
+            for comment in comments:
+                content = comment.get('content', '')
+                if not content:
+                    continue
+
+                # Strip HTML tags for clean text search
+                clean_content = re.sub(r'<[^>]+>', ' ', content).strip()
+                # Collapse whitespace
+                clean_content = re.sub(r'\s+', ' ', clean_content)
+
+                # If we see the USED marker before an @agent → hint already consumed
+                if '[AGENT_HINT_USED]' in clean_content:
+                    return None
+
+                if '@agent' in clean_content.lower():
+                    # Extract text after @agent
+                    match = re.search(r'@agent\s+(.*)', clean_content, re.IGNORECASE)
+                    if match:
+                        hint = match.group(1).strip()
+                        if hint:
+                            return hint
+
+            return None
+
+        except Exception as e:
+            logger.warning(f"  ⚠️ Erreur vérification @agent hint: {e}")
+            return None
+
+    def _consume_agent_hint(self, ticket_id: str) -> None:
+        """Mark the @agent hint as consumed so it won't fire again."""
+        try:
+            self.desk_client.add_ticket_comment(
+                ticket_id=ticket_id,
+                content='[AGENT_HINT_USED]',
+                is_public=False
+            )
+            logger.info("  ✅ @agent hint marqué comme consommé")
+        except Exception as e:
+            logger.warning(f"  ⚠️ Erreur marquage @agent hint: {e}")
+
     def _verify_duplicate_clarification_response(
         self,
         ticket_id: str,
@@ -603,14 +664,25 @@ class DOCTicketWorkflow:
                 # qui détectera l'intention CONFIRMATION_DOUBLON ou REFUS_DOUBLON
 
             # ================================================================
+            # STEP 0.6: VÉRIFIER SI UN AGENT HUMAIN A LAISSÉ UN HINT (@agent)
+            # ================================================================
+            agent_hint = self._check_agent_hint(ticket_id)
+            if agent_hint:
+                logger.info(f"\n📝 @agent hint détecté: {agent_hint[:80]}...")
+
+            # ================================================================
             # STEP 1: AGENT TRIEUR (Triage with STOP & GO)
             # ================================================================
             logger.info("\n1️⃣  AGENT TRIEUR - Triage du ticket...")
             result['workflow_stage'] = 'TRIAGE'
 
             # auto_transfer=False if we're in dry-run mode (no ticket updates)
-            triage_result = self._run_triage(ticket_id, auto_transfer=auto_update_ticket)
+            triage_result = self._run_triage(ticket_id, auto_transfer=auto_update_ticket, agent_hint=agent_hint)
             result['triage_result'] = triage_result
+
+            # Marquer le hint comme consommé pour ne pas le réutiliser
+            if agent_hint:
+                self._consume_agent_hint(ticket_id)
 
             # ================================================================
             # CHECK: Réponse à une recherche d'identité en attente ?
@@ -1940,7 +2012,7 @@ Le candidat a un ancien dossier dont les frais CMA ({CMA_EXAM_FEE}€) ont déj�
             traceback.print_exc()
             return result
 
-    def _run_triage(self, ticket_id: str, auto_transfer: bool = True) -> Dict:
+    def _run_triage(self, ticket_id: str, auto_transfer: bool = True, agent_hint: Optional[str] = None) -> Dict:
         """
         Run AGENT TRIEUR logic with AI-based triage.
 
@@ -2296,7 +2368,7 @@ Le candidat a un ancien dossier dont les frais CMA ({CMA_EXAM_FEE}€) ont déj�
             if auto_transfer:
                 try:
                     logger.info(f"🔄 Transfert automatique vers Contact...")
-                    transfer_success = self.dispatcher._reassign_ticket(ticket_id, DEPT_CONTACT)
+                    transfer_success = self._reassign_ticket(ticket_id, DEPT_CONTACT)
                     if transfer_success:
                         logger.info(f"✅ Ticket transféré vers Contact")
                         triage_result['transferred'] = True
@@ -2324,7 +2396,7 @@ Le candidat a un ancien dossier dont les frais CMA ({CMA_EXAM_FEE}€) ont déj�
 
             if auto_transfer:
                 try:
-                    transfer_success = self.dispatcher._reassign_ticket(ticket_id, DEPT_CONTACT)
+                    transfer_success = self._reassign_ticket(ticket_id, DEPT_CONTACT)
                     if transfer_success:
                         logger.info(f"✅ Ticket transféré vers Contact")
                         triage_result['transferred'] = True
@@ -2513,7 +2585,7 @@ Le candidat a un ancien dossier dont les frais CMA ({CMA_EXAM_FEE}€) ont déj�
                 if auto_transfer:
                     try:
                         logger.info(f"🔄 Transfert automatique vers Contact...")
-                        transfer_success = self.dispatcher._reassign_ticket(ticket_id, DEPT_CONTACT)
+                        transfer_success = self._reassign_ticket(ticket_id, DEPT_CONTACT)
                         if transfer_success:
                             logger.info(f"✅ Ticket transféré vers Contact")
                             triage_result['transferred'] = True
@@ -2617,7 +2689,7 @@ Le candidat a un ancien dossier dont les frais CMA ({CMA_EXAM_FEE}€) ont déj�
                         # Transférer vers Contact si auto_transfer
                         if auto_transfer:
                             try:
-                                transfer_success = self.dispatcher._reassign_ticket(ticket_id, DEPT_CONTACT)
+                                transfer_success = self._reassign_ticket(ticket_id, DEPT_CONTACT)
                                 if transfer_success:
                                     logger.info("  ✅ Ticket transféré vers Contact")
                                     triage_result['transferred'] = True
@@ -2687,7 +2759,7 @@ Le candidat a un ancien dossier dont les frais CMA ({CMA_EXAM_FEE}€) ont déj�
                 if auto_transfer:
                     try:
                         logger.info(f"🔄 Transfert automatique vers Contact...")
-                        transfer_success = self.dispatcher._reassign_ticket(ticket_id, DEPT_CONTACT)
+                        transfer_success = self._reassign_ticket(ticket_id, DEPT_CONTACT)
                         if transfer_success:
                             logger.info(f"✅ Ticket transféré vers Contact")
                             triage_result['transferred'] = True
@@ -2725,7 +2797,7 @@ Le candidat a un ancien dossier dont les frais CMA ({CMA_EXAM_FEE}€) ont déj�
                 if auto_transfer:
                     try:
                         logger.info(f"🔄 Transfert automatique vers Contact...")
-                        transfer_success = self.dispatcher._reassign_ticket(ticket_id, DEPT_CONTACT)
+                        transfer_success = self._reassign_ticket(ticket_id, DEPT_CONTACT)
                         if transfer_success:
                             logger.info(f"✅ Ticket transféré vers Contact")
                             triage_result['transferred'] = True
@@ -2769,7 +2841,7 @@ Le candidat a un ancien dossier dont les frais CMA ({CMA_EXAM_FEE}€) ont déj�
             if auto_transfer:
                 try:
                     logger.info(f"🔄 Transfert automatique vers {suggested_department}...")
-                    transfer_success = self.dispatcher._reassign_ticket(ticket_id, suggested_department)
+                    transfer_success = self._reassign_ticket(ticket_id, suggested_department)
                     if transfer_success:
                         logger.info(f"✅ Ticket transféré vers {suggested_department}")
                         triage_result['transferred'] = True
@@ -2925,7 +2997,8 @@ RÉSUMÉ (2-3 phrases):"""
                 deal_data=selected_deal,
                 current_department=DEPT_DOC,
                 conversation_summary=conversation_summary,
-                deal_journey=deal_journey_summary
+                deal_journey=deal_journey_summary,
+                agent_hint=agent_hint
             )
 
         logger.info(f"  🤖 Résultat IA: {ai_triage['action']} → {ai_triage['target_department']} ({ai_triage['reason']})")
@@ -3008,7 +3081,7 @@ RÉSUMÉ (2-3 phrases):"""
                 logger.info(f"🔄 Transfert automatique vers {ai_triage['target_department']}...")
                 try:
                     # Use dispatcher to reassign
-                    transfer_success = self.dispatcher._reassign_ticket(ticket_id, ai_triage['target_department'])
+                    transfer_success = self._reassign_ticket(ticket_id, ai_triage['target_department'])
                     triage_result['transferred'] = transfer_success
                     if transfer_success:
                         logger.info(f"✅ Ticket transféré vers {ai_triage['target_department']}")
@@ -3532,15 +3605,14 @@ Deux comptes ExamenT3P fonctionnels ont été détectés pour ce candidat, et le
                 sync_result['date_sync'] = date_sync_result
             elif date_sync_result.get('error'):
                 logger.warning(f"  ⚠️ Erreur sync date: {date_sync_result['error']}")
-                # CRITIQUE: Même si la session CRM n'existe pas, la date ExamT3P
-                # est la source de vérité. Propager la date ExamT3P dans le contexte
-                # pour que le template utilise la bonne date (pas la date CRM fausse).
+                # Si la session CRM n'existe pas pour la date ExamT3P, c'est que
+                # cette date n'est pas dans le calendrier Zoho (source de vérité
+                # pour le planning des examens). On garde la date CRM.
                 examt3p_exam_date = examt3p_data.get('examens', {}).get('date')
                 if examt3p_exam_date and date_sync_result.get('old_date') and examt3p_exam_date != date_sync_result['old_date']:
-                    enriched_lookups['date_examen'] = examt3p_exam_date
-                    enriched_lookups['date_examen_source'] = 'examt3p'
                     enriched_lookups['date_examen_crm_desync'] = True
-                    logger.warning(f"  📅 DÉSYNCHRONISATION: CRM={date_sync_result['old_date']} ≠ ExamT3P={examt3p_exam_date} → utilisation date ExamT3P")
+                    enriched_lookups['examt3p_date_not_in_calendar'] = True
+                    logger.warning(f"  📅 DÉSYNCHRONISATION: CRM={date_sync_result['old_date']} ≠ ExamT3P={examt3p_exam_date} — date ExamT3P absente du calendrier CRM → CRM conservé")
 
         # ================================================================
         # EXTRACTION CONFIRMATIONS DU TICKET
@@ -7591,144 +7663,19 @@ Réponds UNIQUEMENT avec le format demandé, rien d'autre."""
 
         return updates
 
-    def _prepare_deal_updates(
-        self,
-        response_result: Dict,
-        analysis_result: Dict
-    ) -> Dict:
-        """
-        Prepare CRM deal field updates.
-
-        Uses pattern-matched updates from State Engine (crm_updates)
-        which analyzes the conversation context to determine what needs updating.
-
-        IMPORTANT: Utilise les fonctions existantes de examt3p_crm_sync.py pour
-        convertir les valeurs string en IDs CRM (lookup fields).
-        """
-        # Get AI-extracted updates (primary source)
-        ai_updates = response_result.get('crm_updates', {})
-
-        if not ai_updates:
-            logger.info(f"  📊 No CRM updates extracted by AI")
-            return {}
-
-        logger.info(f"  📊 AI extracted CRM updates (raw): {ai_updates}")
-
-        crm_updates = {}
-        deal_data = analysis_result.get('deal_data', {})
-        session_data = analysis_result.get('session_data', {})
-
-        # ================================================================
-        # 1. Date_examen_VTC (string → session ID via existing function)
-        # ================================================================
-        if 'Date_examen_VTC' in ai_updates:
-            date_str = ai_updates['Date_examen_VTC']
-            # Récupérer le département depuis le deal
-            departement = deal_data.get('CMA_de_depot', '')
-            if departement:
-                match = re.search(r'\b(\d{2,3})\b', str(departement))
-                if match:
-                    departement = match.group(1)
-
-            if departement:
-                # Utiliser la fonction existante de examt3p_crm_sync.py
-                session = find_exam_session_by_date_and_dept(
-                    self.crm_client, date_str, departement
-                )
-                if session and session.get('id'):
-                    crm_updates['Date_examen_VTC'] = session['id']
-                    logger.info(f"  📊 Date_examen_VTC: {date_str} → ID {session['id']}")
-                else:
-                    logger.warning(f"  ⚠️ Session examen non trouvée: {date_str} / dept {departement}")
-            else:
-                logger.warning(f"  ⚠️ Département non trouvé, impossible de mapper Date_examen_VTC")
-
-        # ================================================================
-        # 2. Session_choisie (session name → session ID from proposed options)
-        # ================================================================
-        if 'Session_choisie' in ai_updates:
-            session_name = ai_updates['Session_choisie']
-            # Chercher dans les sessions proposées par l'analyse
-            proposed_options = session_data.get('proposed_options', [])
-
-            # Extraire toutes les sessions (proposed_options imbriqué OU sessions_proposees flat)
-            all_sessions_flat = []
-            if proposed_options:
-                for option in proposed_options:
-                    for sess in option.get('sessions', []):
-                        all_sessions_flat.append(sess)
-            elif session_data.get('sessions_proposees'):
-                all_sessions_flat = list(session_data['sessions_proposees'])
-
-            session_found = False
-            for sess in all_sessions_flat:
-                sess_id = sess.get('id')
-                sess_debut = sess.get('Date_d_but', '') or sess.get('date_debut', '')
-                sess_fin = sess.get('Date_fin', '') or sess.get('date_fin', '')
-                sess_type = sess.get('session_type_label', '') or sess.get('session_type', '')
-
-                # Matching: soit par dates, soit par type (jour/soir)
-                if sess_id:
-                    match_date = (sess_debut and sess_debut in session_name) or \
-                                (sess_fin and sess_fin in session_name)
-                    match_type = ('soir' in session_name.lower() and 'soir' in str(sess_type).lower()) or \
-                                ('jour' in session_name.lower() and 'jour' in str(sess_type).lower())
-
-                    if match_date or match_type:
-                        crm_updates['Session_choisie'] = sess_id
-                        logger.info(f"  📊 Session_choisie: {session_name} → ID {sess_id}")
-                        session_found = True
-                        break
-
-            if not session_found:
-                logger.warning(f"  ⚠️ Session formation non trouvée: {session_name}")
-
-        # ================================================================
-        # 2.5 Session confirmée par le candidat (CONFIRMATION_SESSION avec dates)
-        # ================================================================
-        # Si le candidat a confirmé sa session avec des dates et qu'on a matché une session
-        if analysis_result.get('session_confirmed') and analysis_result.get('matched_session_id'):
-            matched_session_id = analysis_result['matched_session_id']
-            matched_session_name = analysis_result.get('matched_session_name', '')
-            crm_updates['Session'] = matched_session_id
-            logger.info(f"  📊 Session (confirmée): {matched_session_name} → ID {matched_session_id}")
-
-            # Aussi mettre à jour Preference_horaire si on a le type
-            matched_type = analysis_result.get('matched_session_type')
-            if matched_type:
-                crm_updates['Preference_horaire'] = matched_type
-                logger.info(f"  📊 Preference_horaire: {matched_type}")
-
-        # ================================================================
-        # 2.6 Correction erreur CAB (DEMANDE_CHANGEMENT_SESSION avec plainte)
-        # ================================================================
-        # Si on a confirmé une erreur CAB et trouvé la session correcte
-        if analysis_result.get('cab_error_corrected') and analysis_result.get('cab_error_corrected_session_id'):
-            corrected_session_id = analysis_result['cab_error_corrected_session_id']
-            corrected_session_name = analysis_result.get('cab_error_corrected_session_name', '')
-            crm_updates['Session'] = corrected_session_id
-            logger.info(f"  📊 Session (correction erreur CAB): {corrected_session_name} → ID {corrected_session_id}")
-
-            # Aussi mettre à jour Preference_horaire avec le type correct
-            corrected_type = analysis_result.get('cab_error_corrected_session_type')
-            if corrected_type:
-                crm_updates['Preference_horaire'] = corrected_type
-                logger.info(f"  📊 Preference_horaire (corrigé): {corrected_type}")
-
-        # ================================================================
-        # 3. Autres champs (texte simple - pas de mapping nécessaire)
-        # ================================================================
-        for key, value in ai_updates.items():
-            if key not in ['Date_examen_VTC', 'Session_choisie']:
-                crm_updates[key] = value
-                logger.info(f"  📊 {key}: {value}")
-
-        if crm_updates:
-            logger.info(f"  ✅ Final CRM updates: {list(crm_updates.keys())}")
-        else:
-            logger.warning(f"  ⚠️ No valid CRM updates after mapping")
-
-        return crm_updates
+    def _reassign_ticket(self, ticket_id: str, new_department: str) -> bool:
+        """Reassign ticket to a new department. Returns True if successful."""
+        try:
+            logger.info(f"Reassigning ticket {ticket_id} to department: {new_department}")
+            self.desk_client.move_ticket_to_department(
+                ticket_id=ticket_id,
+                department_name=new_department
+            )
+            logger.info(f"Successfully reassigned ticket {ticket_id} to {new_department}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to reassign ticket {ticket_id}: {e}")
+            return False
 
     def close(self):
         """Clean up resources."""
@@ -7738,11 +7685,8 @@ Réponds UNIQUEMENT avec le format demandé, rien d'autre."""
             self.crm_client.close()
         if hasattr(self, 'deal_linker') and hasattr(self.deal_linker, 'close'):
             self.deal_linker.close()
-        if hasattr(self, 'dispatcher') and hasattr(self.dispatcher, 'close'):
-            self.dispatcher.close()
         if hasattr(self, 'crm_update_agent') and hasattr(self.crm_update_agent, 'close'):
             self.crm_update_agent.close()
-        # ExamT3PAgent, TriageAgent, and State Engine components don't have close() method
 
 
 def test_workflow():
