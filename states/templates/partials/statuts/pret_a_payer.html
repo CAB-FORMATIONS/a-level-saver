@@ -3,9 +3,13 @@ Votre dossier est <b>complet</b> et le paiement des frais d'inscription est en c
 {{#if uber_20}}
 <i>Dans le cadre du partenariat Uber, les frais d'inscription ({{frais_examen_complet}}€) sont pris en charge.</i><br>
 {{/if}}
+<br>
+<b>Prochaines étapes :</b><br>
+1. Paiement des frais d'inscription auprès de la CMA<br>
+2. Vérification de votre dossier par la CMA (5 à 10 jours ouvrés)<br>
+3. Si tout est conforme, vous recevrez votre convocation d'examen<br>
 {{#if date_examen}}
+<br>
 {{> partials/common/exam_date_line}}{{#if cma_departement}} (CMA {{cma_departement}}){{/if}}<br>
-{{#unless examen_passe}}{{#unless exam_today}}
-Vous recevrez votre convocation officielle environ 10 jours avant l'examen.<br>
-{{/unless}}{{/unless}}
+<i>Cette date reste sous réserve de la validation de votre dossier par la CMA.</i><br>
 {{/if}}
