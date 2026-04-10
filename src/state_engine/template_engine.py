@@ -1168,6 +1168,8 @@ class TemplateEngine:
             result['auto_assigned'] = False
             result['credentials_invalid'] = False
             result['credentials_inconnus'] = False
+            result['has_next_dates'] = False
+            result['next_dates'] = []
             for key in list(result.keys()):
                 if key.startswith('intention_') or key.startswith('action_'):
                     result[key] = False

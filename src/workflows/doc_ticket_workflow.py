@@ -4008,6 +4008,15 @@ Cordialement,<br>
             # ================================================================
             # Si le système détecte un auto-report (date passée + statut pré-validation),
             # vérifier si le candidat confirme une date spécifique dans son message
+            # GUARD RAIL: PAS D'ACCÈS EXAMT3P → PAS D'AUTO-REPORT
+            if date_examen_vtc_result.get('auto_report') and examt3p_data.get('credentials_login_failed'):
+                logger.warning("  🛑 GUARD RAIL: Credentials échouées → AUTO-REPORT BLOQUÉ (pas d'accès ExamT3P)")
+                date_examen_vtc_result['auto_report'] = False
+
+            if date_examen_vtc_result.get('auto_report') and not examt3p_data.get('compte_existe'):
+                logger.warning("  🛑 GUARD RAIL: Pas de compte ExamT3P → AUTO-REPORT BLOQUÉ")
+                date_examen_vtc_result['auto_report'] = False
+
             if date_examen_vtc_result.get('auto_report'):
 
                 # Extraire le dernier message du candidat
@@ -4056,12 +4065,30 @@ Cordialement,<br>
 
                         # Mettre à jour enriched_lookups pour que la réponse utilise la nouvelle date
                         enriched_lookups['date_examen'] = new_date
+
+                        # Tracker pour la note META
+                        date_examen_vtc_result['crm_date_updated'] = True
+                        date_examen_vtc_result['crm_date_old'] = enriched_lookups.get('date_examen_original', enriched_lookups.get('date_examen', ''))
+                        date_examen_vtc_result['crm_date_new'] = new_date
                     except Exception as e:
                         logger.error(f"  ❌ Erreur mise à jour CRM Date_examen_VTC: {e}")
 
             # ================================================================
             # AUTO-ASSIGNATION: Appliquer les mises à jour CRM si détectées
             # ================================================================
+            # GUARD RAIL: PAS D'ACCÈS EXAMT3P → PAS DE MISE À JOUR CRM
+            # Sans accès au dossier, on ne peut pas vérifier l'état réel.
+            # Auto-reporter une date alors que le candidat a peut-être réussi = dangereux.
+            if examt3p_data.get('credentials_login_failed') and date_examen_vtc_result.get('auto_assigned'):
+                logger.warning(f"  🛑 GUARD RAIL: Credentials échouées → AUTO-ASSIGNATION BLOQUÉE (pas d'accès ExamT3P)")
+                date_examen_vtc_result['auto_assigned'] = False
+                date_examen_vtc_result['crm_updates'] = {}
+
+            if not examt3p_data.get('compte_existe') and date_examen_vtc_result.get('auto_assigned'):
+                logger.warning(f"  🛑 GUARD RAIL: Pas de compte ExamT3P → AUTO-ASSIGNATION BLOQUÉE")
+                date_examen_vtc_result['auto_assigned'] = False
+                date_examen_vtc_result['crm_updates'] = {}
+
             if resultat_info['dossier_termine'] and date_examen_vtc_result.get('auto_assigned'):
                 logger.warning(f"  🛑 GUARD RAIL: Dossier terminé (Resultat={resultat_raw}) → AUTO-ASSIGNATION BLOQUÉE")
                 date_examen_vtc_result['auto_assigned'] = False
@@ -7481,6 +7508,14 @@ Génère maintenant la personnalisation (1-3 phrases):"""
             old_date = date_sync.get('old_date') or '—'
             new_date = date_sync.get('new_date', '')
             updates.append(f"• Date_examen_VTC: {old_date} → {new_date}")
+
+        # Auto-report date (STEP 2 — directement dans _run_analysis)
+        date_result = analysis_result.get('date_examen_vtc_result', {})
+        if date_result.get('crm_date_updated'):
+            old = date_result.get('crm_date_old', '—')
+            new = date_result.get('crm_date_new', '')
+            if not any('Date_examen_VTC' in u for u in updates):
+                updates.append(f"• Date_examen_VTC: {old} → {new}")
 
         # Mises à jour CRM appliquées (passées en paramètre après STEP 5)
         if crm_updates_applied:
