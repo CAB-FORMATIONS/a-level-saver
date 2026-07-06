@@ -59,3 +59,25 @@ crm_schema.json
 
 # Token cache OAuth (sensitive - contains access tokens)
 .token_cache.json
+
+# Claude Code local (permissions locales, peut contenir des commandes sensibles)
+.claude/settings.local.json
+.claude/projects/
+
+# Artefacts de debug / sorties one-shot
+workflow_output*.txt
+workflow_*_debug.txt
+workflow_continuous_output.txt
+render_logs_*.txt
+pre_commit_report.md
+pre_commit_check*_report.md
+doc_tickets_pending.json
+doc_tickets_processed.json
+
+# Sorties de batch (donnees candidats, ne pas versionner)
+data/*.json
+!data/geography.json
+
+# Documents externes volumineux
+(697) Cab Formations.pdf
+docs/ZIA AGENT/*.pdf
