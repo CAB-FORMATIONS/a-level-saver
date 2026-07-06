@@ -29,7 +29,13 @@ class Settings(BaseSettings):
     zoho_desk_email_doc: Optional[str] = None      # DOC department
     zoho_desk_email_contact: Optional[str] = None  # Contact department
     zoho_desk_email_compta: Optional[str] = None   # Comptabilité department
+    zoho_desk_email_relations: Optional[str] = "relations.entreprises@cab-formations.fr"
     zoho_desk_email_default: Optional[str] = None  # Fallback
+    zoho_desk_relations_department_id: str = "198709000027921097"
+
+    # Internal PlanBot API (Edusign service, read-only)
+    planbot_api_url: Optional[str] = None
+    planbot_api_secret: Optional[str] = None
 
     # Zoho CRM (credentials séparées si nécessaire)
     zoho_crm_client_id: Optional[str] = None
