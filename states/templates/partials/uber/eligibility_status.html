@@ -1,0 +1,14 @@
+<!-- Partial: Statut de vérification d'éligibilité Uber -->
+<!-- S'affiche quand le candidat questionne son éligibilité et qu'on n'a pas encore l'info -->
+<!-- Conditions: uber_20 (deal Uber) + pas encore uber_eligible -->
+
+{{#if uber_no_docs_yet}}
+<b>Concernant votre éligibilité</b><br>
+Votre éligibilité au programme Uber sera vérifiée une fois votre dossier complété. Nous vous invitons à soumettre vos documents et à nous recontacter <b>4 jours après</b> la soumission si vous n'avez pas de retour de notre part.<br>
+<br>
+{{/if}}
+{{#if uber_eligibility_pending}}
+<b>Concernant votre éligibilité</b><br>
+Votre dossier a bien été reçu et votre éligibilité est <b>en cours de vérification</b>. Nous vous invitons à nous recontacter <b>{{days_until_eligibility_text}}</b> si vous n'avez pas de retour de notre part.<br>
+<br>
+{{/if}}
