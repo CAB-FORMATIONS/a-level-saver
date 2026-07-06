@@ -310,10 +310,31 @@ class BusinessRules:
                 combined_content += cleaned_content.lower()
 
             # Si demande autre service détectée → Contact (malgré deal 20€)
+            # SAUF si le candidat a une date d'examen future (dossier actif en DOC)
             matched_keyword = next((kw for kw in other_service_keywords if kw in combined_content), None)
             if matched_keyword:
-                logger.info(f"🚦 Keyword autre service détecté dans contenu nettoyé: '{matched_keyword}' → Contact")
-                return "Contact"
+                # Vérifier si date d'examen future → rester en DOC
+                has_future_exam = False
+                date_examen_vtc = selected_deal.get('Date_examen_VTC')
+                if date_examen_vtc:
+                    # Lookup format: {'name': '44_2026-05-26', 'id': '...'}
+                    date_name = date_examen_vtc.get('name', '') if isinstance(date_examen_vtc, dict) else str(date_examen_vtc)
+                    # Extraire la date (format XX_YYYY-MM-DD)
+                    import re as _re
+                    date_match = _re.search(r'(\d{4}-\d{2}-\d{2})', date_name)
+                    if date_match:
+                        from datetime import datetime as _dt
+                        try:
+                            exam_date = _dt.strptime(date_match.group(1), '%Y-%m-%d').date()
+                            has_future_exam = exam_date > _dt.now().date()
+                        except ValueError:
+                            pass
+
+                if has_future_exam:
+                    logger.info(f"🚦 Keyword autre service '{matched_keyword}' détecté MAIS date examen future → reste en DOC")
+                else:
+                    logger.info(f"🚦 Keyword autre service détecté dans contenu nettoyé: '{matched_keyword}' → Contact")
+                    return "Contact"
 
             evalbox = selected_deal.get("Evalbox", "")
 
