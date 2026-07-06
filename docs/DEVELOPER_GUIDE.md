@@ -238,7 +238,7 @@ Si l'etat a du contenu d'alerte, l'ajouter dans `_generate_alert_content()`.
 | Seuils temporels | `src/constants/thresholds.py` (ex: `EXAM_WITHIN_DAYS = 30`) |
 | Montants | `src/constants/amounts.py` (ex: `UBER_OFFER_AMOUNT = 20`) |
 | Statuts Evalbox | `src/constants/evalbox.py` (frozensets `PAID_STATUSES`, `VALIDATED`, etc.) |
-| Mots-cles | `config/keywords.yaml` (17 listes) |
+| Mots-cles | `config/keywords.yaml` (19 listes) |
 | URLs externes | `src/constants/urls.py` |
 | Modeles IA | `src/constants/models.py` |
 | Types de sessions | `src/constants/sessions.py` |
@@ -359,16 +359,17 @@ Le template est selectionne dans cet ordre de priorite :
 | Priorite | Source | Type |
 |----------|--------|------|
 | 1 | Matrice STATE:INTENTION (`state_intention_matrix.yaml`) | Moderne |
-| 2 | `TEMPLATE_STATE_MAP` (`template_engine.py`) | Legacy |
-| 3 | `candidate_states.yaml` -> `response.template` | Legacy |
-| 4 | Fallback generique | -- |
+| 2 | PASS 1-4 (`for_intention`, `for_condition`, `for_uber_case`, `for_resultat`) | Transition |
+| 3 | Fallback `response_master.html` | Moderne |
+
+**Note** : le PASS 5 legacy (`for_evalbox` → `base_legacy/`) est **désactivé** (code commenté, `template_engine.py:422-428`). `TEMPLATE_STATE_MAP` n'existe plus.
 
 ```bash
 # Verifier si l'entree existe dans la matrice
 grep "MON_ETAT:MON_INTENTION" states/state_intention_matrix.yaml
 ```
 
-Si le log montre "Template: dossier_cree" sans "Template selectionne via matrice" : c'est un fallback legacy. Migrer vers la matrice (voir Regle 14 dans CLAUDE.md).
+Si le log ne montre pas "Template selectionne via matrice", le rendu retombe sur `response_master.html` generique : ajouter l'entree dans la matrice (voir Regle 14 dans CLAUDE.md).
 
 ### 2. Partial non rendu (Handlebars brut dans la sortie)
 

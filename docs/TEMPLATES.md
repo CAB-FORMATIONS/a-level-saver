@@ -35,34 +35,19 @@ Le système de templates génère les réponses aux candidats de manière **dét
 ```
 states/templates/
 ├── response_master.html          # Template master universel
-├── base_legacy/                  # 62 templates legacy (fallback)
+├── base_legacy/                  # 66 templates legacy (fallback DÉSACTIVÉ)
 │   ├── uber_cas_a.html
 │   ├── dossier_synchronise.html
 │   └── ...
-└── partials/                     # Blocs modulaires réutilisables
-    ├── intentions/               # Réponses aux intentions (14)
+└── partials/                     # Blocs modulaires réutilisables (94 .html, 17 catégories)
+    ├── intentions/               # Réponses aux intentions (36)
     │   ├── statut_dossier.html
     │   ├── demande_date.html
     │   ├── demande_identifiants.html
     │   ├── confirmation_session.html
-    │   ├── demande_convocation.html
-    │   ├── demande_elearning.html
     │   ├── report_date.html
-    │   ├── probleme_documents.html
     │   ├── question_generale.html
-    │   ├── resultat_examen.html
-    │   ├── question_uber.html
-    │   ├── question_session.html
-    │   ├── question_processus.html
-    │   └── autres_departements.html
-    ├── statuts/                  # Affichage statut Evalbox (7)
-    │   ├── dossier_cree.html
-    │   ├── dossier_synchronise.html
-    │   ├── pret_a_payer.html
-    │   ├── valide_cma.html
-    │   ├── refus_cma.html
-    │   ├── convoc_recue.html
-    │   └── en_attente.html
+    │   └── ... (36 fichiers au total)
     ├── actions/                  # Actions requises (10)
     │   ├── passer_test.html
     │   ├── envoyer_documents.html
@@ -74,11 +59,29 @@ states/templates/
     │   ├── preparer_examen.html
     │   ├── corriger_documents.html
     │   └── contacter_uber.html
-    ├── uber/                     # Conditions Uber (5)
-    ├── resultats/                # Résultats examen (3)
-    ├── report/                   # Report date (3)
+    ├── uber/                     # Conditions Uber (10)
+    ├── statuts/                  # Affichage statut Evalbox (8)
+    │   ├── dossier_cree.html
+    │   ├── dossier_synchronise.html
+    │   ├── pret_a_payer.html
+    │   ├── valide_cma.html
+    │   ├── refus_cma.html
+    │   ├── convoc_recue.html
+    │   ├── documents_refuses.html
+    │   └── en_attente.html
+    ├── resultats/                # Résultats examen (6)
+    ├── report/                   # Report date (4)
+    ├── cma/                      # Contact CMA (3)
+    ├── documents/                # Documents (3)
+    ├── alerts/                   # Alertes (2)
+    ├── common/                   # Communs (2)
+    ├── context/                  # Contexte (2)
     ├── credentials/              # Identifiants (2)
-    └── dates/                    # Proposition dates (1)
+    ├── warnings/                 # Avertissements (2)
+    ├── alternatives/             # Alternatives (1)
+    ├── confirmations/            # Confirmations (1)
+    ├── dates/                    # Proposition dates (1)
+    └── prospect/                 # Prospect (1)
 ```
 
 ---
@@ -279,7 +282,7 @@ PASS 1.5: Templates avec for_state
 PASS 2: Templates avec for_condition seule
 PASS 3: for_uber_case (A, B, D, E)
 PASS 4: for_resultat (Admis, Non admis)
-PASS 5: for_evalbox (statut dossier)
+PASS 5: for_evalbox (statut dossier) — DÉSACTIVÉ (code commenté, template_engine.py:422-428)
 FALLBACK: response_master.html
 ```
 

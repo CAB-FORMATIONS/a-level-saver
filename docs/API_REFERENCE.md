@@ -13,7 +13,7 @@ Documentation exhaustive de toutes les integrations API du projet A-Level Saver.
 | **Zoho CRM v8** | `https://www.zohoapis.{dc}/crm/v8` | OAuth2 (Bearer token) | Idem v3 | `src/zoho_client.py` |
 | **Zoho OAuth** | `https://accounts.zoho.{dc}/oauth/v2` | Client credentials | 2s min entre refreshes | `src/zoho_token_manager.py` |
 | **Anthropic (Claude)** | `https://api.anthropic.com` | API Key (Bearer) | Geree par le SDK | `src/agents/*.py`, `src/utils/*.py` |
-| **ExamT3P** | `https://www.exament3p.fr` | Login/Password (HTTP POST) | 10s timeout | `src/utils/exament3p_http_client.py` |
+| **ExamT3P** | `https://www.exament3p.fr` | Login/Password (HTTP POST) | 10s timeout | `src/utils/exament3p_playwright.py` (classe `ExamT3PHttpClient`) |
 
 > **Note** : `{dc}` = datacenter Zoho, configure via `settings.zoho_datacenter` (defaut: `com`).
 
@@ -140,6 +140,28 @@ Statistiques et configuration du webhook.
     "active_threads": 2,
     "timestamp": "2026-02-16T10:30:00"
 }
+```
+
+### GET /logs
+
+Logs applicatifs recents (buffer memoire, 2000 lignes max). **Protege par le header `X-Webhook-Secret`** (`webhook_server.py:218`).
+
+**Query params** :
+- `?lines=200` — nombre de lignes (defaut 200, max 2000)
+- `?level=ERROR` — filtre par niveau (INFO, WARNING, ERROR)
+- `?q=keyword` — filtre par mot-cle (insensible a la casse)
+- `?format=text` — texte brut au lieu de JSON
+
+```bash
+curl -H "X-Webhook-Secret: $SECRET" "https://a-level-saver.onrender.com/logs?lines=100&level=ERROR"
+```
+
+### GET /logs/ticket/{ticket_id}
+
+Logs filtres pour un ticket specifique. **Protege par le header `X-Webhook-Secret`** (`webhook_server.py:257`). Supporte `?format=text`.
+
+```bash
+curl -H "X-Webhook-Secret: $SECRET" "https://a-level-saver.onrender.com/logs/ticket/198709000449479828"
 ```
 
 ---
@@ -646,18 +668,18 @@ response = self.client.messages.create(
 
 | Composant | Modele | Cout approx. |
 |-----------|--------|--------------|
-| Extraction identifiants | Haiku 3.5 | ~$0.001 |
-| Agent Trieur | Sonnet 4 | ~$0.001 |
-| Conversation Analyzer V3 | Sonnet 4.5 | ~$0.01-0.02 |
-| Response Humanizer | Sonnet 4 | ~$0.036 |
-| Notes CRM next steps | Haiku 3.5 | ~$0.001 |
-| **Total** | | **~$0.05-0.06** |
+| Extraction identifiants | Haiku 4.5 (`MODEL_EXTRACTION`) | ~$0.001 |
+| Agent Trieur | Sonnet 4.6 (`MODEL_TRIAGE`) | ~$0.01 |
+| Conversation Analyzer V3 | Sonnet 4.5 (`MODEL_CONVERSATION`) | ~$0.01-0.02 |
+| Response Humanizer | Sonnet 4.6 (`MODEL_HUMANIZER`) | ~$0.036 |
+| Notes CRM next steps | Sonnet 4.6 (`MODEL_TRIAGE`) | ~$0.01 |
+| **Total** | | **~$0.06-0.08** |
 
 ---
 
 ## 5. ExamT3P (HTTP/httpx)
 
-**Fichiers** : `src/utils/exament3p_http_client.py`, `src/utils/examt3p_credentials_helper.py`, `src/agents/examt3p_agent.py`
+**Fichiers** : `src/utils/exament3p_playwright.py` (classe `ExamT3PHttpClient`, ligne 58), `src/utils/examt3p_credentials_helper.py`, `src/agents/examt3p_agent.py`
 
 ### 5.1 Architecture
 
@@ -665,8 +687,8 @@ ExamT3P est un portail web (`https://www.exament3p.fr`) sans API publique. L'ext
 
 ```
 ExamT3PAgent (orchestrateur)
-    └── exament3p_http_client.py (extracteur HTTP)
-            └── ExamT3PHttpClient (classe principale)
+    └── exament3p_playwright.py (extracteur HTTP)
+            └── ExamT3PHttpClient (classe principale, ligne 58)
                     ├── _login()               → POST /Cma/UserAccount/login
                     ├── _extract_dashboard()   → GET /mon-espace (HTML parsing)
                     ├── _extract_messages()     → GET /Cmacandidate/getMessages (JSON)
@@ -731,6 +753,25 @@ Fichier `src/utils/examt3p_crm_sync.py`. Mapping des statuts :
 | Incomplet | Refuse CMA |
 | Valide | VALIDE CMA |
 | En attente de convocation | Convoc CMA recue |
+
+---
+
+## 5bis. API interne PlanBot (B2B Relations entreprises)
+
+**Fichier** : `src/utils/planbot_api_client.py` (classe `PlanBotAPIClient`)
+
+API interne en lecture seule (exposee par le service Edusign) utilisee par le workflow Relations entreprises pour les disponibilites de sessions.
+
+| Propriete | Valeur |
+|-----------|--------|
+| Endpoint | `POST {PLANBOT_API_URL}/internal/planbot/availability` |
+| Auth | Header `X-PlanBot-Secret` |
+| Body | `{"action": "full", "payload": {...}}` |
+| Timeout | 90s |
+
+**Configuration** (via `config.py`) : `PLANBOT_API_URL` (`planbot_api_url`), `PLANBOT_API_SECRET` (`planbot_api_secret`).
+
+**Mode degrade** : si non configuree, retourne `{"status": "skipped", "error": "planbot_api_not_configured"}` ; en cas d'erreur HTTP ou reseau, retourne un dict `{"status": "error", ...}` sans lever d'exception (le workflow cree quand meme un brouillon).
 
 ---
 

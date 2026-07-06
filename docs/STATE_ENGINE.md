@@ -18,11 +18,11 @@ Le State Engine génère les réponses de manière **déterministe** :
 
 | Fichier | Contenu | Priorité |
 |---------|---------|----------|
-| `states/candidate_states.yaml` | **38 ÉTATS** avec severity | SOURCE UNIQUE |
-| `states/state_intention_matrix.yaml` | **37 INTENTIONS** + matrice | Intentions + mapping |
+| `states/candidate_states.yaml` | **42 ÉTATS** avec severity | SOURCE UNIQUE |
+| `states/state_intention_matrix.yaml` | **50 INTENTIONS** + matrice | Intentions + mapping |
 | `states/templates/response_master.html` | Template master modulaire | Architecture v2.0 |
 | `states/templates/partials/**/*.html` | Partials modulaires | Fragments réutilisables |
-| `states/templates/base_legacy/*.html` | 62 templates legacy | Fallback |
+| `states/templates/base_legacy/*.html` | 66 templates legacy | Fallback DÉSACTIVÉ (PASS 5 commenté) |
 
 ---
 
@@ -32,8 +32,8 @@ Le State Engine détecte **plusieurs états simultanément** via classification 
 
 | Severity | Comportement | Exemples |
 |----------|--------------|----------|
-| **BLOCKING** | Stoppe le workflow, réponse unique | SPAM, DUPLICATE_UBER, UBER_CAS_A |
-| **WARNING** | Continue + ajoute alerte | UBER_ACCOUNT_NOT_VERIFIED, UBER_NOT_ELIGIBLE |
+| **BLOCKING** | Stoppe le workflow, réponse unique | SPAM, ROUTE_DEPARTMENT, CANDIDATE_NOT_FOUND, EXAMT3P_DOWN, EXAMT3P_ACCESS_LOST, DOUBLE_ACCOUNT_PAID, MISSED_TRAINING_FORCE_MAJEURE |
+| **WARNING** | Continue + ajoute alerte | DUPLICATE_UBER, UBER_DOCS_MISSING, UBER_ACCOUNT_NOT_VERIFIED, UBER_NOT_ELIGIBLE |
 | **INFO** | Combinables entre eux | EXAM_DATE_EMPTY, CREDENTIALS_INVALID, GENERAL |
 
 ### Comportement
@@ -47,9 +47,10 @@ Le State Engine détecte **plusieurs états simultanément** via classification 
 | Catégorie | Priority | ID Pattern | Exemples |
 |-----------|----------|------------|----------|
 | Triage | 1-4 | T1-T4 | SPAM, ROUTE, DUPLICATE_UBER, CANDIDATE_NOT_FOUND |
-| Analysis | 95-103 | A0-A4 | CREDENTIALS_INVALID, EXAMT3P_DOWN, DOUBLE_ACCOUNT |
+| Analysis | 95-104 | A0-A6 | CREDENTIALS_INVALID, EXAMT3P_DOWN, EXAMT3P_ACCESS_LOST, DOUBLE_ACCOUNT |
 | Uber | 200-204 | U-* | PROSPECT, CAS_A, CAS_B, CAS_D, CAS_E |
-| Date Examen | 300-309 | D-1 à D-10 | DATE_EMPTY, DATE_PAST, VALIDE_CMA, etc. |
+| Force Majeure + Cohérence | 290 | FM-1 | MISSED_TRAINING_FORCE_MAJEURE |
+| Date Examen | 300-310 | D-1 à D-11 | DATE_EMPTY, DATE_PAST, VALIDE_CMA, etc. |
 | Intention | 400-408 | I1-I9 | REPORT_DATE, CONFIRMATION_SESSION |
 | Cohérence | 500-502 | C1-C3 | TRAINING_MISSED, DOSSIER_NOT_RECEIVED |
 | Blocage | 600 | B1 | DATE_MODIFICATION_BLOCKED |
@@ -143,7 +144,8 @@ PASS 3: Cas Uber (A, B, D, E)
 
 PASS 4: Résultat examen (Admis, Non admis, Absent)
 
-PASS 5: Evalbox (statut dossier)
+PASS 5: Evalbox (statut dossier) — DÉSACTIVÉ (code commenté, template_engine.py:422-428)
+        Plus aucun fallback vers base_legacy/ (Règle 14)
 
 FALLBACK: response_master.html
 ```
@@ -298,9 +300,14 @@ Si l'intention existe dans le YAML mais pas dans le prompt → elle ne sera **JA
 |---|---------|--------|
 | 1 | `states/state_intention_matrix.yaml` | Définir l'intention (section `intentions:`) |
 | 2 | **`src/agents/triage_agent.py`** | **OBLIGATOIRE** - Ajouter dans SYSTEM_PROMPT |
-| 3 | `states/state_intention_matrix.yaml` | Ajouter entrées matrice État×Intention |
+| 3 | `states/state_intention_matrix.yaml` | Ajouter entrées matrice État×Intention (+ wildcard `"*:NOM"`) |
 | 4 | `states/templates/partials/intentions/<nom>.html` | Template partial (si nécessaire) |
 | 5 | `states/templates/response_master.html` | Ajouter section `{{#if intention_xxx}}` |
+| 6 | `src/state_engine/template_engine.py` | Ajouter dans `INTENTION_FLAG_MAP` |
+| 7 | `src/state_engine/template_engine.py` | Initialiser le flag dans `_auto_map_intention_flags()` |
+| 8 | `src/state_engine/template_engine.py` | Ajouter les variables spécifiques dans `_prepare_placeholder_data()` |
+
+(Voir la checklist complète en 6 étapes dans `docs/DEVELOPER_GUIDE.md`.)
 
 ### Détails
 

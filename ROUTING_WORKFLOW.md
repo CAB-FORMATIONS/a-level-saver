@@ -1,5 +1,7 @@
 # 🔄 Workflow de Routing Correct
 
+> ⚠️ **OBSOLÈTE** : dispatcher_agent.py et orchestrator.py n'existent plus. Le routage réel : DOCTicketWorkflow._run_triage (doc_ticket_workflow.py:2029) + BusinessRules.determine_department_from_deals_and_ticket (business_rules.py:215).
+
 ## ❌ Ancien Workflow (INCORRECT)
 
 ```

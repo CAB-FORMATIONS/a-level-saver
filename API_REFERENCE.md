@@ -1,5 +1,7 @@
 # Référence API - Zoho Desk & CRM
 
+> ⚠️ **OBSOLÈTE** : supplanté par docs/API_REFERENCE.md (référence à jour).
+
 Ce document détaille tous les endpoints API Zoho utilisés par le système.
 
 ## 🎫 API Zoho Desk

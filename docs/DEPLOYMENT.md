@@ -2,7 +2,7 @@
 
 ## Architecture de Deploiement
 
-Le systeme A-Level Saver est deploye sur **Render** en tant que Web Service Docker. Le serveur Flask recoit les webhooks de Zoho Desk et declenche le workflow de traitement des tickets.
+Le systeme A-Level Saver est deploye sur **Render** en tant que Web Service Python natif (`runtime: python` dans `render.yaml`). Le serveur Flask recoit les webhooks de Zoho Desk et declenche le workflow de traitement des tickets.
 
 ```
                           +--------------------------+
@@ -15,9 +15,9 @@ Le systeme A-Level Saver est deploye sur **Render** en tant que Web Service Dock
                                       v
                           +--------------------------+
                           |   Render Web Service     |
-                          |   (Docker container)     |
+                          |   (runtime python natif) |
                           |                          |
-                          |   Gunicorn (2 workers)   |
+                          |   Gunicorn (1 worker)    |
                           |   Flask (webhook_server) |
                           +-----------+--------------+
                                       |
@@ -63,10 +63,10 @@ Installation des dependances Python. Le `--no-cache-dir` evite de stocker le cac
 ```dockerfile
 COPY . .
 EXPOSE 10000
-CMD ["gunicorn", "webhook_server:app", "--bind", "0.0.0.0:10000", "--workers", "2", "--timeout", "120"]
+CMD ["gunicorn", "webhook_server:app", "--bind", "0.0.0.0:10000", "--workers", "1", "--timeout", "120"]
 ```
 - **Port 10000** : port par defaut de Render pour les Web Services
-- **2 workers** : suffisant pour le volume de tickets (traitement asynchrone en background thread)
+- **1 worker** : suffisant pour le volume de tickets (traitement asynchrone en background thread) ; un seul worker garantit aussi que le buffer de logs en memoire (`/logs`) est complet
 - **Timeout 120s** : les workflows peuvent prendre 30-60s (extraction ExamT3P + appels LLM)
 
 ### Dependances critiques dans requirements.txt
@@ -119,6 +119,10 @@ CMD ["gunicorn", "webhook_server:app", "--bind", "0.0.0.0:10000", "--workers", "
 | `ESCALATION_AGENT_ID` | ID agent Zoho Desk pour escalade | `198709000096599317` | `config.py` |
 | `ESCALATION_AGENT_NAME` | Nom de l'agent pour escalade | `Lamia Serbouty` | `config.py` |
 | `RGPD_REFERENT_EMAIL` | Email du referent RGPD | `jc@cab-formations.fr` | `config.py` |
+| `ZOHO_DESK_EMAIL_RELATIONS` | Adresse email de reponse dept Relations entreprises | `relations.entreprises@cab-formations.fr` | `config.py` |
+| `ZOHO_DESK_RELATIONS_DEPARTMENT_ID` | ID du departement Relations entreprises | `198709000027921097` | `config.py` |
+| `PLANBOT_API_URL` | URL de l'API interne PlanBot (B2B) | `None` (mode degrade « skipped ») | `config.py` |
+| `PLANBOT_API_SECRET` | Secret de l'API PlanBot (header `X-PlanBot-Secret`) | `None` | `config.py` |
 
 ### Variables webhook (dev local uniquement)
 
@@ -216,6 +220,8 @@ info response;
 | `/webhook/zoho-desk` | POST | `X-Webhook-Secret` | Endpoint principal (Deluge) — traitement asynchrone |
 | `/webhook/test` | POST | Non | Endpoint de test — traitement synchrone, retourne le resultat complet |
 | `/webhook/stats` | GET | Non | Configuration et statut du webhook |
+| `/logs` | GET | `X-Webhook-Secret` | Logs recents en memoire (`?lines=`, `?level=`, `?q=`, `?format=text`) |
+| `/logs/ticket/<ticket_id>` | GET | `X-Webhook-Secret` | Logs filtres par ticket |
 
 ### Traitement asynchrone
 
@@ -235,16 +241,16 @@ services:
     name: a-level-saver
     runtime: python
     buildCommand: "pip install -r requirements.txt"
-    startCommand: "gunicorn webhook_server:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120"
+    startCommand: "gunicorn webhook_server:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120"
     healthCheckPath: /health
     envVars:
       - key: PYTHON_VERSION
         value: "3.11.8"
 ```
 
-**Note** : Ce fichier est utilise pour le deploiement natif (sans Docker). Le deploiement actuel utilise le **Dockerfile**. Depuis la migration de Playwright vers httpx, le `render.yaml` est simplifie (plus besoin de `playwright install --with-deps chromium` ni de `PLAYWRIGHT_BROWSERS_PATH`).
+**Note** : Le deploiement actuel utilise le **runtime Python natif** de Render (`runtime: python` avec `buildCommand`/`startCommand` ci-dessus). Le `Dockerfile` existe dans le repo mais **n'est pas utilise par Render**. Depuis la migration de Playwright vers httpx, le `render.yaml` est simplifie (plus besoin de `playwright install --with-deps chromium` ni de `PLAYWRIGHT_BROWSERS_PATH`).
 
-Avec le Dockerfile, Render detecte automatiquement sa presence et l'utilise pour le build. Le `healthCheckPath: /health` dans `render.yaml` configure le health check automatique de Render.
+Le `healthCheckPath: /health` dans `render.yaml` configure le health check automatique de Render.
 
 ---
 
@@ -283,7 +289,7 @@ python webhook_server.py
 En mode production locale :
 
 ```bash
-gunicorn webhook_server:app --bind 0.0.0.0:5000 --workers 2 --timeout 120
+gunicorn webhook_server:app --bind 0.0.0.0:5000 --workers 1 --timeout 120
 ```
 
 ### Tester un ticket individuellement
@@ -569,7 +575,7 @@ a-level-saver/
     zoho_client.py              # Clients API Zoho (Desk + CRM)
     utils/
       logging_config.py         # Configuration des logs
-      exament3p_http_client.py   # Extraction ExamT3P via httpx + BeautifulSoup
+      exament3p_playwright.py    # Extraction ExamT3P via httpx + BeautifulSoup (classe ExamT3PHttpClient)
     workflows/
       doc_ticket_workflow.py    # Orchestrateur principal
     constants/

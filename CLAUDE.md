@@ -115,7 +115,7 @@ grep '"\*:NOM_INTENTION"' states/state_intention_matrix.yaml  # Wildcard obligat
 Avant de coder une fonctionnalité, **TOUJOURS vérifier** si elle existe :
 
 ```bash
-# Lister états existants (41+)
+# Lister états existants (42)
 grep -E "^  [A-Z_]+:" states/candidate_states.yaml | head -50
 
 # Lister intentions existantes (50+)
@@ -137,14 +137,16 @@ ls src/utils/
 
 ```
 0. DRAFT CHECK      → Skip si brouillon existant
+0.6 AGENT HINT      → Vérifier si un agent humain a laissé un hint (@agent)
 1. TRIAGE AGENT     → GO/ROUTE/SPAM/DUPLICATE_UBER + intention + session_preference
 2. ANALYSIS         → 7 sources (ticket, deal, ExamT3P, dates, sessions, uber, conversation V3)
 3. STATE ENGINE     → STATE×INTENTION → Template + partials (déterministe)
 4. HUMANIZER        → Reformulation naturelle (optionnel)
 5. CRM UPDATES      → Via CRMUpdateAgent (mapping auto, règles blocage, dossier_termine guard)
-6. DRAFT CREATION   → Brouillon Zoho Desk
-7. CRM NOTE         → [META] line pour ThreadMemory
+6. CRM NOTE         → [META] line pour ThreadMemory (après les updates CRM)
+7. REPLY DELIVERY   → Envoi ou brouillon Zoho Desk
 8. VALIDATION       → Vérification finale
+8b. TRANSFERT       → Transfert DOCS CAB (si VTC hors partenariat)
 ```
 
 **Détails complets :** `docs/ARCHITECTURE.md`
@@ -155,8 +157,8 @@ ls src/utils/
 
 | Fichier | Contenu |
 |---------|---------|
-| `states/candidate_states.yaml` | **41 ÉTATS** - severity, detection, workflow |
-| `states/state_intention_matrix.yaml` | **50 INTENTIONS** + 125 entrées matrice État×Intention |
+| `states/candidate_states.yaml` | **42 ÉTATS** - severity, detection, workflow |
+| `states/state_intention_matrix.yaml` | **50 INTENTIONS** + 143 entrées matrice État×Intention |
 | `states/templates/response_master.html` | Template master modulaire (v2.0) |
 | `states/templates/partials/**/*.html` | Partials modulaires (intentions, statuts, actions) |
 | `states/VARIABLES.md` | Variables Handlebars disponibles |
@@ -173,14 +175,14 @@ Toutes les constantes métier sont centralisées dans `src/constants/` :
 | `models.py` | IDs modèles IA (5) | `MODEL_TRIAGE`, `MODEL_HUMANIZER` |
 | `evalbox.py` | Frozensets statuts (12) + STATUT_DISPLAY | `PAID_STATUSES`, `VALIDATED` |
 | `thresholds.py` | Seuils temporels (11) | `EXAM_WITHIN_DAYS`, `RECENT_THREAD_HOURS` |
-| `amounts.py` | Montants métier (3) | `UBER_OFFER_AMOUNT=20`, `CMA_EXAM_FEE=241` |
+| `amounts.py` | Montants métier (5) | `UBER_OFFER_AMOUNT=20`, `CMA_EXAM_FEE=241` |
 | `sessions.py` | Types/horaires sessions | `SESSION_HOURS`, `is_uber_visio_session()` |
 | `intents.py` | Frozensets d'intentions (8) | `DATES_INTENTS`, `SESSION_INTENTS` |
-| `keywords.py` | Charge 17 listes depuis `config/keywords.yaml` | `ANNULATION_KEYWORDS` |
+| `keywords.py` | Charge 19 listes depuis `config/keywords.yaml` | `ANNULATION_KEYWORDS` |
 | `urls.py` | URLs externes (6) | `EXAMT3P_URL`, `ELEARNING_URL` |
 
 Autres données externalisées :
-- `config/keywords.yaml` — 17 listes de mots-clés (source unique)
+- `config/keywords.yaml` — 19 listes de mots-clés (source unique)
 - `data/geography.json` — DEPT_TO_REGION (94), CITY_TO_REGION (73), REGION_ALIASES (34)
 - `config.py` — Staff config : `escalation_agent_id`, `escalation_agent_name`, `rgpd_referent_email`
 
@@ -366,7 +368,7 @@ context_data = {                _prepare_placeholder_data()      {{#if my_var}}
 
 **Symptôme** : Variable définie dans le workflow, template ne réagit pas.
 
-**Solution** : Ajouter EXPLICITEMENT dans `_prepare_placeholder_data()` (~ligne 700-945) :
+**Solution** : Ajouter EXPLICITEMENT dans `_prepare_placeholder_data()` (~ligne 641) :
 ```python
 result = {
     ...
@@ -501,11 +503,11 @@ Template Engine - Ordre de sélection :
    PASS 2: for_condition               ⚠️ Transition
    PASS 3: for_uber_case               ⚠️ Transition
    PASS 4: for_resultat                ⚠️ Transition
-   PASS 5: for_evalbox                 ❌ LEGACY ! (base_legacy/)
+   PASS 5: for_evalbox                 ❌ DÉSACTIVÉ (code commenté, template_engine.py:422-428)
    Fallback: response_master.html      ✅ Générique moderne
 ```
 
-Si une combinaison `STATE:INTENTION` n'existe pas dans la matrice, le code peut tomber sur **PASS 5 (Evalbox)** et utiliser un template legacy comme `dossier_cree.html`.
+**PASS 5 (Evalbox → base_legacy/) est DÉSACTIVÉ** : le code est commenté dans `template_engine.py:422-428`, conformément à cette règle. Le fallback final est toujours `response_master.html`. Cette règle ne s'appliquerait à nouveau que si PASS 5 était réactivé.
 
 ### La Règle
 
@@ -768,14 +770,11 @@ Quand un candidat échoue, la CMA ajoute un suffixe TEn au dossier :
    Ex: "READY_TO_PAY:CONFIRMATION_SESSION" → response_master.html
    ✅ Architecture moderne avec intentions
 
-2. TEMPLATE_STATE_MAP (template_engine.py ligne ~1007)
-   Ex: 'READY_TO_PAY': 'pret_a_payer'
-   ❌ Legacy (base_legacy/) - PAS d'intentions !
+2. PASS 1-4 (for_intention, for_condition, for_uber_case, for_resultat)
+   ⚠️ Transition (base_templates)
 
-3. candidate_states.yaml → response.template
-   Ex: template: "ready_to_pay.html"
-
-4. Fallback générique
+3. Fallback final : response_master.html
+   (PASS 5 for_evalbox est DÉSACTIVÉ — code commenté template_engine.py:422-428)
 ```
 
 **Investigation:**
@@ -784,10 +783,7 @@ Quand un candidat échoue, la CMA ajoute un suffixe TEn au dossier :
 grep "READY_TO_PAY:CONFIRMATION_SESSION" states/state_intention_matrix.yaml
 
 # 2. Vérifier le log "Template sélectionné via matrice"
-# Si absent → fallback sur legacy
-
-# 3. Vérifier TEMPLATE_STATE_MAP dans template_engine.py
-grep "READY_TO_PAY" src/state_engine/template_engine.py
+# Si absent → fallback response_master.html générique
 ```
 
 **Solution:** Ajouter l'entrée dans `state_intention_matrix.yaml`:
@@ -806,7 +802,6 @@ grep "READY_TO_PAY" src/state_engine/template_engine.py
 |---------|---------------|
 | `candidate_states.yaml` | `READY_TO_PAY` |
 | `state_intention_matrix.yaml` | `PRET_A_PAYER` (ancien) |
-| `TEMPLATE_STATE_MAP` | `'READY_TO_PAY': 'pret_a_payer'` |
 
 **Vérification:**
 ```bash
@@ -970,12 +965,12 @@ python show_response.py <ticket_id>
 
 | Composant | Modèle | Coût |
 |-----------|--------|------|
-| Extraction identifiants | Haiku 3.5 | ~$0.001 |
-| Agent Trieur | Haiku 3.5 | ~$0.001 |
-| Conversation Analyzer (V3) | Sonnet 4.5 | ~$0.01-0.02 |
-| Response Humanizer | Sonnet 4.5 | ~$0.036 |
-| Next steps note CRM | Haiku 3.5 | ~$0.001 |
-| **Total** | | **~$0.05-0.06** |
+| Extraction identifiants | Haiku 4.5 (`MODEL_EXTRACTION`) | ~$0.001 |
+| Agent Trieur | Sonnet 4.6 (`MODEL_TRIAGE`) | ~$0.01 |
+| Conversation Analyzer (V3) | Sonnet 4.5 (`MODEL_CONVERSATION`) | ~$0.01-0.02 |
+| Response Humanizer | Sonnet 4.6 (`MODEL_HUMANIZER`) | ~$0.036 |
+| Next steps note CRM | Sonnet 4.6 (`MODEL_TRIAGE`) | ~$0.01 |
+| **Total** | | **~$0.06-0.08** |
 
 **Note** : Le Conversation Analyzer ne s'exécute que pour les tickets multi-thread (>1 thread entrant). Les tickets single-thread = $0 (short-circuit).
 

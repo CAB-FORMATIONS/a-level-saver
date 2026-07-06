@@ -1,5 +1,7 @@
 # 🤖 Workflow Autonome - Zoho Automation
 
+> ⚠️ **DOCUMENT HISTORIQUE** : décrit une ancienne méthode de collaboration par fichiers JSON. Les workflows réels sont documentés dans docs/FUNCTIONAL_OVERVIEW.md et BATCH_WORKFLOW.md.
+
 ## Principe
 
 Pour éviter les copy-paste de résultats, nous utilisons un système de **fichiers intermédiaires** :

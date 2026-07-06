@@ -1,28 +1,31 @@
 # A-Level Saver - Automatisation Zoho Desk & CRM
 
-Système d'agents IA pour automatiser la gestion des tickets Zoho Desk et la mise à jour des opportunités Zoho CRM pour un service d'orientation A-Level.
+Système d'agents IA pour automatiser la gestion des tickets Zoho Desk et la mise à jour des opportunités Zoho CRM (CAB Formations - formation VTC Uber).
 
 ## 🎯 Fonctionnalités
 
-### Agent Zoho Desk
-- ✅ Analyse automatique des tickets de support
-- ✅ Génération de réponses personnalisées et empathiques
-- ✅ Détection automatique des cas nécessitant une escalade
-- ✅ Mise à jour automatique des statuts de tickets
-- ✅ Traitement par lots de multiples tickets
+### Workflow DOC (candidats VTC)
+- ✅ Triage automatique des tickets (GO / ROUTE / SPAM / DUPLICATE_UBER)
+- ✅ Liaison ticket ↔ opportunité CRM (DealLinkingAgent)
+- ✅ State Engine déterministe (42 états × 50 intentions → templates)
+- ✅ Génération de réponses personnalisées et empathiques (Humanizer IA)
+- ✅ Mise à jour automatique du CRM et création de brouillons Zoho Desk
 
-### Agent Zoho CRM
-- ✅ Analyse de la santé des opportunités
-- ✅ Recommandations de prochaines étapes
-- ✅ Mise à jour automatique des champs d'opportunité
-- ✅ Détection des opportunités nécessitant attention
-- ✅ Scoring automatique de priorité
+### Workflow Relations entreprises (B2B)
+- ✅ Triage 15 intentions B2B (devis, disponibilités, conventions, factures...)
+- ✅ Lookup CRM de l'expéditeur (contact + compte)
+- ✅ Brouillons uniquement — jamais d'envoi automatique, jamais de mise à jour CRM
 
-### Orchestrateur
-- ✅ Coordination entre tickets et opportunités CRM
-- ✅ Workflows automatisés complexes
-- ✅ Traitement planifié (cron-ready)
-- ✅ Reporting et monitoring
+### Pipeline
+
+```
+Webhook / Batch → DOCTicketWorkflow
+  → Triage → Deal Linking → State Engine → Templates → Humanizer
+  → Brouillon Zoho Desk (+ note CRM)
+```
+
+Le workflow Relations entreprises (`src/workflows/relations_ticket_workflow.py`)
+suit le même principe mais reste en mode brouillon strict.
 
 ## 🚀 Démarrage rapide
 
@@ -50,14 +53,17 @@ cp .env.example .env
 ### Premier test
 
 ```bash
-# Test de l'agent Desk
-python examples/basic_ticket_processing.py
+# Voir le statut de la file de tickets
+python run_workflow_batch.py --status
 
-# Test de l'agent CRM
-python examples/crm_opportunity_management.py
+# Test sur 5 tickets en mode dry-run (pas de draft/CRM updates)
+python run_workflow_batch.py --count 5 --dry-run
 
-# Test du workflow complet
-python examples/full_workflow_orchestration.py
+# Traiter un ticket spécifique
+python run_workflow_batch.py --ticket <ticket_id> --dry-run
+
+# Serveur webhook (déclenchement par Zoho Desk)
+python webhook_server.py
 ```
 
 ## 📖 Documentation
@@ -86,7 +92,7 @@ ngrok http 5000
 1. Setup → Automation → Webhooks → Add Webhook
 2. URL : `https://votre-domaine.com/webhook/zoho-desk`
 3. Events : "Ticket Created", "Ticket Updated"
-4. Configurer le secret HMAC dans `.env`
+4. Configurer le secret partagé `ZOHO_WEBHOOK_SECRET` dans `.env` (header `X-Webhook-Secret`)
 
 **Guide rapide :** [WEBHOOK_QUICKSTART.md](WEBHOOK_QUICKSTART.md)
 
@@ -96,58 +102,71 @@ ngrok http 5000
 a-level-saver/
 ├── src/
 │   ├── agents/
-│   │   ├── base_agent.py        # Classe de base pour les agents IA
-│   │   ├── desk_agent.py        # Agent Zoho Desk
-│   │   └── crm_agent.py         # Agent Zoho CRM
-│   ├── zoho_client.py           # Clients API Zoho (Desk & CRM)
-│   └── orchestrator.py          # Orchestrateur de workflows
-├── examples/
-│   ├── basic_ticket_processing.py
-│   ├── crm_opportunity_management.py
-│   ├── full_workflow_orchestration.py
-│   └── scheduled_automation.py
-├── config.py                    # Configuration centralisée
-├── requirements.txt             # Dépendances Python
-└── GUIDE.md                    # Documentation complète
+│   │   ├── base_agent.py               # Classe de base pour les agents IA
+│   │   ├── triage_agent.py             # Triage GO/ROUTE/SPAM + intentions
+│   │   ├── deal_linking_agent.py       # Liaison ticket ↔ deal CRM
+│   │   ├── crm_update_agent.py         # Mises à jour CRM (mapping, guards)
+│   │   ├── examt3p_agent.py            # Extraction dossier ExamT3P
+│   │   └── relations_triage_agent.py   # Triage B2B (15 intentions)
+│   ├── workflows/
+│   │   ├── doc_ticket_workflow.py      # Workflow principal DOC (8 étapes)
+│   │   └── relations_ticket_workflow.py # Workflow B2B (brouillons only)
+│   ├── state_engine/
+│   │   ├── state_detector.py           # Détection des 42 états
+│   │   ├── template_engine.py          # Sélection template + contexte
+│   │   ├── pybars_renderer.py          # Rendu Handlebars (pybars3)
+│   │   ├── response_validator.py       # Validation des réponses
+│   │   └── crm_updater.py              # Application des updates CRM
+│   ├── utils/                          # Helpers (thread_memory, dates, etc.)
+│   ├── constants/                      # Constantes métier (models, thresholds...)
+│   ├── zoho_client.py                  # Clients API Zoho (Desk & CRM)
+│   └── ticket_deal_linker.py           # Stratégies de liaison de base
+├── states/
+│   ├── candidate_states.yaml           # 42 états
+│   ├── state_intention_matrix.yaml     # 50 intentions + matrice État×Intention
+│   ├── blocks/                         # 53 blocs de contenu
+│   └── templates/                      # response_master.html + partials + base_legacy
+├── webhook_server.py                   # Serveur Flask (webhook Zoho Desk)
+├── run_workflow_batch.py               # Traitement batch (CLI)
+├── run_workflow_continuous.py          # Traitement continu
+├── config.py                           # Configuration centralisée
+├── business_rules.py                   # Règles de routage départemental
+├── render.yaml                         # Déploiement Render (runtime python)
+├── Dockerfile                          # Image Docker (non utilisée par Render)
+└── requirements.txt                    # Dépendances Python
 ```
 
 ## 💡 Cas d'usage
 
-### 1. Support client automatisé
+### 1. Traiter un ticket DOC complet
 ```python
-from src.agents import DeskTicketAgent
+from src.workflows.doc_ticket_workflow import DOCTicketWorkflow
 
-agent = DeskTicketAgent()
-result = agent.process({
-    "ticket_id": "123456789",
-    "auto_respond": True,
-    "auto_update": True
-})
-```
-
-### 2. Gestion des opportunités
-```python
-from src.agents import CRMOpportunityAgent
-
-agent = CRMOpportunityAgent()
-result = agent.process({
-    "deal_id": "987654321",
-    "auto_update": True,
-    "auto_add_note": True
-})
-```
-
-### 3. Workflow intégré
-```python
-from src.orchestrator import ZohoAutomationOrchestrator
-
-orchestrator = ZohoAutomationOrchestrator()
-result = orchestrator.process_ticket_with_crm_update(
-    ticket_id="123456789",
-    deal_id="987654321",
-    auto_respond=True,
-    auto_update_deal=True
+workflow = DOCTicketWorkflow()
+result = workflow.process_ticket(
+    ticket_id="198709000438366101",
+    auto_create_draft=True,
+    auto_update_crm=True,
+    auto_update_ticket=True
 )
+```
+
+### 2. Traiter un ticket Relations entreprises (B2B)
+```python
+from src.workflows.relations_ticket_workflow import RelationsTicketWorkflow
+
+workflow = RelationsTicketWorkflow()
+result = workflow.process_ticket(
+    ticket_id="198709000438366101",
+    auto_create_draft=True  # Brouillon uniquement, jamais d'envoi auto
+)
+```
+
+### 3. Traitement par lots (CLI)
+```bash
+python run_workflow_batch.py --count 10          # Traiter 10 tickets
+python run_workflow_batch.py --ticket <id>       # Un ticket spécifique
+python run_workflow_batch.py --count 5 --dry-run # Mode test
 ```
 
 ## 🔧 Technologies utilisées

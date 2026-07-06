@@ -6,11 +6,12 @@ Les agents sont des composants IA spécialisés utilisant Claude (Anthropic).
 
 | Agent | Modèle | Rôle |
 |-------|--------|------|
-| TriageAgent | Haiku | Triage tickets (GO/ROUTE/SPAM) + détection intention |
+| TriageAgent | claude-sonnet-4-6 (`MODEL_TRIAGE`) | Triage tickets (GO/ROUTE/SPAM) + détection intention |
 | CRMUpdateAgent | - | Mises à jour CRM avec validation |
 | DealLinkingAgent | - | Liaison ticket↔deal |
 | ExamT3PAgent | - | Extraction données ExamT3P |
-| TicketDispatcherAgent | - | Routage vers départements |
+| RelationsTriageAgent | claude-haiku-4-5 (`MODEL_EXTRACTION`) | Triage B2B Relations entreprises (15 intentions) |
+| TicketDispatcherAgent | - | ⚠️ Exemple uniquement (non branché en prod) |
 
 ---
 
@@ -205,16 +206,7 @@ data = agent.extract_data(identifiant, mot_de_passe)
 
 ## 5. TicketDispatcherAgent
 
-**Fichier :** `src/agents/dispatcher_agent.py`
-Route les tickets vers le bon département.
-
-### Signature
-```python
-from src.agents.dispatcher_agent import TicketDispatcherAgent
-
-agent = TicketDispatcherAgent()
-result = agent.dispatch(ticket_id, target_department="Contact")
-```
+> ⚠️ **`src/agents/dispatcher_agent.py` n'existe pas.** Le seul fichier lié est `examples/ticket_dispatcher.py`, un script d'exemple **non branché en production**. Le routage réel est fait par `DOCTicketWorkflow._run_triage()` + `BusinessRules.determine_department_from_deals_and_ticket()` (business_rules.py:215).
 
 ### Départements disponibles
 Voir `desk_departments.json` pour la liste complète :
@@ -222,7 +214,43 @@ Voir `desk_departments.json` pour la liste complète :
 
 ---
 
-## 6. BaseAgent (Classe abstraite)
+## 6. RelationsTriageAgent
+
+**Fichier :** `src/agents/relations_triage_agent.py`
+Triage des emails B2B du département Relations entreprises (LLM + fallback déterministe par mots-clés).
+
+### Signature
+```python
+from src.agents.relations_triage_agent import RelationsTriageAgent
+
+agent = RelationsTriageAgent()
+result = agent.process({
+    "subject": "Demande de devis CACES R489",
+    "message": "...",
+    "email": "contact@entreprise.fr",
+    "crm_context": {...}
+})
+```
+
+### 15 intentions B2B
+`DEMANDE_DEVIS_FORMATION`, `DEMANDE_DISPONIBILITE_SESSION`, `INSCRIPTION_CANDIDATS`, `COMMANDE_FORMALOGISTICS`, `ANNULATION_REPORT_ABSENCE`, `CONVENTION_CONTRAT_DOSSIER`, `BON_DE_COMMANDE`, `CONVOCATION_CONFIRMATION`, `ATTESTATION_FIN_FORMATION`, `DOCUMENTS_SIGNATURES_MANQUANTS`, `FACTURE_FINANCEMENT_PEC`, `BILAN_FORMATEUR`, `PROSPECTION_PARTENARIAT`, `CV_PROFILS_INTERVENANTS`, `AUTRE_A_QUALIFIER`
+
+### Actions possibles
+| Action | Comportement |
+|--------|--------------|
+| `DRAFT` | Brouillon client possible (jamais d'envoi direct) |
+| `IGNORE_NOISE` | Spam, newsletter, no-reply, notification automatique |
+| `ROUTE_COMPTA` | Litige facture / relance comptable |
+| `ROUTE_HUMAN` | Demande sensible ou ambiguïté forte |
+
+### Extraction
+`formation_type`, `centre`, `start_date`/`end_date`, `nb_candidates`, `categories` (CACES), `type_ir`, `financement`, `missing_fields`, etc.
+
+**Modèle :** `MODEL_EXTRACTION` (claude-haiku-4-5)
+
+---
+
+## 7. BaseAgent (Classe abstraite)
 
 **Fichier :** `src/agents/base_agent.py`
 Classe de base pour tous les agents.
@@ -236,8 +264,7 @@ class BaseAgent:
 ```
 
 ### Modèle utilisé
-Défini dans `config.py` : `claude-sonnet-4-5-20250929`
-(Haiku pour les tâches légères comme le triage)
+`settings.agent_model` de `config.py` (legacy). Les agents du workflow utilisent les modèles centralisés dans `src/constants/models.py` (`MODEL_TRIAGE`, `MODEL_HUMANIZER`, `MODEL_EXTRACTION`...).
 
 ---
 

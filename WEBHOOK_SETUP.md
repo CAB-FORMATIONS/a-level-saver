@@ -5,19 +5,19 @@ Ce guide explique comment configurer et déployer le serveur webhook pour automa
 ## Architecture
 
 ```
-Zoho Desk (Événement ticket)
+Zoho Desk (Workflow Rule → fonction Deluge invokeurl)
     ↓
 Webhook HTTP POST
     ↓
 Serveur Flask (webhook_server.py)
     ↓
-Vérification signature HMAC
+Vérification du header X-Webhook-Secret (secret partagé)
     ↓
-Orchestrateur (process_ticket_complete_workflow)
+DOCTicketWorkflow.process_ticket (thread en arrière-plan)
     ↓
 8 étapes d'automatisation
     ↓
-Réponse JSON (succès/échec)
+Réponse JSON immédiate (200, traitement asynchrone)
 ```
 
 ## 1. Configuration locale
@@ -35,22 +35,16 @@ Cela installera Flask et Gunicorn nécessaires pour le serveur webhook.
 Ajoutez ces variables dans votre fichier `.env` :
 
 ```bash
-# Webhook Configuration
-ZOHO_WEBHOOK_SECRET=votre_secret_hmac_ici
+# Webhook Configuration (seules variables lues par webhook_server.py)
+ZOHO_WEBHOOK_SECRET=votre_secret_partage_ici   # Header X-Webhook-Secret
 WEBHOOK_HOST=0.0.0.0
 WEBHOOK_PORT=5000
-
-# Automation Flags (contrôle progressif)
-WEBHOOK_AUTO_DISPATCH=true          # Réaffectation auto au bon département
-WEBHOOK_AUTO_LINK=true              # Liaison auto ticket ↔ deal
-WEBHOOK_AUTO_RESPOND=false          # ⚠️ Génère ET envoie la réponse
-WEBHOOK_AUTO_UPDATE_TICKET=false    # ⚠️ Change le statut du ticket
-WEBHOOK_AUTO_UPDATE_DEAL=false      # ⚠️ Met à jour le CRM
-WEBHOOK_AUTO_ADD_NOTE=false         # ⚠️ Ajoute des notes au CRM
 
 # Flask
 FLASK_DEBUG=false                   # true pour dev, false pour prod
 ```
+
+**Note :** Si `ZOHO_WEBHOOK_SECRET` n'est pas défini, l'authentification est désactivée (un warning est loggé).
 
 ### Démarrage du serveur (développement)
 
@@ -61,9 +55,11 @@ python webhook_server.py
 Le serveur démarre sur `http://0.0.0.0:5000` avec les endpoints suivants :
 
 - `GET /health` - Health check
-- `POST /webhook/zoho-desk` - Endpoint principal pour les webhooks Zoho
-- `POST /webhook/test` - Endpoint de test sans vérification de signature
+- `POST /webhook/zoho-desk` - Endpoint principal pour les webhooks Zoho (X-Webhook-Secret)
+- `POST /webhook/test` - Endpoint de test synchrone, sans authentification
 - `GET /webhook/stats` - Statistiques et configuration actuelle
+- `GET /logs` - Logs récents en mémoire (protégé X-Webhook-Secret)
+- `GET /logs/ticket/<ticket_id>` - Logs filtrés par ticket (protégé X-Webhook-Secret)
 
 ### Vérification
 
@@ -161,29 +157,25 @@ Sélectionnez les départements concernés :
 
 **En-têtes HTTP personnalisés :**
 
-Ajoutez cet en-tête pour la vérification de signature :
+Ajoutez cet en-tête pour l'authentification (secret partagé, comparé tel quel par le serveur — pas de HMAC) :
 ```
-X-Zoho-Signature: {signature}
+X-Webhook-Secret: {votre_secret}
 ```
 
-(Zoho génèrera automatiquement la signature si vous configurez le secret)
+### Étape 3 : Configuration du secret partagé
 
-### Étape 3 : Configuration du secret HMAC
-
-**Dans Zoho Desk :**
-1. Dans la configuration du webhook, cherchez "Webhook Secret"
-2. Générez un secret aléatoire fort :
+1. Générez un secret aléatoire fort :
    ```bash
    # Générez un secret sécurisé
    python -c "import secrets; print(secrets.token_urlsafe(32))"
    ```
-3. Copiez ce secret dans Zoho Desk
-4. Ajoutez-le aussi dans votre `.env` :
+2. Configurez ce secret dans l'en-tête `X-Webhook-Secret` envoyé par Zoho Desk (fonction Deluge / webhook)
+3. Ajoutez-le aussi dans votre `.env` :
    ```bash
    ZOHO_WEBHOOK_SECRET=le_secret_généré
    ```
 
-**⚠️ Important :** Le secret doit être identique dans Zoho Desk et dans votre `.env` !
+**⚠️ Important :** Le secret doit être identique côté Zoho Desk et dans votre `.env` ! (Vérification : `webhook_server.py:53-69`)
 
 ### Étape 4 : Tester le webhook
 
@@ -199,38 +191,31 @@ tail -f logs/app.log
 
 ## 4. Test manuel avec curl
 
-### Test simple (sans signature)
+### Test simple (sans authentification)
 
-Utilisez l'endpoint `/webhook/test` qui ne vérifie pas la signature :
+Utilisez l'endpoint `/webhook/test` qui ne vérifie pas le secret (traitement synchrone, résultat complet) :
 
 ```bash
 curl -X POST http://localhost:5000/webhook/test \
   -H "Content-Type: application/json" \
   -d '{
     "ticket_id": "198709000438366101",
-    "auto_dispatch": true,
-    "auto_link": true,
-    "auto_respond": false
+    "auto_create_draft": true,
+    "auto_update_crm": true,
+    "auto_update_ticket": true,
+    "auto_send": false
   }'
 ```
 
-### Test avec signature HMAC
+### Test avec le secret partagé
 
-Pour tester l'endpoint principal avec signature :
+Pour tester l'endpoint principal avec authentification :
 
 ```bash
-# 1. Créez le payload
-PAYLOAD='{"ticket":{"id":"198709000438366101"},"event_type":"ticket.created"}'
-
-# 2. Calculez la signature HMAC
-SECRET="votre_secret_hmac"
-SIGNATURE=$(echo -n "$PAYLOAD" | openssl dgst -sha256 -hmac "$SECRET" | cut -d' ' -f2)
-
-# 3. Envoyez la requête
 curl -X POST http://localhost:5000/webhook/zoho-desk \
   -H "Content-Type: application/json" \
-  -H "X-Zoho-Signature: $SIGNATURE" \
-  -d "$PAYLOAD"
+  -H "X-Webhook-Secret: votre_secret_partage" \
+  -d '{"ticket_id": "198709000438366101"}'
 ```
 
 ### Test avec les fichiers JSON pushés
@@ -404,54 +389,19 @@ sudo apt install certbot python3-certbot-nginx
 sudo certbot --nginx -d votre-domaine.com
 ```
 
-## 6. Activation progressive de l'automatisation
+## 6. Contrôle de l'automatisation
 
-**Recommandation :** Activez progressivement les fonctionnalités pour valider chaque étape.
+Le comportement n'est PAS contrôlé par des variables d'environnement, mais par les paramètres de `DOCTicketWorkflow.process_ticket` :
 
-### Niveau 1 : Dispatch + Linking uniquement
+| Paramètre | Défaut (webhook) | Effet |
+|-----------|------------------|-------|
+| `auto_create_draft` | `true` | Crée le brouillon Zoho Desk |
+| `auto_update_crm` | `true` | Met à jour le deal CRM |
+| `auto_update_ticket` | `true` | Met à jour le statut/tags du ticket |
+| `auto_send` | `true` | Envoi direct si les guard rails l'autorisent (`_can_auto_send()`), sinon fallback brouillon |
 
-```bash
-WEBHOOK_AUTO_DISPATCH=true
-WEBHOOK_AUTO_LINK=true
-WEBHOOK_AUTO_RESPOND=false
-WEBHOOK_AUTO_UPDATE_TICKET=false
-WEBHOOK_AUTO_UPDATE_DEAL=false
-WEBHOOK_AUTO_ADD_NOTE=false
-```
-
-**Ce qui se passe :**
-- ✅ Les tickets sont automatiquement réaffectés au bon département
-- ✅ Le lien ticket ↔ deal est créé automatiquement
-- ❌ Aucune réponse envoyée (reste en mode suggestion)
-- ❌ Aucune modification du ticket/CRM
-
-**Surveillez pendant 2-3 jours** pour vérifier que le routing est correct.
-
-### Niveau 2 : + Réponses automatiques
-
-```bash
-WEBHOOK_AUTO_RESPOND=true
-WEBHOOK_AUTO_UPDATE_TICKET=true
-```
-
-**Ce qui se passe :**
-- ✅ Génère ET envoie les réponses aux clients
-- ✅ Change le statut du ticket (ex: Open → Pending)
-
-**⚠️ ATTENTION :** Les clients recevront des emails automatiques !
-
-**Surveillez attentivement** pour vérifier que les réponses sont appropriées.
-
-### Niveau 3 : Automatisation complète
-
-```bash
-WEBHOOK_AUTO_UPDATE_DEAL=true
-WEBHOOK_AUTO_ADD_NOTE=true
-```
-
-**Ce qui se passe :**
-- ✅ Met à jour les opportunités CRM automatiquement
-- ✅ Ajoute des notes dans le CRM
+Sur l'endpoint `/webhook/zoho-desk`, le traitement utilise les défauts ci-dessus.
+Sur `/webhook/test`, chaque paramètre peut être surchargé dans le payload JSON (voir §4).
 
 ## 7. Monitoring et logs
 
@@ -481,14 +431,12 @@ Exemple de réponse :
   "service": "a-level-saver-webhook",
   "status": "running",
   "configuration": {
-    "auto_dispatch": true,
-    "auto_link": true,
-    "auto_respond": false,
-    "auto_update_ticket": false,
-    "auto_update_deal": false,
-    "auto_add_note": false,
-    "signature_verification": true
+    "auth": "X-Webhook-Secret header",
+    "auth_enabled": true,
+    "processing": "async (background thread)",
+    "auto_send": "guarded by _can_auto_send()"
   },
+  "active_threads": 2,
   "timestamp": "2026-01-25T02:00:00.000Z"
 }
 ```
@@ -496,39 +444,38 @@ Exemple de réponse :
 ### Alertes recommandées
 
 Configurez des alertes pour :
-- ❌ Webhook signature verification failed
+- ❌ X-Webhook-Secret mismatch
 - ❌ Error processing webhook
-- ❌ Failed to parse JSON payload
-- ⚠️ No ticket ID found in payload
+- ❌ Failed to parse JSON
+- ⚠️ ticket_id required
 
 ## 8. Dépannage
 
-### Erreur : "Invalid signature"
+### Erreur : "Unauthorized" (401)
 
-**Cause :** Le secret HMAC ne correspond pas entre Zoho et votre serveur.
+**Cause :** Le secret partagé (header X-Webhook-Secret) ne correspond pas entre Zoho et votre serveur.
 
 **Solution :**
 1. Vérifiez que `ZOHO_WEBHOOK_SECRET` dans `.env` correspond au secret dans Zoho Desk
 2. Vérifiez qu'il n'y a pas d'espaces ou caractères invisibles
 3. Régénérez un nouveau secret si nécessaire
 
-### Erreur : "No ticket ID found in payload"
+### Erreur : "ticket_id required"
 
-**Cause :** Le format du payload Zoho a changé ou est inattendu.
+**Cause :** Le payload JSON ne contient pas `ticket_id` (ou `ticketId`).
 
 **Solution :**
-1. Loggez le payload complet : ajoutez `logger.debug(f"Payload: {json.dumps(data, indent=2)}")`
-2. Vérifiez la structure dans les logs
-3. Ajustez `extract_ticket_id_from_payload()` si nécessaire
+1. Vérifiez le payload envoyé par la fonction Deluge : `{"ticket_id": "198709000..."}`
+2. Consultez les logs via `GET /logs`
 
-### Erreur : "Orchestrator failed"
+### Erreur : workflow en échec ([BG] Ticket ... FAILED)
 
-**Cause :** Problème dans le workflow d'automatisation.
+**Cause :** Problème dans `DOCTicketWorkflow.process_ticket`.
 
 **Solution :**
 1. Vérifiez les credentials Zoho dans `.env`
-2. Testez manuellement avec `test_with_real_tickets.py`
-3. Vérifiez les logs détaillés de l'orchestrateur
+2. Testez manuellement avec `POST /webhook/test` (résultat synchrone détaillé)
+3. Consultez `GET /logs/ticket/<ticket_id>` pour les logs de ce ticket
 
 ### Webhook ne se déclenche pas
 
@@ -556,7 +503,7 @@ Configurez des alertes pour :
 
 ### Checklist de sécurité
 
-- ✅ **Signature HMAC activée** : `ZOHO_WEBHOOK_SECRET` configuré
+- ✅ **Secret partagé activé** : `ZOHO_WEBHOOK_SECRET` configuré (header X-Webhook-Secret)
 - ✅ **HTTPS uniquement** : Utilisez un certificat SSL (Let's Encrypt)
 - ✅ **Rate limiting** : Limitez le nombre de requêtes par IP
 - ✅ **Validation des données** : Vérifiez ticket_id, event_type, etc.

@@ -23,10 +23,9 @@ graph TB
     end
 
     subgraph "Agents Spécialisés"
-        TA[TriageAgent<br/>GO/ROUTE/SPAM]
+        TA[TriageAgent<br/>GO/ROUTE/SPAM + Routage]
         DLA[DealLinkingAgent<br/>Liaison CRM]
         CUA[CRMUpdateAgent<br/>Mises à jour CRM]
-        DA[DispatcherAgent<br/>Routage]
     end
 
     subgraph "Helpers & Utils"
@@ -39,7 +38,7 @@ graph TB
     end
 
     subgraph "State Engine"
-        SD[StateDetector<br/>~25 états]
+        SD[StateDetector<br/>42 états]
         TE[TemplateEngine<br/>Handlebars]
         RV[ResponseValidator<br/>Validation règles]
     end
@@ -49,9 +48,9 @@ graph TB
     end
 
     subgraph "Données d'État"
-        CS[(candidate_states.yaml<br/>~25 états)]
-        SIM[(state_intention_matrix.yaml<br/>37 intentions)]
-        TPL[(templates/<br/>~62 templates HTML)]
+        CS[(candidate_states.yaml<br/>42 états)]
+        SIM[(state_intention_matrix.yaml<br/>50 intentions)]
+        TPL[(templates/<br/>66 templates legacy + partials)]
         BLK[(blocks/<br/>~50 blocs MD)]
     end
 
@@ -66,7 +65,6 @@ graph TB
     WF --> TA
     WF --> DLA
     WF --> CUA
-    WF --> DA
 
     WF --> DEH
     WF --> SH
@@ -643,11 +641,13 @@ stateDiagram-v2
 
 ---
 
-## 11. Intentions Détectées par TriageAgent (I01-I37)
+## 11. Intentions Détectées par TriageAgent (extrait)
+
+> Note : diagramme partiel. La liste complète compte **50 intentions** (voir `states/state_intention_matrix.yaml`).
 
 ```mermaid
 mindmap
-  root((37 Intentions))
+  root((50 Intentions))
     Statut & Info
       I01 STATUT_DOSSIER
       I02 DEMANDE_CONVOCATION
@@ -734,9 +734,9 @@ graph TB
         end
 
         subgraph "Agents IA"
-            TA[TriageAgent<br/>Haiku 3.5]
-            RW[Response Writer<br/>Sonnet 4.5]
-            NS[Next Steps<br/>Haiku 3.5]
+            TA[TriageAgent<br/>Sonnet 4.6]
+            RW[Response Humanizer<br/>Sonnet 4.6]
+            NS[Next Steps<br/>Sonnet 4.6]
         end
 
         subgraph "State Engine"
@@ -948,7 +948,7 @@ sequenceDiagram
 
     WF->>SD: detect_all_states(deal_data, examt3p, triage_result,<br/>session_data, training_consistency) ⭐ v2.2
 
-    Note over SD: Évalue ~25 états par priorité<br/>uber_case auto-calculé dans contexte
+    Note over SD: Évalue 42 états par priorité<br/>uber_case auto-calculé dans contexte
 
     SD-->>WF: DetectedStates {blocking, warnings, infos, context}
 

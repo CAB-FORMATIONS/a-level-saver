@@ -1,5 +1,7 @@
 ## Stratégies de liaison Ticket ↔ Deal
 
+> ⚠️ **Avertissement** : le workflow de production utilise **`DealLinkingAgent`** (`src/agents/deal_linking_agent.py`), plus riche que le `TicketDealLinker` décrit ici (détection doublon Uber, filtrage par nom sur la recherche téléphone, champ `cf_opportunite`, gestion des emails forwardés). `TicketDealLinker` (`src/ticket_deal_linker.py`) est la version de base documentée ci-dessous.
+
 Ce document explique comment le système lie automatiquement les tickets Zoho Desk aux opportunités Zoho CRM.
 
 ## 🎯 Le problème
@@ -8,11 +10,11 @@ Zoho Desk et Zoho CRM sont deux systèmes séparés. Pour automatiser les workfl
 
 ## ✅ Solution : Multiples stratégies avec fallback
 
-Le système utilise **5 stratégies** différentes, essayées dans l'ordre jusqu'à trouver un match.
+Le système utilise **6 stratégies** différentes, essayées dans l'ordre jusqu'à trouver un match.
 
 ---
 
-## 📋 Les 5 stratégies
+## 📋 Les 6 stratégies
 
 ### 1️⃣ Custom Field (Lien direct) ⭐⭐⭐
 
@@ -46,7 +48,21 @@ deal = linker.find_deal_for_ticket(ticket_id, strategies=["custom_field"])
 
 ---
 
-### 2️⃣ Contact Email ⭐⭐
+### 2️⃣ Department Specific ⭐⭐
+
+**Priorité** : Élevée
+**Comment ça marche** : Logique de recherche spécifique au département du ticket, définie dans `business_rules.py` (`get_deal_search_criteria_for_department`). Implémentée par `_find_by_department_logic()` (`src/ticket_deal_linker.py:148`).
+
+**Prérequis** : le ticket doit avoir un département et un email de contact ; skip silencieux sinon (ou si `business_rules.py` n'est pas disponible).
+
+**Code** :
+```python
+deal = linker.find_deal_for_ticket(ticket_id, strategies=["department_specific"])
+```
+
+---
+
+### 3️⃣ Contact Email ⭐⭐
 
 **Priorité** : Élevée
 **Comment ça marche** : Cherche les deals où le contact a le même email que le contact du ticket
@@ -78,7 +94,7 @@ deal = linker.find_deal_for_ticket(ticket_id, strategies=["contact_email"])
 
 ---
 
-### 3️⃣ Contact Phone ⭐⭐
+### 4️⃣ Contact Phone ⭐⭐
 
 **Priorité** : Élevée
 **Comment ça marche** : Cherche les deals par numéro de téléphone
@@ -109,7 +125,7 @@ deal = linker.find_deal_for_ticket(ticket_id, strategies=["contact_phone"])
 
 ---
 
-### 4️⃣ Account/Organization ⭐
+### 5️⃣ Account/Organization ⭐
 
 **Priorité** : Moyenne
 **Comment ça marche** : Cherche les deals liés à la même organisation/entreprise
@@ -139,7 +155,7 @@ deal = linker.find_deal_for_ticket(ticket_id, strategies=["account"])
 
 ---
 
-### 5️⃣ Recent Deal (Fallback) ⭐
+### 6️⃣ Recent Deal (Fallback) ⭐
 
 **Priorité** : Faible
 **Comment ça marche** : Récupère le deal le plus récemment modifié pour ce contact
@@ -223,36 +239,28 @@ linker.link_ticket_to_deal_bidirectional(
 
 ## ⚡ Workflow complet automatisé
 
-La méthode recommandée qui fait tout automatiquement :
+En production, la liaison est intégrée au workflow principal via `DealLinkingAgent` :
 
 ```python
-from src.orchestrator import ZohoAutomationOrchestrator
+from src.workflows.doc_ticket_workflow import DOCTicketWorkflow
 
-orchestrator = ZohoAutomationOrchestrator()
+workflow = DOCTicketWorkflow()
 
-# Traite le ticket ET trouve/met à jour le deal automatiquement
-result = orchestrator.process_ticket_with_auto_crm_link(
+# Traite le ticket : triage → deal linking → state engine → réponse → CRM
+result = workflow.process_ticket(
     ticket_id="ticket_123",
-    auto_respond=True,              # Répond au ticket
-    auto_update_ticket=True,        # MAJ statut ticket
-    auto_update_deal=True,          # MAJ le deal
-    auto_add_note=True,             # Ajoute note au deal
-    create_bidirectional_link=True  # Crée le lien pour la prochaine fois
+    auto_create_draft=True,
+    auto_update_crm=True,
+    auto_update_ticket=True
 )
-
-if result['deal_found']:
-    print(f"Deal trouvé et mis à jour: {result['deal_name']}")
-else:
-    print("Aucun deal trouvé - ticket traité seul")
 ```
 
-**Ce que fait cette méthode** :
-1. ✅ Analyse le ticket avec l'IA
-2. ✅ Cherche le deal automatiquement (toutes stratégies)
-3. ✅ Crée un lien bidirectionnel
-4. ✅ Analyse l'impact sur le deal avec l'IA
-5. ✅ Met à jour le deal automatiquement
-6. ✅ Ajoute une note avec l'analyse
+**Ce que fait le workflow** :
+1. ✅ Triage du ticket (TriageAgent)
+2. ✅ Cherche le deal automatiquement (DealLinkingAgent : cf_opportunite, email, téléphone + filtre nom, forwards, doublon Uber)
+3. ✅ Analyse multi-sources (ExamT3P, dates, sessions, uber)
+4. ✅ Génère la réponse (State Engine + Humanizer)
+5. ✅ Met à jour le deal (CRMUpdateAgent) et ajoute une note consolidée
 
 ---
 
@@ -403,9 +411,7 @@ Voir `src/ticket_deal_linker.py` pour :
 - `link_ticket_to_deal_bidirectional()` - Crée un lien bidirectionnel
 - `auto_link_ticket()` - Trouve ET lie automatiquement
 
-Voir `src/orchestrator.py` pour :
-- `process_ticket_with_crm_update()` - Workflow avec deal_id connu
-- `process_ticket_with_auto_crm_link()` - Workflow avec recherche auto
+Voir `src/agents/deal_linking_agent.py` pour la version production (utilisée par `DOCTicketWorkflow`).
 
 ---
 

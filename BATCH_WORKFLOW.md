@@ -178,6 +178,14 @@ python run_workflow_batch.py --count <N> --dry-run
 | `--dry-run` ou `-d` | Mode test sans création de draft/CRM |
 | `--ticket ID` ou `-t ID` | Traite un ticket spécifique |
 | `--delay X` | Délai entre tickets en secondes (défaut: 2.0) |
+| `--auto-send` | Envoie directement les réponses (avec guard rails, fallback draft) |
+
+### Option `--auto-send`
+
+Comportement (`run_workflow_batch.py:440` et `process_batch()`) :
+- `process_ticket()` est appelé avec `auto_send=True` et `auto_create_draft=False` : si les guard rails (`_can_auto_send()`) l'autorisent, la réponse est **envoyée directement** puis le ticket est **fermé** ; sinon **fallback en brouillon** (raison dans `send_fallback_reason`)
+- Combiné à `--dry-run`, l'envoi est désactivé (`auto_send=False` effectif)
+- Le label du batch affiche `AUTO-SEND` au lieu de `PRODUCTION (draft)`
 
 ## Exemples
 

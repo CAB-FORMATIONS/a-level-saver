@@ -68,10 +68,10 @@ STEP 0.5 DOUBLON CHECK    Verifier si clarification doublon en attente
 STEP 1   TRIAGE AGENT     GO / ROUTE / SPAM / DUPLICATE_UBER + intention + session_preference
 STEP 2   ANALYSIS         7 sources (ticket, deal, ExamT3P, dates, sessions, uber, conversation V3)
 STEP 3   STATE ENGINE     ETAT x INTENTION --> Template + partials (deterministe)
-STEP 4   HUMANIZER        Reformulation naturelle par Sonnet 4.5 (optionnel)
+STEP 4   HUMANIZER        Reformulation naturelle par Sonnet 4.6 (optionnel)
 STEP 5   CRM UPDATES      Via CRMUpdateAgent (mapping auto, regles blocage, guard rail dossier_termine)
-STEP 6   DRAFT CREATION   Brouillon Zoho Desk ou envoi direct (auto-send)
-STEP 7   CRM NOTE         Ligne [META] pour ThreadMemory
+STEP 6   CRM NOTE         Ligne [META] pour ThreadMemory (apres les mises a jour CRM)
+STEP 7   REPLY DELIVERY   Brouillon Zoho Desk ou envoi direct (auto-send)
 STEP 8   VALIDATION       Verification finale (termes interdits, donnees factuelles)
 ```
 
@@ -203,6 +203,7 @@ Les etats sont evalues par ordre de priorite (1 = plus prioritaire). Le premier 
 | A3 | `DOUBLE_ACCOUNT_PAID` | BLOCKING | Deux comptes ExamT3P payes detectes |
 | A4 | `PERSONAL_ACCOUNT_WARNING` | WARNING | Compte CAB paye + compte personnel non paye |
 | A5 | `SESSION_ASSIGNMENT_ERROR` | WARNING | Session assignee dans le passe - erreur admin |
+| A6 | `EXAMT3P_ACCESS_LOST` | BLOCKING | Identifiants ExamT3P invalides + dossier en statut critique (paiement fait) |
 
 ### Etats Eligibilite Uber (Priorite 200-204)
 
@@ -274,7 +275,7 @@ Les etats sont evalues par ordre de priorite (1 = plus prioritaire). Le premier 
 
 ## Les Intentions
 
-Les intentions sont detectees par le Triage Agent (IA Haiku 3.5) et representent ce que le candidat demande. Elles sont definies dans `state_intention_matrix.yaml`.
+Les intentions sont detectees par le Triage Agent (IA Sonnet 4.6) et representent ce que le candidat demande. Elles sont definies dans `state_intention_matrix.yaml`.
 
 ### Demandes d'information
 
@@ -644,16 +645,30 @@ Les templates utilisent ces flags pour adapter le vocabulaire (passe/present/fut
 
 ---
 
+## Workflow Relations entreprises (B2B)
+
+Un workflow separe traite les emails du departement Relations entreprises (`src/workflows/relations_ticket_workflow.py`). Il est volontairement independant du workflow DOC :
+
+- **Triage B2B** : `RelationsTriageAgent` (LLM + fallback deterministe) classe le message parmi 15 intentions B2B (devis, disponibilite session, inscription candidats, commande Formalogistics, annulation/report/absence, convention/contrat, bon de commande, convocation, attestation fin de formation, documents/signatures manquants, facture/financement, bilan formateur, prospection/partenariat, CV intervenants, autre a qualifier) avec actions DRAFT / IGNORE_NOISE / ROUTE_COMPTA / ROUTE_HUMAN.
+- **Lookup CRM** : `RelationsCRMLookup` retrouve le contact et le compte (entreprise) a partir de l'email de l'expediteur.
+- **Disponibilites** : si la demande est suffisamment qualifiee, interrogation en lecture seule de l'API interne PlanBot (`planbot_api_client.py`) ; sinon la reponse demande les infos manquantes (`missing_fields`).
+- **Brouillon uniquement** : le workflow ne fait JAMAIS d'envoi automatique ni de mise a jour CRM — il cree uniquement des brouillons Zoho Desk (`auto_create_draft=True`).
+- **Validation** : `relations_response_validator.py` verifie l'absence de termes interdits (`FORBIDDEN_TERMS`) avant creation du brouillon.
+
+Point d'entree batch : `run_relations_workflow_batch.py`.
+
+---
+
 ## Couts API par ticket
 
 | Composant | Modele | Cout estime |
 |-----------|--------|-------------|
-| Extraction identifiants | Haiku 3.5 | ~0.001 USD |
-| Agent Trieur | Haiku 3.5 | ~0.001 USD |
-| Conversation Analyzer V3 | Sonnet 4.5 | ~0.01-0.02 USD |
-| Response Humanizer | Sonnet 4.5 | ~0.036 USD |
-| Note CRM (next steps) | Haiku 3.5 | ~0.001 USD |
-| **Total** | | **~0.05-0.06 USD** |
+| Extraction identifiants | Haiku 4.5 (`MODEL_EXTRACTION`) | ~0.001 USD |
+| Agent Trieur | Sonnet 4.6 (`MODEL_TRIAGE`) | ~0.01 USD |
+| Conversation Analyzer V3 | Sonnet 4.5 (`MODEL_CONVERSATION`) | ~0.01-0.02 USD |
+| Response Humanizer | Sonnet 4.6 (`MODEL_HUMANIZER`) | ~0.036 USD |
+| Note CRM (next steps) | Sonnet 4.6 (`MODEL_TRIAGE`) | ~0.01 USD |
+| **Total** | | **~0.06-0.08 USD** |
 
 Le Conversation Analyzer V3 ne s'execute que pour les tickets multi-thread (>1 thread entrant). Les tickets single-thread = 0 USD (court-circuit).
 

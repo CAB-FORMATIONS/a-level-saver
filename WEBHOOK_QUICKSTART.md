@@ -11,7 +11,7 @@ pip install -r requirements.txt
 
 ## 2. Configuration (2 minutes)
 
-### Générer un secret HMAC
+### Générer un secret partagé (X-Webhook-Secret)
 
 ```bash
 python -c "import secrets; print(secrets.token_urlsafe(32))"
@@ -24,18 +24,10 @@ Copiez le résultat (ex: `xK7pQ2mN9vR8sT4uW6yZ1aB3cD5eF7gH`)
 Ajoutez ces lignes à votre `.env` :
 
 ```bash
-# Webhook
+# Webhook (seules variables lues par webhook_server.py)
 ZOHO_WEBHOOK_SECRET=xK7pQ2mN9vR8sT4uW6yZ1aB3cD5eF7gH
 WEBHOOK_HOST=0.0.0.0
 WEBHOOK_PORT=5000
-
-# Automation (mode READ-ONLY au début)
-WEBHOOK_AUTO_DISPATCH=true
-WEBHOOK_AUTO_LINK=true
-WEBHOOK_AUTO_RESPOND=false
-WEBHOOK_AUTO_UPDATE_TICKET=false
-WEBHOOK_AUTO_UPDATE_DEAL=false
-WEBHOOK_AUTO_ADD_NOTE=false
 
 # Flask
 FLASK_DEBUG=false
@@ -49,12 +41,9 @@ python webhook_server.py
 
 Vous devriez voir :
 ```
-🚀 A-Level Saver Webhook Server Starting
-Host: 0.0.0.0
-Port: 5000
-Auto Dispatch: True
-Auto Link: True
-Auto Respond: False
+A-Level Saver Webhook Server Starting
+Host: 0.0.0.0:5000 | Debug: False
+Auth: Enabled
 ...
 ```
 
@@ -120,18 +109,15 @@ Après un test réussi, vous devriez voir :
 {
   "success": true,
   "ticket_id": "198709000438366101",
-  "processing_time_seconds": 3.45,
   "result": {
-    "dispatcher": true,
-    "deal_linking": true,
-    "desk_agent": true,
-    "crm_agent": true,
-    "summary": {
-      "current_department": "Contact",
-      "recommended_department": "DOC",
-      "deal_found": true,
-      "deal_name": "BFS NP Samir Mezoulfi"
-    }
+    "workflow_stage": "COMPLETED",
+    "delivery_method": "draft",
+    "draft_created": true,
+    "reply_sent": false,
+    "crm_updated": true,
+    "ticket_updated": true,
+    "skip_reason": null,
+    "errors": []
   }
 }
 ```
@@ -148,8 +134,11 @@ python test_webhook.py --test all
 # Test avec un ticket spécifique
 python test_webhook.py --test simple --ticket-id VOTRE_TICKET_ID
 
-# Test avec signature HMAC
-python test_webhook.py --test signature --ticket-id VOTRE_TICKET_ID
+# Test authentifié de l'endpoint principal
+curl -X POST http://localhost:5000/webhook/zoho-desk \
+  -H "Content-Type: application/json" \
+  -H "X-Webhook-Secret: VOTRE_SECRET" \
+  -d '{"ticket_id": "VOTRE_TICKET_ID"}'
 
 # Vérifier la configuration
 curl http://localhost:5000/webhook/stats
@@ -158,40 +147,9 @@ curl http://localhost:5000/webhook/stats
 tail -f logs/app.log
 ```
 
-## Activation progressive
+## Contrôle de l'automatisation
 
-### Niveau 1 : Dispatch + Link (recommandé au début)
-
-```bash
-WEBHOOK_AUTO_DISPATCH=true
-WEBHOOK_AUTO_LINK=true
-WEBHOOK_AUTO_RESPOND=false
-WEBHOOK_AUTO_UPDATE_TICKET=false
-WEBHOOK_AUTO_UPDATE_DEAL=false
-WEBHOOK_AUTO_ADD_NOTE=false
-```
-
-**Ce qui se passe :**
-- ✅ Les tickets sont réaffectés au bon département
-- ✅ Le lien ticket ↔ deal est créé
-- ❌ Aucune réponse envoyée (mode suggestion)
-- ❌ Aucune modification du CRM
-
-### Niveau 2 : + Réponses (après validation)
-
-```bash
-WEBHOOK_AUTO_RESPOND=true
-WEBHOOK_AUTO_UPDATE_TICKET=true
-```
-
-**⚠️ ATTENTION :** Les clients recevront des emails automatiques !
-
-### Niveau 3 : Tout automatique (après tests approfondis)
-
-```bash
-WEBHOOK_AUTO_UPDATE_DEAL=true
-WEBHOOK_AUTO_ADD_NOTE=true
-```
+Le comportement est contrôlé par les paramètres de `DOCTicketWorkflow.process_ticket` (`auto_create_draft`, `auto_update_crm`, `auto_update_ticket`, `auto_send`), surchargeables dans le payload de `/webhook/test`. Voir [WEBHOOK_SETUP.md](./WEBHOOK_SETUP.md) §6.
 
 ## Dépannage rapide
 
@@ -202,9 +160,9 @@ Le serveur n'est pas démarré. Lancez :
 python webhook_server.py
 ```
 
-### "Invalid signature"
+### "Unauthorized" (401)
 
-Le secret dans `.env` ne correspond pas au secret dans Zoho Desk.
+Le secret dans `.env` (header `X-Webhook-Secret`) ne correspond pas au secret dans Zoho Desk.
 
 Solution :
 1. Vérifiez `ZOHO_WEBHOOK_SECRET` dans `.env`

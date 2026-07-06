@@ -1,0 +1,75 @@
+openapi: 3.0.1
+info:
+  title: Creates an email reply with minimal fields
+  version: v1
+servers:
+- url: https://desk.zoho.eu
+security:
+- OAuth2:
+  - Desk.tickets.UPDATE
+paths:
+  /api/v1/tickets/{ticket_id}/sendReply:
+    post:
+      summary: Creates an email reply with minimal fields
+      operationId: sendEmailReply
+      parameters:
+      - name: ticket_id
+        in: path
+        description: The unique ID of the ticket
+        required: true
+        style: simple
+        explode: false
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              required:
+              - content
+              type: object
+              properties:
+                channel:
+                  type: string
+                  example: EMAIL
+                to:
+                  type: string
+                  example: carol@zylker.com
+                fromEmailAddress:
+                  type: string
+                  example: techsupport@zylker.com
+                contentType:
+                  type: string
+                  example: plainText
+                  enum:
+                  - plainText
+                  - html
+                content:
+                  type: string
+                  example: We have escalated the issue. Will update you regarding
+                    the progress.
+                isForward:
+                  type: boolean
+                  example: true
+        required: true
+      responses:
+        "200":
+          description: send reply saved successfully.
+        "400":
+          description: Bad Request.
+        "401":
+          description: Unauthorized.
+        "403":
+          description: Forbidden.
+        "404":
+          description: Ticket Not Found.
+components:
+  securitySchemes:
+    OAuth2:
+      type: oauth2
+      flows:
+        authorizationCode:
+          authorizationUrl: https://accounts.zoho.eu/oauth/v2/auth
+          tokenUrl: https://accounts.zoho.eu/oauth/v2/token
+          scopes:
+            Desk.tickets.UPDATE: Permission to update Zoho Desk tickets.
