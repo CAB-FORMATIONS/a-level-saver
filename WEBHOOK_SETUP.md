@@ -44,7 +44,7 @@ WEBHOOK_PORT=5000
 FLASK_DEBUG=false                   # true pour dev, false pour prod
 ```
 
-**Note :** Si `ZOHO_WEBHOOK_SECRET` n'est pas défini, l'authentification est désactivée (un warning est loggé).
+**Note :** Si `ZOHO_WEBHOOK_SECRET` n'est pas défini, les endpoints protégés rejettent les requêtes.
 
 ### Démarrage du serveur (développement)
 
@@ -56,7 +56,7 @@ Le serveur démarre sur `http://0.0.0.0:5000` avec les endpoints suivants :
 
 - `GET /health` - Health check
 - `POST /webhook/zoho-desk` - Endpoint principal pour les webhooks Zoho (X-Webhook-Secret)
-- `POST /webhook/test` - Endpoint de test synchrone, sans authentification
+- `POST /webhook/test` - Endpoint live synchrone, authentifié et désactivé par défaut
 - `GET /webhook/stats` - Statistiques et configuration actuelle
 - `GET /logs` - Logs récents en mémoire (protégé X-Webhook-Secret)
 - `GET /logs/ticket/<ticket_id>` - Logs filtrés par ticket (protégé X-Webhook-Secret)
@@ -191,18 +191,20 @@ tail -f logs/app.log
 
 ## 4. Test manuel avec curl
 
-### Test simple (sans authentification)
+### Test live explicite
 
-Utilisez l'endpoint `/webhook/test` qui ne vérifie pas le secret (traitement synchrone, résultat complet) :
+Définissez d'abord `ENABLE_LIVE_TEST_WEBHOOK=true`. Cet endpoint peut écrire dans Desk ou CRM et ne constitue pas un dry-run fiable :
 
 ```bash
 curl -X POST http://localhost:5000/webhook/test \
   -H "Content-Type: application/json" \
+  -H "X-Webhook-Secret: votre_secret_partage" \
   -d '{
     "ticket_id": "198709000438366101",
-    "auto_create_draft": true,
-    "auto_update_crm": true,
-    "auto_update_ticket": true,
+    "confirm_live_mutations": true,
+    "auto_create_draft": false,
+    "auto_update_crm": false,
+    "auto_update_ticket": false,
     "auto_send": false
   }'
 ```
@@ -226,7 +228,8 @@ Vous pouvez tester avec les vraies données que vous avez pushées :
 # Testez avec le ticket 198709000438366101
 curl -X POST http://localhost:5000/webhook/test \
   -H "Content-Type: application/json" \
-  -d '{"ticket_id": "198709000438366101"}'
+  -H "X-Webhook-Secret: votre_secret_partage" \
+  -d '{"ticket_id": "198709000438366101", "confirm_live_mutations": true}'
 ```
 
 ## 5. Déploiement en production

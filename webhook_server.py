@@ -52,13 +52,17 @@ app = Flask(__name__)
 
 # Configuration — shared secret sent by Deluge in X-Webhook-Secret header
 WEBHOOK_SECRET = os.getenv('ZOHO_WEBHOOK_SECRET', '')
+ENABLE_LIVE_TEST_WEBHOOK = os.getenv('ENABLE_LIVE_TEST_WEBHOOK', '').lower() == 'true'
+_PROCESSING_TICKETS = set()
+_PENDING_TICKETS = set()
+_PROCESSING_LOCK = threading.Lock()
 
 
 def verify_secret(req) -> bool:
     """Verify the shared secret from X-Webhook-Secret header."""
     if not WEBHOOK_SECRET:
-        logger.warning("ZOHO_WEBHOOK_SECRET not configured - skipping auth")
-        return True
+        logger.error("ZOHO_WEBHOOK_SECRET not configured - rejecting webhook")
+        return False
 
     provided = req.headers.get('X-Webhook-Secret', '')
     if not provided:
@@ -72,28 +76,55 @@ def verify_secret(req) -> bool:
     return True
 
 
-def process_ticket_background(ticket_id: str, auto_send: bool = True):
+def process_ticket_background(ticket_id: str, auto_send: bool = False):
     """Process a ticket in a background thread."""
+    with _PROCESSING_LOCK:
+        if ticket_id in _PROCESSING_TICKETS:
+            _PENDING_TICKETS.add(ticket_id)
+            logger.info(f"[BG] Ticket {ticket_id} already processing - rerun queued")
+            return
+        _PROCESSING_TICKETS.add(ticket_id)
+
+    registration_released = False
     try:
-        logger.info(f"[BG] Starting workflow for ticket {ticket_id}")
-        workflow = DOCTicketWorkflow()
-        result = workflow.process_ticket(
-            ticket_id=ticket_id,
-            auto_create_draft=True,
-            auto_update_crm=True,
-            auto_update_ticket=True,
-            auto_send=auto_send
-        )
-        stage = result.get('workflow_stage', '?')
-        delivery = result.get('delivery_method', '?')
-        errors = result.get('errors', [])
-        logger.info(f"[BG] Ticket {ticket_id} done — stage={stage}, delivery={delivery}, errors={len(errors)}")
-        if errors:
-            for e in errors:
-                logger.error(f"[BG] Ticket {ticket_id} error: {e}")
-    except Exception as e:
-        logger.error(f"[BG] Ticket {ticket_id} FAILED: {e}")
-        logger.error(traceback.format_exc())
+        while True:
+            try:
+                logger.info(f"[BG] Starting workflow for ticket {ticket_id}")
+                workflow = DOCTicketWorkflow()
+                result = workflow.process_ticket(
+                    ticket_id=ticket_id,
+                    auto_create_draft=True,
+                    auto_update_crm=True,
+                    auto_update_ticket=True,
+                    auto_send=auto_send
+                )
+                stage = result.get('workflow_stage', '?')
+                delivery = result.get('delivery_method', '?')
+                errors = result.get('errors', [])
+                logger.info(f"[BG] Ticket {ticket_id} done — stage={stage}, delivery={delivery}, errors={len(errors)}")
+                if errors:
+                    for error in errors:
+                        logger.error(f"[BG] Ticket {ticket_id} error: {error}")
+            except Exception as exc:
+                logger.error(f"[BG] Ticket {ticket_id} FAILED: {exc}")
+                logger.error(traceback.format_exc())
+
+            with _PROCESSING_LOCK:
+                if ticket_id in _PENDING_TICKETS:
+                    _PENDING_TICKETS.discard(ticket_id)
+                    rerun = True
+                else:
+                    _PROCESSING_TICKETS.discard(ticket_id)
+                    registration_released = True
+                    rerun = False
+            if not rerun:
+                return
+            logger.info(f"[BG] Reprocessing ticket {ticket_id} after queued event")
+    finally:
+        if not registration_released:
+            with _PROCESSING_LOCK:
+                _PROCESSING_TICKETS.discard(ticket_id)
+                _PENDING_TICKETS.discard(ticket_id)
 
 
 @app.route('/health', methods=['GET'])
@@ -152,29 +183,40 @@ def handle_zoho_desk_webhook():
 @app.route('/webhook/test', methods=['POST'])
 def test_webhook():
     """
-    Test endpoint — synchronous, no auth, returns full result.
+    Synchronous live test endpoint. Authenticated and disabled by default.
+
+    Enabling it requires ENABLE_LIVE_TEST_WEBHOOK=true. Every request must
+    explicitly acknowledge that the workflow may mutate live systems.
 
     Usage:
         curl -X POST https://.../webhook/test \
           -H "Content-Type: application/json" \
-          -d '{"ticket_id": "198709000438366101"}'
+          -H "X-Webhook-Secret: ..." \
+          -d '{"ticket_id": "...", "confirm_live_mutations": true}'
     """
+    if not verify_secret(request):
+        return jsonify({'success': False, 'error': 'Unauthorized'}), 401
+    if not ENABLE_LIVE_TEST_WEBHOOK:
+        return jsonify({'success': False, 'error': 'Live test webhook disabled'}), 403
+
     try:
         data = request.get_json(force=True)
         ticket_id = data.get('ticket_id')
 
         if not ticket_id:
             return jsonify({'success': False, 'error': 'ticket_id required'}), 400
+        if data.get('confirm_live_mutations') is not True:
+            return jsonify({'success': False, 'error': 'confirm_live_mutations=true required'}), 400
 
         logger.info(f"Test webhook triggered for ticket {ticket_id}")
 
         workflow = DOCTicketWorkflow()
         result = workflow.process_ticket(
             ticket_id=ticket_id,
-            auto_create_draft=data.get('auto_create_draft', True),
-            auto_update_crm=data.get('auto_update_crm', True),
-            auto_update_ticket=data.get('auto_update_ticket', True),
-            auto_send=data.get('auto_send', True)
+            auto_create_draft=data.get('auto_create_draft', False),
+            auto_update_crm=data.get('auto_update_crm', False),
+            auto_update_ticket=data.get('auto_update_ticket', False),
+            auto_send=data.get('auto_send', False)
         )
 
         return jsonify({
@@ -208,7 +250,7 @@ def webhook_stats():
             'auth': 'X-Webhook-Secret header',
             'auth_enabled': bool(WEBHOOK_SECRET),
             'processing': 'async (background thread)',
-            'auto_send': 'guarded by _can_auto_send()'
+            'auto_send': 'disabled; draft-only until an audited scenario is allowlisted'
         },
         'active_threads': threading.active_count(),
         'timestamp': datetime.utcnow().isoformat()
@@ -304,7 +346,7 @@ if __name__ == '__main__':
     logger.info("A-Level Saver Webhook Server Starting")
     logger.info("=" * 60)
     logger.info(f"Host: {host}:{port} | Debug: {debug}")
-    logger.info(f"Auth: {'Enabled' if WEBHOOK_SECRET else 'DISABLED (WARNING)'}")
+    logger.info(f"Auth: {'Enabled' if WEBHOOK_SECRET else 'MISSING (webhooks rejected)'}")
     logger.info("=" * 60)
 
     app.run(host=host, port=port, debug=debug)

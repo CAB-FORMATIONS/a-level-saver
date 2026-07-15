@@ -85,22 +85,24 @@ workflow.process_ticket(
     auto_create_draft=True,
     auto_update_crm=True,
     auto_update_ticket=True,
-    auto_send=True   # Garde-fous via _can_auto_send()
+    auto_send=False  # Brouillon uniquement par defaut
 )
 ```
 
 ### POST /webhook/test
 
-Endpoint de test synchrone, sans authentification. Retourne le resultat complet du workflow.
+Endpoint de test synchrone protege par `X-Webhook-Secret` et desactive par defaut.
+Il faut definir `ENABLE_LIVE_TEST_WEBHOOK=true`; cet endpoint peut muter les systemes live meme lorsque les options ci-dessous valent `false`.
 
 **Requete** :
 ```json
 {
     "ticket_id": "198709000438366101",
-    "auto_create_draft": true,
-    "auto_update_crm": true,
-    "auto_update_ticket": true,
-    "auto_send": true
+    "confirm_live_mutations": true,
+    "auto_create_draft": false,
+    "auto_update_crm": false,
+    "auto_update_ticket": false,
+    "auto_send": false
 }
 ```
 
@@ -135,7 +137,7 @@ Statistiques et configuration du webhook.
         "auth": "X-Webhook-Secret header",
         "auth_enabled": true,
         "processing": "async (background thread)",
-        "auto_send": "guarded by _can_auto_send()"
+        "auto_send": "disabled; draft-only until an audited scenario is allowlisted"
     },
     "active_threads": 2,
     "timestamp": "2026-02-16T10:30:00"

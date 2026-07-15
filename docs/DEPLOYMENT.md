@@ -128,7 +128,8 @@ CMD ["gunicorn", "webhook_server:app", "--bind", "0.0.0.0:10000", "--workers", "
 
 | Variable | Description | Defaut | Fichier source |
 |----------|-------------|--------|----------------|
-| `ZOHO_WEBHOOK_SECRET` | Secret partage pour authentification webhook | `''` (pas d'auth) | `webhook_server.py` |
+| `ZOHO_WEBHOOK_SECRET` | Secret partage pour authentification webhook | Requis | `webhook_server.py` |
+| `ENABLE_LIVE_TEST_WEBHOOK` | Active le endpoint de test mutateur | `false` | `webhook_server.py` |
 | `WEBHOOK_HOST` | Hote d'ecoute Flask | `0.0.0.0` | `webhook_server.py` |
 | `WEBHOOK_PORT` | Port d'ecoute Flask | `5000` | `webhook_server.py` |
 | `WEBHOOK_TEST_URL` | URL de base pour `test_webhook.py` | `http://localhost:5000` | `test_webhook.py` |
@@ -218,7 +219,7 @@ info response;
 |----------|---------|------|-------------|
 | `/health` | GET | Non | Health check (utilise par Render) |
 | `/webhook/zoho-desk` | POST | `X-Webhook-Secret` | Endpoint principal (Deluge) — traitement asynchrone |
-| `/webhook/test` | POST | Non | Endpoint de test — traitement synchrone, retourne le resultat complet |
+| `/webhook/test` | POST | `X-Webhook-Secret` | Desactive par defaut; test synchrone avec mutations live possibles |
 | `/webhook/stats` | GET | Non | Configuration et statut du webhook |
 | `/logs` | GET | `X-Webhook-Secret` | Logs recents en memoire (`?lines=`, `?level=`, `?q=`, `?format=text`) |
 | `/logs/ticket/<ticket_id>` | GET | `X-Webhook-Secret` | Logs filtres par ticket |
@@ -227,7 +228,7 @@ info response;
 
 L'endpoint `/webhook/zoho-desk` retourne `200 OK` immediatement et traite le ticket dans un **background thread** (`threading.Thread`, `daemon=True`). Cela evite les timeouts Deluge (limite de 10s).
 
-L'endpoint `/webhook/test` est synchrone et retourne le resultat complet du workflow. Il est utile pour le debug mais ne doit pas etre appele par Deluge en production.
+L'endpoint `/webhook/test` est synchrone, desactive sauf si `ENABLE_LIVE_TEST_WEBHOOK=true`, et exige `confirm_live_mutations=true`. Il ne constitue pas un dry-run fiable et ne doit pas etre appele par Deluge.
 
 ---
 
@@ -329,7 +330,7 @@ python test_webhook.py --test signature --secret "votre_secret"
 Le script `test_webhook.py` supporte 6 types de tests :
 - `health` : Verifie le endpoint /health
 - `stats` : Verifie le endpoint /webhook/stats
-- `simple` : Envoie un ticket via /webhook/test (synchrone, sans auth)
+- `simple` : Envoie un ticket via `/webhook/test` (synchrone, authentifie, activation live explicite requise)
 - `signature` : Envoie un ticket via /webhook/zoho-desk (avec auth X-Webhook-Secret)
 - `real` : Utilise des donnees de tickets reels depuis des fichiers JSON
 - `invalid` : Teste le error handling avec des payloads invalides

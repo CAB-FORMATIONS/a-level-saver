@@ -1,6 +1,7 @@
 # Zoho Desk department names — single source of truth
 
 DEPT_DOC = "DOC"
+DEPT_DOC_ID = "198709000025523146"
 DEPT_DOCS_CAB = "DOCS CAB"
 DEPT_CONTACT = "Contact"
 DEPT_COMPTABILITE = "Comptabilité"

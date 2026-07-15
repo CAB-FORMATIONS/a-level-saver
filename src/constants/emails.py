@@ -24,3 +24,14 @@ INTERNAL_DOMAIN_MARKERS = (
 
 # Company signature
 COMPANY_SIGNATURE = "L'équipe CAB Formations"
+
+# Direct system senders that must never receive a customer-facing reply.
+AUTO_CLOSE_SENDERS = {
+    'noreply@exament3p.fr': 'ExamT3P',
+    'no-reply@exament3p.fr': 'ExamT3P',
+    'notification@exament3p.fr': 'ExamT3P',
+    'notifications@exament3p.fr': 'ExamT3P',
+    'noreply@aircall.io': 'Aircall',
+    'noreply@notify.aircall.io': 'Aircall',
+    'noreply@zohocalendar.com': 'Zoho Calendar',
+}
