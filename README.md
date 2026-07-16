@@ -14,6 +14,8 @@ Système d'agents IA pour automatiser la gestion des tickets Zoho Desk et la mis
 ### Workflow Relations entreprises (B2B)
 - ✅ Triage 15 intentions B2B (devis, disponibilités, conventions, factures...)
 - ✅ Lookup CRM de l'expéditeur (contact + compte)
+- ✅ Affectation du ticket au propriétaire CRM du compte avant création du brouillon
+- ✅ Rédaction contextualisée par `RelationsResponseAgent` avec fallback déterministe
 - ✅ Brouillons uniquement — jamais d'envoi automatique, jamais de mise à jour CRM
 
 ### Pipeline
@@ -107,7 +109,8 @@ a-level-saver/
 │   │   ├── deal_linking_agent.py       # Liaison ticket ↔ deal CRM
 │   │   ├── crm_update_agent.py         # Mises à jour CRM (mapping, guards)
 │   │   ├── examt3p_agent.py            # Extraction dossier ExamT3P
-│   │   └── relations_triage_agent.py   # Triage B2B (15 intentions)
+│   │   ├── relations_triage_agent.py   # Triage B2B (15 intentions)
+│   │   └── relations_response_agent.py # Rédaction B2B contextualisée et sécurisée
 │   ├── workflows/
 │   │   ├── doc_ticket_workflow.py      # Workflow principal DOC (8 étapes)
 │   │   └── relations_ticket_workflow.py # Workflow B2B (brouillons only)

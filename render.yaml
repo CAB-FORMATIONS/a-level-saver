@@ -8,3 +8,7 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: "3.11.8"
+      - key: PLANBOT_API_URL
+        value: "https://edusign-z9iz.onrender.com"
+      - key: PLANBOT_API_SECRET
+        sync: false

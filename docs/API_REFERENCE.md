@@ -252,7 +252,19 @@ Appelle `list_departments()` et filtre par nom (case-insensitive).
 
 Meme principe, retourne le Dict complet du departement.
 
-### 2.3 Threads (Emails)
+### 2.3 Agents
+
+#### `list_agents()` — Lister les agents Desk
+
+| Propriete | Valeur |
+|-----------|--------|
+| Methode API | `GET /api/v1/agents` |
+| Retour | `List[Dict]` paginee et dedupliquee par ID |
+| Usage | Resolution de `Account.Owner.email` vers l'agent Desk Relations entreprises |
+
+Le refresh token Zoho Desk doit autoriser cet endpoint. Inclure notamment les scopes `Desk.basic.READ` et `Desk.agents.READ` lors de sa generation.
+
+### 2.4 Threads (Emails)
 
 #### `get_ticket_threads(ticket_id)` — Liste des threads (resume)
 
@@ -282,7 +294,7 @@ for thread in threads:
     plain = thread.get('plainText')      # Texte brut (si dispo)
 ```
 
-### 2.4 Conversations et Historique
+### 2.5 Conversations et Historique
 
 #### `get_ticket_conversations(ticket_id)` — Toutes les conversations
 
@@ -314,7 +326,7 @@ Retourne :
 }
 ```
 
-### 2.5 Commentaires
+### 2.6 Commentaires
 
 #### `get_ticket_comments(ticket_id, include_public, include_private)` — Commentaires
 
@@ -330,7 +342,7 @@ Retourne :
 | Methode API | `POST /api/v1/tickets/{ticket_id}/comments` |
 | Body | `{"content": "...", "isPublic": true}` |
 
-### 2.6 Brouillons et Reponses
+### 2.7 Brouillons et Reponses
 
 #### `create_ticket_reply_draft(ticket_id, content, content_type, from_email, to_email)` — Creer un brouillon
 
@@ -768,12 +780,16 @@ API interne en lecture seule (exposee par le service Edusign) utilisee par le wo
 |-----------|--------|
 | Endpoint | `POST {PLANBOT_API_URL}/internal/planbot/availability` |
 | Auth | Header `X-PlanBot-Secret` |
-| Body | `{"action": "full", "payload": {...}}` |
+| Body | `{"action": "full" | "search_alternative_dates" | "search_alternative_centres", "payload": {...}}` |
 | Timeout | 90s |
 
 **Configuration** (via `config.py`) : `PLANBOT_API_URL` (`planbot_api_url`), `PLANBOT_API_SECRET` (`planbot_api_secret`).
 
 **Mode degrade** : si non configuree, retourne `{"status": "skipped", "error": "planbot_api_not_configured"}` ; en cas d'erreur HTTP ou reseau, retourne un dict `{"status": "error", ...}` sans lever d'exception (le workflow cree quand meme un brouillon).
+
+Sans date demandee, le workflow utilise `search_alternative_dates` sur les prochaines semaines. Si aucune sequence complete n'est disponible au centre deduit du compte CRM, il appelle `search_alternative_centres` sur une fenetre technique de 12 semaines. Pour un CACES, `categories` et `type_ir` (`initial` ou `recyclage`) restent obligatoires ; la duree est calculee par PlanBot.
+
+Si le nombre de candidats ou `type_ir` ne sont pas precises, le workflow envoie respectivement `1` et `initial` comme hypotheses. Le brouillon doit demander explicitement leur confirmation avant signature.
 
 ---
 

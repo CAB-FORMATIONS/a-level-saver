@@ -292,6 +292,18 @@ class ZohoDeskClient(ZohoAPIClient):
         params = {"orgId": settings.zoho_desk_org_id}
         return self._get_all_pages(url, params, limit_per_page=100)
 
+    def list_agents(self) -> List[Dict[str, Any]]:
+        """List all Zoho Desk agents with their email and departments."""
+        url = f"{settings.zoho_desk_api_url}/agents"
+        params = {"orgId": settings.zoho_desk_org_id}
+        agents = self._get_all_pages(url, params, limit_per_page=100)
+        unique_agents = {}
+        for agent in agents:
+            agent_id = str(agent.get("id") or "")
+            if agent_id:
+                unique_agents[agent_id] = agent
+        return list(unique_agents.values())
+
     def get_department_id_by_name(self, name: str) -> Optional[str]:
         """
         Get department ID by name.
@@ -526,6 +538,13 @@ class ZohoDeskClient(ZohoAPIClient):
             logger.warning(f"Erreur vérification draft pour ticket {ticket_id}: {e}")
             return False
 
+    def has_existing_draft_strict(self, ticket_id: str) -> bool:
+        """Check for drafts across every thread page and propagate read errors."""
+        return any(
+            str(thread.get("status") or "").upper() == "DRAFT"
+            for thread in self.list_ticket_threads(ticket_id)
+        )
+
     def get_ticket_threads(self, ticket_id: str) -> Dict[str, Any]:
         """
         Get all threads (emails, replies) for a ticket.
@@ -537,6 +556,18 @@ class ZohoDeskClient(ZohoAPIClient):
         url = f"{settings.zoho_desk_api_url}/tickets/{ticket_id}/threads"
         params = {"orgId": settings.zoho_desk_org_id}
         return self._make_request("GET", url, params=params)
+
+    def list_ticket_threads(self, ticket_id: str) -> List[Dict[str, Any]]:
+        """List all ticket thread summaries with pagination and ID deduplication."""
+        url = f"{settings.zoho_desk_api_url}/tickets/{ticket_id}/threads"
+        params = {"orgId": settings.zoho_desk_org_id}
+        threads = self._get_all_pages(url, params, limit_per_page=100)
+        unique_threads = {}
+        for thread in threads:
+            thread_id = str(thread.get("id") or "")
+            if thread_id:
+                unique_threads[thread_id] = thread
+        return list(unique_threads.values())
 
     def get_thread_details(self, ticket_id: str, thread_id: str) -> Dict[str, Any]:
         """
@@ -577,8 +608,7 @@ class ZohoDeskClient(ZohoAPIClient):
         logger.info(f"Fetching all threads with full content for ticket {ticket_id}")
 
         # Get list of threads
-        threads_response = self.get_ticket_threads(ticket_id)
-        threads_list = threads_response.get("data", [])
+        threads_list = self.list_ticket_threads(ticket_id)
 
         if not threads_list:
             logger.info(f"No threads found for ticket {ticket_id}")

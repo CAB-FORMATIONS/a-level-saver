@@ -21,9 +21,9 @@ os.environ["PYTHONIOENCODING"] = "utf-8"
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from config import settings
-from src.workflows.relations_ticket_workflow import RelationsTicketWorkflow
-from src.zoho_client import ZohoDeskClient
+from config import settings  # noqa: E402
+from src.workflows.relations_ticket_workflow import RelationsTicketWorkflow  # noqa: E402
+from src.zoho_client import ZohoDeskClient  # noqa: E402
 
 
 def fetch_relations_tickets(statuses: list[str], limit: int) -> list[dict[str, Any]]:
@@ -107,11 +107,21 @@ def main() -> int:
             "intent": (result.get("triage_result") or {}).get("intent"),
             "action": (result.get("triage_result") or {}).get("action"),
             "draft_created": result.get("draft_created"),
+            "draft_content": result.get("draft_content"),
+            "response_generation": result.get("response_generation"),
+            "assignment": result.get("assignment"),
             "validation": result.get("validation"),
             "skip_reason": result.get("skip_reason"),
             "errors": result.get("errors"),
         })
-        print(f"    -> {result.get('workflow_stage')} | draft={result.get('draft_created')} | intent={(result.get('triage_result') or {}).get('intent')}")
+        generation = result.get("response_generation") or {}
+        assignment = result.get("assignment") or {}
+        source = "ai" if generation.get("used_ai") else "fallback" if generation else "n/a"
+        print(
+            f"    -> {result.get('workflow_stage')} | draft={result.get('draft_created')} | "
+            f"intent={(result.get('triage_result') or {}).get('intent')} | response={source} | "
+            f"manager={assignment.get('desk_agent_name') or 'n/a'}"
+        )
 
     if not args.no_save:
         output = save_results(results)

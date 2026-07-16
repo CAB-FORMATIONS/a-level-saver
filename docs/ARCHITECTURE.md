@@ -183,9 +183,12 @@ a-level-saver/
 
 1. **Triage B2B** : `RelationsTriageAgent` (15 intentions : devis, disponibilités, inscriptions, conventions, factures...) avec actions DRAFT / IGNORE_NOISE / ROUTE_COMPTA / ROUTE_HUMAN
 2. **Lookup CRM** : `relations_crm_lookup.py` (contact + compte via l'email expéditeur)
-3. **Disponibilités** : appel en lecture seule de l'API interne PlanBot (`planbot_api_client.py`), dégradé « skipped » si non configurée
-4. **Réponse** : `relations_response_builder.py`, validée par `relations_response_validator.py` (FORBIDDEN_TERMS)
-5. **Livraison** : brouillon Zoho Desk uniquement — jamais d'envoi automatique, jamais de mise à jour CRM
+3. **Gestionnaire du compte** : résolution de `Account.Owner.email` vers un agent Desk actif du département Relations entreprises
+4. **Disponibilités** : appel en lecture seule de l'API interne PlanBot (`planbot_api_client.py`), dégradé « skipped » si non configurée
+5. **Base déterministe** : `relations_response_builder.py` construit un fallback sans prix ni pièce jointe inventés
+6. **Rédaction** : `RelationsResponseAgent` adapte la réponse au dernier message et à la conversation
+7. **Validation** : `relations_response_validator.py` contrôle HTML, dates, montants, confirmations et disponibilités
+8. **Livraison** : revalidation, affectation au gestionnaire, seconde revalidation puis brouillon Zoho Desk — jamais d'envoi automatique, jamais de mise à jour CRM
 
 Point d'entrée batch : `run_relations_workflow_batch.py`.
 

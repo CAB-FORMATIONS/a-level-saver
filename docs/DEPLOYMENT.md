@@ -157,6 +157,8 @@ envVars:
 
 ## Configuration Zoho Desk
 
+Le refresh token Desk doit inclure les droits necessaires aux tickets, threads, brouillons et agents. Le workflow Relations entreprises requiert en particulier `Desk.basic.READ` et `Desk.agents.READ` pour resoudre le gestionnaire CRM vers un agent Zoho Desk actif.
+
 ### Flux de declenchement
 
 ```

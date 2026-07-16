@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from email.utils import parseaddr
 from typing import Any
 
@@ -24,7 +25,8 @@ FREE_EMAIL_DOMAINS = {
     "live.com",
 }
 
-INTERNAL_DOMAINS = {"cab-formations.fr", "formalogistics.fr", "formalogistics.com"}
+INTERNAL_DOMAINS = {"cab-formations.fr", "formalogistics.fr", "formalogistics.com", "formalogistics.pro"}
+EMAIL_PATTERN = re.compile(r"^[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Z0-9.-]+\.[A-Z]{2,}$", re.IGNORECASE)
 
 
 def email_domain(email: str) -> str:
@@ -32,10 +34,16 @@ def email_domain(email: str) -> str:
     return email.rsplit("@", 1)[1].lower() if "@" in (email or "") else ""
 
 
+def is_internal_domain(domain: str) -> bool:
+    domain = str(domain or "").lower().strip(".")
+    return any(domain == internal or domain.endswith(f".{internal}") for internal in INTERNAL_DOMAINS)
+
+
 def normalize_email(value: str) -> str:
     """Extract bare email from values like 'Name <email@domain.com>'."""
     parsed = parseaddr(value or "")[1]
-    return (parsed or value or "").strip().strip("<>").lower()
+    email = (parsed or value or "").strip().strip("<>").lower()
+    return email if EMAIL_PATTERN.fullmatch(email) else ""
 
 
 def _criteria_safe(value: str) -> str:
@@ -60,15 +68,41 @@ class RelationsCRMLookup:
             "deals": [],
             "contact_name": "",
             "account_name": "",
+            "account_id": "",
+            "account_owner": None,
+            "contact_matches": 0,
+            "lookup_error": "",
         }
 
         if not email:
             return result
-        if domain in INTERNAL_DOMAINS:
+        if is_internal_domain(domain):
             result["classification"] = "internal"
             return result
 
-        contact = self._find_contact_by_email(email)
+        try:
+            contacts = self._find_contacts_by_email(email)
+        except Exception as exc:
+            logger.warning("CRM contact lookup failed for %s: %s", email, exc)
+            result["lookup_error"] = f"Recherche Contact CRM impossible: {exc}"
+            return result
+        result["contact_matches"] = len(contacts)
+
+        contact = None
+        if len(contacts) == 1:
+            contact = contacts[0]
+        elif len(contacts) > 1:
+            account_ids = {
+                str((item.get("Account_Name") or {}).get("id") or "")
+                if isinstance(item.get("Account_Name"), dict) else ""
+                for item in contacts
+            }
+            if len(account_ids) != 1 or "" in account_ids:
+                result["classification"] = "ambiguous_crm_contact"
+                result["lookup_error"] = f"{len(contacts)} Contacts CRM correspondent a cet email avec des comptes differents"
+                return result
+            contact = sorted(contacts, key=lambda item: str(item.get("id") or ""))[0]
+
         if contact:
             result["contact"] = contact
             result["classification"] = "client_crm"
@@ -79,6 +113,8 @@ class RelationsCRMLookup:
                 account = self._get_account(account_lookup["id"])
                 result["account"] = account or account_lookup
                 result["account_name"] = (account or account_lookup).get("Account_Name") or account_lookup.get("name", "")
+                result["account_id"] = str((account or account_lookup).get("id") or account_lookup["id"])
+                result["account_owner"] = self._normalize_owner((account or account_lookup).get("Owner"))
 
             contact_id = contact.get("id")
             if contact_id:
@@ -91,14 +127,10 @@ class RelationsCRMLookup:
             result["classification"] = "unknown_personal"
         return result
 
-    def _find_contact_by_email(self, email: str) -> dict[str, Any] | None:
-        try:
-            response = self.crm_client.search_contacts(f"(Email:equals:{_criteria_safe(email)})")
-            records = response.get("data", []) if isinstance(response, dict) else []
-            return records[0] if records else None
-        except Exception as exc:
-            logger.warning("CRM contact lookup failed for %s: %s", email, exc)
-            return None
+    def _find_contacts_by_email(self, email: str) -> list[dict[str, Any]]:
+        response = self.crm_client.search_contacts(f"(Email:equals:{_criteria_safe(email)})")
+        records = response.get("data", []) if isinstance(response, dict) else []
+        return [record for record in records if isinstance(record, dict)]
 
     def _get_account(self, account_id: str) -> dict[str, Any] | None:
         try:
@@ -113,3 +145,14 @@ class RelationsCRMLookup:
         last = contact.get("Last_Name") or ""
         full = f"{first} {last}".strip()
         return full or contact.get("Full_Name") or contact.get("Email") or ""
+
+    @staticmethod
+    def _normalize_owner(owner: Any) -> dict[str, str] | None:
+        if not isinstance(owner, dict):
+            return None
+        owner_id = str(owner.get("id") or "").strip()
+        name = str(owner.get("name") or "").strip()
+        email = normalize_email(owner.get("email") or "")
+        if not owner_id or not name or not email:
+            return None
+        return {"id": owner_id, "name": name, "email": email}

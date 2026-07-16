@@ -7,9 +7,10 @@ Mettre en place une automatisation augmentee par IA pour la boite Zoho Desk `Rel
 Le workflow doit :
 - identifier l'intention du mail,
 - retrouver le contexte CRM client/prospect,
+- affecter le ticket au proprietaire CRM du compte associe,
 - proposer une reponse adaptee,
 - utiliser PlanBot via API pour les demandes de disponibilite/session,
-- integrer un bloc devis avec montants `XXX a completer`,
+- preparer les demandes de devis sans exposer de prix ou placeholder non verifie,
 - rester en mode brouillon uniquement.
 
 ## Separation Avec DOC
@@ -37,6 +38,7 @@ Les seules briques reutilisees sont techniques : clients Zoho, creation de broui
 Fichiers ajoutes :
 - `src/workflows/relations_ticket_workflow.py`
 - `src/agents/relations_triage_agent.py`
+- `src/agents/relations_response_agent.py`
 - `src/utils/planbot_api_client.py`
 - `src/utils/relations_crm_lookup.py`
 - `src/utils/relations_response_builder.py`
@@ -46,6 +48,7 @@ Fichiers ajoutes :
 Fichiers modifies :
 - `config.py`
 - `src/constants/departments.py`
+- `src/zoho_client.py`
 
 ## Fichiers Cotes Edusign
 
@@ -115,12 +118,40 @@ Le workflow bloque ou evite :
 - termes internes dans les brouillons : `PlanBot`, `Zoho rules`, `UT`, `API`, `simulation`, etc.,
 - confirmation ferme d'inscription/place reservee.
 
-Le bloc devis contient uniquement des placeholders :
-- `Montant HT : XXX EUR a completer`
-- `TVA : XXX a completer`
-- `Montant TTC : XXX EUR a completer`
-- `Validite du devis : XXX jours a completer`
-- `Modalites : XXX a completer`
+Les brouillons clients ne contiennent plus de bloc `XXX a completer`. Sans grille tarifaire fiable, le prix reste absent du mail et une alerte interne indique au conseiller qu'il doit finaliser le devis.
+
+Le workflow bloque egalement :
+- les copies Zoho entrantes de nos propres reponses,
+- les tickets deja repondus, fermes ou hors departement,
+- tout changement de thread pendant la generation,
+- les dates, nombres de candidats et categories sans preuve dans le message courant,
+- les disponibilites partielles ou non confirmees par PlanBot.
+
+Avant toute creation de brouillon, le workflow :
+1. retrouve le Contact CRM par l'email expediteur,
+2. charge le Compte lie au Contact,
+3. lit `Account.Owner`,
+4. retrouve l'agent Desk actif par `Owner.email`,
+5. verifie son rattachement au departement Relations entreprises,
+6. affecte le ticket avec `assigneeId`, puis revalide le contexte.
+
+Si une etape echoue, aucun brouillon n'est cree. L'ID Owner CRM n'est jamais reutilise comme ID Desk : la correspondance se fait uniquement par email.
+
+### Suivis Et Changements De Session
+
+Pour un report, un retour a la date initiale ou le choix d'une proposition, le workflow reconstitue un contexte structure depuis tous les echanges pertinents : formation, categories, centre, periode, type initial/recyclage, nombre et noms des candidats.
+
+Chaque information conserve sa provenance. Le workflow appelle `check_availability` uniquement si une seule session cible peut etre identifiee et si tous les champs PlanBot sont verifies. Une date de facture, d'echeance, de signature ou de paiement n'est jamais reutilisee comme date de session.
+
+Politique d'appel :
+- report vers une periode precise : verification de la periode cible ;
+- retour a la date initiale : verification de la session initiale reconstituee ;
+- choix d'une proposition : nouvelle verification de capacite avant brouillon ;
+- annulation, absence, retrait de candidat ou demande de confirmation administrative : aucun appel PlanBot ;
+- plusieurs sessions, centres, formations, candidats ou annees encore possibles : aucun appel et demande de precision ;
+- session passee : aucun appel.
+
+Une disponibilite PlanBot ne signifie jamais que l'inscription ou le changement est enregistre. Le brouillon peut confirmer la capacite detectee, mais indique toujours que l'action reste a finaliser par le conseiller.
 
 ## Commandes Utiles
 
@@ -181,6 +212,17 @@ Regle actuelle : le dernier message utile prime sur le sujet quand il contient u
 - PlanBot n'est durablement exploitable qu'apres configuration des variables d'environnement.
 - La grille tarifaire client n'existe pas encore dans Zoho, donc les prix restent a completer manuellement.
 - Les demandes avec informations incompletes generent une demande de precision plutot qu'une proposition de session.
+
+### Recherche PlanBot Sans Date Client
+
+Pour une demande de prochaines disponibilites sans periode :
+- le centre peut etre deduit du Compte CRM s'il correspond sans ambiguite a un centre connu,
+- `search_alternative_dates` cherche les prochaines sequences au meme centre,
+- `search_alternative_centres` cherche ensuite une solution dans les centres proches,
+- la duree CACES est calculee par PlanBot et n'est plus demandee au client,
+- `initial` ou `recyclage` doit etre confirme avant traitement definitif.
+
+Regle metier mise a jour : en l'absence de precision, le workflow utilise temporairement `1 candidat` et `initial` pour interroger PlanBot. Ces valeurs sont tracees comme hypotheses et le dernier paragraphe du brouillon demande obligatoirement leur confirmation. Une valeur explicitement donnee par le client n'est pas marquee comme hypothese.
 
 ## Prochaines Etapes
 

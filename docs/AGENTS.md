@@ -11,6 +11,7 @@ Les agents sont des composants IA spécialisés utilisant Claude (Anthropic).
 | DealLinkingAgent | - | Liaison ticket↔deal |
 | ExamT3PAgent | - | Extraction données ExamT3P |
 | RelationsTriageAgent | claude-haiku-4-5 (`MODEL_EXTRACTION`) | Triage B2B Relations entreprises (15 intentions) |
+| RelationsResponseAgent | claude-sonnet-4-6 (`MODEL_HUMANIZER`) | Rédaction sécurisée des brouillons B2B |
 | TicketDispatcherAgent | - | ⚠️ Exemple uniquement (non branché en prod) |
 
 ---
@@ -250,7 +251,19 @@ result = agent.process({
 
 ---
 
-## 7. BaseAgent (Classe abstraite)
+## 7. RelationsResponseAgent
+
+**Fichier :** `src/agents/relations_response_agent.py`
+
+Rédige une réponse courte à partir du dernier message externe, de la conversation, du triage, du contexte CRM autorisé et d'une base déterministe. Il retourne aussi `requires_human_action` et `human_action_reason` lorsque le conseiller doit vérifier une inscription, une disponibilité, un tarif ou un document.
+
+Garde-fous principaux : aucun montant inventé, aucune pièce jointe annoncée, aucune confirmation d'action sans preuve, HTML limité et fallback déterministe en cas d'échec IA.
+
+Pour les demandes de formation incomplètes, `1 candidat` et `initial` peuvent être utilisés comme hypothèses par défaut pour PlanBot. `defaulted_fields` oblige alors l'agent à demander leur confirmation dans le dernier paragraphe.
+
+---
+
+## 8. BaseAgent (Classe abstraite)
 
 **Fichier :** `src/agents/base_agent.py`
 Classe de base pour tous les agents.
