@@ -1605,6 +1605,175 @@ def test_workflow_reconstructs_revert_history_and_rechecks_exact_session():
     assert nearby['validation']['valid'] is True
 
 
+def test_strong_cold_sales_spam_is_closed_without_ai_or_draft():
+    workflow = workflow_without_clients()
+    message = (
+        "Nous proposons une solution de nettoyage pour l'entretien de vos locaux. "
+        "Notre reseau vous permet de beneficier d'un interlocuteur unique. "
+        "Je serais ravi de vous presenter nos services et d'etudier vos besoins."
+    )
+    threads = [inbound_thread(plainText=message, attachmentCount='0')]
+    configure_process(workflow, threads)
+    workflow.desk_client.get_ticket.return_value['subject'] = 'Solution de proprete pour vos locaux'
+    workflow.crm_lookup.lookup_sender.return_value = {
+        'classification': 'prospect_business',
+        'lookup_error': '',
+    }
+
+    result = workflow.process_ticket(
+        'ticket-1',
+        auto_update_ticket=True,
+        ignore_existing_draft=True,
+    )
+
+    assert result['workflow_stage'] == 'CLOSED_SPAM'
+    assert result['ticket_closed'] is True
+    assert result['spam_detection']['is_spam'] is True
+    workflow.desk_client.update_ticket.assert_called_once_with('ticket-1', {'status': 'Closed'})
+    workflow.triage_agent.process.assert_not_called()
+    workflow.response_agent.process.assert_not_called()
+
+
+def test_strong_spam_dry_run_reports_close_without_mutation():
+    workflow = workflow_without_clients()
+    threads = [inbound_thread(
+        plainText=(
+            "Notre agence web propose une solution de referencement SEO. "
+            "Je serais ravi de vous presenter nos services lors d'un echange a votre convenance."
+        ),
+        attachmentCount='0',
+    )]
+    configure_process(workflow, threads)
+    workflow.desk_client.get_ticket.return_value['subject'] = 'Ameliorez votre visibilite en ligne'
+    workflow.crm_lookup.lookup_sender.return_value = {
+        'classification': 'prospect_business',
+        'lookup_error': '',
+    }
+
+    result = workflow.process_ticket('ticket-1', ignore_existing_draft=True)
+
+    assert result['workflow_stage'] == 'STOPPED_SPAM_DRY_RUN'
+    assert result['would_close_spam'] is True
+    assert result['ticket_closed'] is False
+    workflow.desk_client.update_ticket.assert_not_called()
+
+
+def test_spam_detector_never_auto_closes_known_client_or_training_request():
+    workflow = workflow_without_clients()
+    sales_message = (
+        "Nous proposons une solution de nettoyage et nos services d'entretien de vos locaux. "
+        "Je serais ravi d'etudier vos besoins avec un interlocuteur unique."
+    )
+    configure_process(workflow, [inbound_thread(plainText=sales_message, attachmentCount='0')])
+
+    known = workflow.process_ticket('ticket-1', ignore_existing_draft=True)
+
+    assert known['spam_detection']['is_spam'] is False
+    assert 'known_crm_contact' in known['spam_detection']['safeguards']
+    assert known['workflow_stage'] == 'DRAFT_DELIVERY'
+
+    workflow = workflow_without_clients()
+    training_message = (
+        "Nous proposons une formation CACES R490 et serions ravis de vous presenter "
+        "notre offre lors d'un echange a votre convenance."
+    )
+    configure_process(workflow, [inbound_thread(plainText=training_message, attachmentCount='0')])
+    workflow.crm_lookup.lookup_sender.return_value = {
+        'classification': 'prospect_business',
+        'lookup_error': '',
+    }
+
+    training = workflow.process_ticket('ticket-1', ignore_existing_draft=True)
+
+    assert training['spam_detection']['is_spam'] is False
+    assert 'training_business_content' in training['spam_detection']['safeguards']
+    workflow.triage_agent.process.assert_called_once()
+    assert training['workflow_stage'] != 'CLOSED_SPAM'
+
+
+def test_ai_noise_alone_does_not_auto_close_ambiguous_message():
+    workflow = workflow_without_clients()
+    configure_process(workflow, [inbound_thread(
+        plainText="Bonjour, je souhaite vous presenter notre entreprise.",
+        attachmentCount='0',
+    )])
+    workflow.crm_lookup.lookup_sender.return_value = {
+        'classification': 'prospect_business',
+        'lookup_error': '',
+    }
+    workflow.triage_agent.process.return_value = safe_triage(
+        action='IGNORE_NOISE',
+        intent='AUTRE_A_QUALIFIER',
+        reason='Message ambigu classe par IA',
+    )
+
+    result = workflow.process_ticket(
+        'ticket-1',
+        auto_update_ticket=True,
+        ignore_existing_draft=True,
+    )
+
+    assert result['workflow_stage'] == 'STOPPED_IGNORE_NOISE'
+    assert result['spam_detection']['is_spam'] is False
+    assert not any(
+        call.args[1] == {'status': 'Closed'}
+        for call in workflow.desk_client.update_ticket.call_args_list
+    )
+
+
+def test_spam_is_not_closed_when_crm_lookup_or_ticket_context_is_uncertain():
+    message = (
+        "Nous proposons une solution de nettoyage et nos services d'entretien de vos locaux. "
+        "Je serais ravi d'etudier vos besoins avec un interlocuteur unique."
+    )
+    workflow = workflow_without_clients()
+    threads = [inbound_thread(plainText=message, attachmentCount='0')]
+    configure_process(workflow, threads)
+    workflow.desk_client.get_ticket.return_value['subject'] = 'Offre de proprete'
+    workflow.crm_lookup.lookup_sender.return_value = {
+        'classification': 'prospect_business',
+        'lookup_error': 'CRM temporairement indisponible',
+    }
+
+    uncertain_crm = workflow.process_ticket(
+        'ticket-1',
+        auto_update_ticket=True,
+        ignore_existing_draft=True,
+    )
+
+    assert uncertain_crm['spam_detection']['is_spam'] is False
+    assert 'crm_lookup_error' in uncertain_crm['spam_detection']['safeguards']
+    assert not any(
+        call.args[1] == {'status': 'Closed'}
+        for call in workflow.desk_client.update_ticket.call_args_list
+    )
+
+    workflow = workflow_without_clients()
+    configure_process(workflow, threads)
+    workflow.desk_client.get_ticket.return_value['subject'] = 'Offre de proprete'
+    workflow.crm_lookup.lookup_sender.return_value = {
+        'classification': 'prospect_business',
+        'lookup_error': '',
+    }
+    newer = inbound_thread(
+        id='newer-message',
+        createdTime='2026-07-15T10:05:00.000Z',
+        plainText='Nouveau message pendant le traitement.',
+        attachmentCount='0',
+    )
+    workflow.desk_client.list_ticket_threads.return_value = [*threads, newer]
+
+    stale = workflow.process_ticket(
+        'ticket-1',
+        auto_update_ticket=True,
+        ignore_existing_draft=True,
+    )
+
+    assert stale['workflow_stage'] == 'SKIPPED_STALE_CONTEXT'
+    assert stale['ticket_closed'] is False
+    workflow.desk_client.update_ticket.assert_not_called()
+
+
 def test_current_training_facts_override_stale_history_before_planbot():
     workflow = workflow_without_clients()
     triage = safe_triage(

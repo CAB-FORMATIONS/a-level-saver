@@ -190,6 +190,8 @@ a-level-saver/
 7. **Validation** : `relations_response_validator.py` contrôle HTML, dates, montants, confirmations et disponibilités
 8. **Livraison** : revalidation, affectation au gestionnaire, seconde revalidation puis brouillon Zoho Desk — jamais d'envoi automatique, jamais de mise à jour CRM
 
+Le webhook choisit automatiquement `RelationsTicketWorkflow` pour le departement Relations entreprises et conserve `DOCTicketWorkflow` pour les autres tickets. Les demarchages commerciaux hors formation sont fermes automatiquement uniquement si plusieurs signaux deterministes concordent, que l'expediteur est absent du CRM et qu'aucun echange CAB anterieur n'existe.
+
 Point d'entrée batch : `run_relations_workflow_batch.py`.
 
 ---

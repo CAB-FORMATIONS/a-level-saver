@@ -9,17 +9,19 @@ Architecture:
 """
 
 import os
-import json
 import logging
 import threading
-from typing import Dict, Any, Optional
 from flask import Flask, request, jsonify
 from datetime import datetime
 import traceback
 
 from collections import deque
+from config import settings
+from src.constants.departments import DEPT_RELATIONS_ENTREPRISES_ID
 from src.workflows.doc_ticket_workflow import DOCTicketWorkflow
+from src.workflows.relations_ticket_workflow import RelationsTicketWorkflow
 from src.utils.logging_config import setup_logging
+from src.zoho_client import ZohoDeskClient
 
 # In-memory log buffer (last 2000 lines)
 LOG_BUFFER = deque(maxlen=2000)
@@ -76,6 +78,50 @@ def verify_secret(req) -> bool:
     return True
 
 
+def _resolve_ticket_workflow(ticket_id: str):
+    """Select the isolated workflow from the ticket's current department."""
+    desk = ZohoDeskClient()
+    try:
+        ticket = desk.get_ticket(ticket_id)
+        department_id = str(ticket.get('departmentId') or '')
+    except Exception as exc:
+        logger.warning(f"Unable to resolve department for {ticket_id}, using DOC workflow: {exc}")
+        return DOCTicketWorkflow(), 'doc'
+    finally:
+        desk.close()
+
+    if department_id in {
+        settings.zoho_desk_relations_department_id,
+        DEPT_RELATIONS_ENTREPRISES_ID,
+    }:
+        return RelationsTicketWorkflow(), 'relations'
+    return DOCTicketWorkflow(), 'doc'
+
+
+def _run_ticket_workflow(
+    workflow,
+    workflow_name: str,
+    ticket_id: str,
+    auto_create_draft: bool,
+    auto_update_crm: bool,
+    auto_update_ticket: bool,
+    auto_send: bool,
+):
+    if workflow_name == 'relations':
+        return workflow.process_ticket(
+            ticket_id=ticket_id,
+            auto_create_draft=auto_create_draft,
+            auto_update_ticket=auto_update_ticket,
+        )
+    return workflow.process_ticket(
+        ticket_id=ticket_id,
+        auto_create_draft=auto_create_draft,
+        auto_update_crm=auto_update_crm,
+        auto_update_ticket=auto_update_ticket,
+        auto_send=auto_send,
+    )
+
+
 def process_ticket_background(ticket_id: str, auto_send: bool = False):
     """Process a ticket in a background thread."""
     with _PROCESSING_LOCK:
@@ -90,18 +136,23 @@ def process_ticket_background(ticket_id: str, auto_send: bool = False):
         while True:
             try:
                 logger.info(f"[BG] Starting workflow for ticket {ticket_id}")
-                workflow = DOCTicketWorkflow()
-                result = workflow.process_ticket(
+                workflow, workflow_name = _resolve_ticket_workflow(ticket_id)
+                result = _run_ticket_workflow(
+                    workflow=workflow,
+                    workflow_name=workflow_name,
                     ticket_id=ticket_id,
                     auto_create_draft=True,
                     auto_update_crm=True,
                     auto_update_ticket=True,
-                    auto_send=auto_send
+                    auto_send=auto_send,
                 )
                 stage = result.get('workflow_stage', '?')
                 delivery = result.get('delivery_method', '?')
                 errors = result.get('errors', [])
-                logger.info(f"[BG] Ticket {ticket_id} done — stage={stage}, delivery={delivery}, errors={len(errors)}")
+                logger.info(
+                    f"[BG] Ticket {ticket_id} done — workflow={workflow_name}, "
+                    f"stage={stage}, delivery={delivery}, errors={len(errors)}"
+                )
                 if errors:
                     for error in errors:
                         logger.error(f"[BG] Ticket {ticket_id} error: {error}")
@@ -210,13 +261,15 @@ def test_webhook():
 
         logger.info(f"Test webhook triggered for ticket {ticket_id}")
 
-        workflow = DOCTicketWorkflow()
-        result = workflow.process_ticket(
-            ticket_id=ticket_id,
+        workflow, workflow_name = _resolve_ticket_workflow(str(ticket_id))
+        result = _run_ticket_workflow(
+            workflow=workflow,
+            workflow_name=workflow_name,
+            ticket_id=str(ticket_id),
             auto_create_draft=data.get('auto_create_draft', False),
             auto_update_crm=data.get('auto_update_crm', False),
             auto_update_ticket=data.get('auto_update_ticket', False),
-            auto_send=data.get('auto_send', False)
+            auto_send=data.get('auto_send', False),
         )
 
         return jsonify({
@@ -279,9 +332,9 @@ def get_logs():
     result = list(LOG_BUFFER)
 
     if level_filter:
-        result = [l for l in result if f' - {level_filter} - ' in l]
+        result = [line for line in result if f' - {level_filter} - ' in line]
     if query:
-        result = [l for l in result if query in l.lower()]
+        result = [line for line in result if query in line.lower()]
 
     result = result[-lines:]
 
@@ -303,7 +356,7 @@ def get_ticket_logs(ticket_id):
         return jsonify({'success': False, 'error': 'Unauthorized'}), 401
 
     fmt = request.args.get('format', 'json')
-    result = [l for l in LOG_BUFFER if ticket_id in l]
+    result = [line for line in LOG_BUFFER if ticket_id in line]
 
     if fmt == 'text':
         return '\n'.join(result), 200, {'Content-Type': 'text/plain; charset=utf-8'}

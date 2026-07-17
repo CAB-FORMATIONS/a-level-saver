@@ -159,6 +159,8 @@ envVars:
 
 Le refresh token Desk doit inclure les droits necessaires aux tickets, threads, brouillons et agents. Le workflow Relations entreprises requiert en particulier `Desk.basic.READ` et `Desk.agents.READ` pour resoudre le gestionnaire CRM vers un agent Zoho Desk actif.
 
+Le meme endpoint webhook distribue les tickets selon leur departement : Relations entreprises utilise le workflow B2B (brouillons et fermeture spam conservatrice), les autres departements conservent le workflow DOC. La Workflow Rule Zoho Desk doit donc appeler le webhook pour le departement Relations entreprises egalement.
+
 ### Flux de declenchement
 
 ```

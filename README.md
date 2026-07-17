@@ -16,6 +16,7 @@ Système d'agents IA pour automatiser la gestion des tickets Zoho Desk et la mis
 - ✅ Lookup CRM de l'expéditeur (contact + compte)
 - ✅ Affectation du ticket au propriétaire CRM du compte avant création du brouillon
 - ✅ Rédaction contextualisée par `RelationsResponseAgent` avec fallback déterministe
+- ✅ Fermeture automatique des démarchages hors formation uniquement sur signaux déterministes forts
 - ✅ Brouillons uniquement — jamais d'envoi automatique, jamais de mise à jour CRM
 
 ### Pipeline

@@ -118,6 +118,8 @@ Le workflow bloque ou evite :
 - termes internes dans les brouillons : `PlanBot`, `Zoho rules`, `UT`, `API`, `simulation`, etc.,
 - confirmation ferme d'inscription/place reservee.
 
+Les demarchages commerciaux sans lien avec la formation peuvent etre fermes automatiquement. La fermeture exige cumulativement un service hors perimetre, au moins deux marqueurs explicites de sollicitation, un expediteur absent du CRM, aucun echange CAB precedent et aucune information metier formation. Une classification IA seule ne ferme jamais un ticket.
+
 Les brouillons clients ne contiennent plus de bloc `XXX a completer`. Sans grille tarifaire fiable, le prix reste absent du mail et une alerte interne indique au conseiller qu'il doit finaliser le devis.
 
 Le workflow bloque egalement :

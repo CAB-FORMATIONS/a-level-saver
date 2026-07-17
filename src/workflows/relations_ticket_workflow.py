@@ -105,6 +105,59 @@ KNOWN_PLANBOT_CENTRES = (
     "Montreuil",
 )
 
+SPAM_SERVICE_MARKERS = (
+    "nettoyage",
+    "proprete",
+    "entretien de vos locaux",
+    "agence web",
+    "referencement seo",
+    "acquisition de clients",
+    "prospection commerciale",
+    "solution de telephonie",
+    "fournisseur d energie",
+    "courtage en energie",
+    "assurance professionnelle",
+    "mutuelle entreprise",
+    "cabinet de recrutement",
+    "solution de cybersecurite",
+)
+
+SPAM_SOLICITATION_MARKERS = (
+    "nous proposons",
+    "nos services",
+    "notre solution",
+    "notre reseau",
+    "je serais ravi de vous presenter",
+    "etudier vos besoins",
+    "echange a votre convenance",
+    "prendre rendez vous",
+    "devis gratuit",
+    "accompagnement personnalise",
+    "interlocuteur unique",
+    "beneficiez ainsi",
+)
+
+RELATIONS_BUSINESS_MARKERS = (
+    "formation",
+    "caces",
+    "sst",
+    "habilitation",
+    "aipr",
+    "candidat",
+    "stagiaire",
+    "convocation",
+    "convention",
+    "attestation",
+    "certificat",
+    "bon de commande",
+    "facture",
+    "opco",
+    "formateur",
+    "e learning",
+    "elearning",
+    "recyclage",
+)
+
 class RelationsTicketWorkflow:
     """Draft-only workflow for the Relations entreprises desk department."""
 
@@ -228,6 +281,36 @@ class RelationsTicketWorkflow:
             result["workflow_stage"] = "CRM_LOOKUP"
             crm_context = self.crm_lookup.lookup_sender(sender_email)
             result["crm_context"] = crm_context
+
+            spam_detection = self._detect_strong_spam(
+                subject,
+                message,
+                crm_context,
+                has_previous_cab="[CAB]" in conversation,
+            )
+            result["spam_detection"] = spam_detection
+            if spam_detection.get("is_spam"):
+                result.update({
+                    "success": True,
+                    "workflow_stage": "STOPPED_SPAM_DRY_RUN",
+                    "skip_reason": spam_detection.get("reason"),
+                    "would_close_spam": True,
+                    "ticket_closed": False,
+                })
+                if auto_update_ticket:
+                    if not self._delivery_context_is_current(ticket_id, context_snapshot, sender_email):
+                        result.update({
+                            "workflow_stage": "SKIPPED_STALE_CONTEXT",
+                            "skip_reason": "Le ticket a change avant la fermeture spam",
+                            "would_close_spam": False,
+                        })
+                        return result
+                    self.desk_client.update_ticket(ticket_id, {"status": "Closed"})
+                    result.update({
+                        "workflow_stage": "CLOSED_SPAM",
+                        "ticket_closed": True,
+                    })
+                return result
 
             result["workflow_stage"] = "TRIAGE"
             triage = self.triage_agent.process({
@@ -891,6 +974,51 @@ class RelationsTicketWorkflow:
     def _email_is_noise(self, email: str) -> bool:
         lower = (email or "").lower()
         return any(part in lower for part in NOISE_EMAIL_PARTS)
+
+    def _detect_strong_spam(
+        self,
+        subject: str,
+        message: str,
+        crm_context: dict[str, Any],
+        has_previous_cab: bool = False,
+    ) -> dict[str, Any]:
+        normalized = self._normalize_search_text(f"{subject}\n{message}")
+        classification = str(crm_context.get("classification") or "")
+        service_markers = [marker for marker in SPAM_SERVICE_MARKERS if marker in normalized]
+        solicitation_markers = [marker for marker in SPAM_SOLICITATION_MARKERS if marker in normalized]
+        business_markers = [marker for marker in RELATIONS_BUSINESS_MARKERS if marker in normalized]
+
+        safeguards = []
+        if classification == "client_crm":
+            safeguards.append("known_crm_contact")
+        elif classification not in {"prospect_business", "unknown_personal"}:
+            safeguards.append("unverified_crm_identity")
+        if crm_context.get("lookup_error"):
+            safeguards.append("crm_lookup_error")
+        if has_previous_cab:
+            safeguards.append("existing_cab_conversation")
+        if business_markers:
+            safeguards.append("training_business_content")
+
+        is_spam = bool(
+            not safeguards
+            and service_markers
+            and len(set(solicitation_markers)) >= 2
+        )
+        reason = ""
+        if is_spam:
+            reason = (
+                "Demarchage commercial hors formation detecte de facon deterministe: "
+                f"service={service_markers[0]}, marqueurs={len(set(solicitation_markers))}"
+            )
+        return {
+            "is_spam": is_spam,
+            "reason": reason,
+            "service_markers": service_markers,
+            "solicitation_markers": solicitation_markers,
+            "business_markers": business_markers,
+            "safeguards": safeguards,
+        }
 
     @staticmethod
     def _apply_session_context(triage: dict[str, Any], session_context: dict[str, Any]) -> None:
