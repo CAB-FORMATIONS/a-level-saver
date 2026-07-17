@@ -367,10 +367,7 @@ def _format_planbot_weeks(planbot_result: dict[str, Any]) -> list[str]:
             if not start or not end or range_key in seen_ranges:
                 continue
             seen_ranges.add(range_key)
-            if start == end:
-                label = _format_date(start)
-            else:
-                label = f"du {_format_date(start)} au {_format_date(end)}"
+            label = _format_option_dates(dates, start, end)
             if option.get("lot_required"):
                 count = int(option.get("nb_candidates") or 0)
                 count_label = f" de {count} candidat{'s' if count > 1 else ''}" if count else ""
@@ -417,7 +414,7 @@ def _format_planbot_centres(planbot_result: dict[str, Any]) -> list[str]:
             if not centre_name or not start or not end or key in seen:
                 continue
             seen.add(key)
-            date_label = _format_date(start) if start == end else f"du {_format_date(start)} au {_format_date(end)}"
+            date_label = _format_option_dates(option.get("dates") or [], start, end)
             if option.get("lot_required"):
                 count = int(option.get("nb_candidates") or 0)
                 count_label = f" de {count} candidat{'s' if count > 1 else ''}" if count else ""
@@ -446,7 +443,7 @@ def _format_sequence_options(options: list[dict[str, Any]]) -> list[str]:
         if not start or not end or key in seen:
             continue
         seen.add(key)
-        label = _format_date(start) if start == end else f"du {_format_date(start)} au {_format_date(end)}"
+        label = _format_option_dates(option.get("dates") or [], start, end)
         if option.get("lot_required"):
             count = int(option.get("nb_candidates") or 0)
             count_label = f" de {count} candidat{'s' if count > 1 else ''}" if count else ""
@@ -580,6 +577,27 @@ def _format_date(value: Any) -> str:
         return datetime.strptime(text, "%Y-%m-%d").strftime("%d/%m/%Y")
     except ValueError:
         return text
+
+
+def _format_option_dates(dates: list[Any], start: str, end: str) -> str:
+    values = list(dict.fromkeys(str(value)[:10] for value in dates if value))
+    if not values:
+        values = [value for value in (start, end) if value]
+    parsed = []
+    for value in values:
+        try:
+            parsed.append(datetime.strptime(value, "%Y-%m-%d"))
+        except ValueError:
+            parsed = []
+            break
+    if parsed and len(parsed) > 1:
+        consecutive = all((current - previous).days == 1 for previous, current in zip(parsed, parsed[1:]))
+        if not consecutive:
+            labels = [_format_date(value) for value in values]
+            return "les " + ", ".join(labels[:-1]) + f" et {labels[-1]}"
+    first = values[0] if values else start
+    last = values[-1] if values else end
+    return _format_date(first) if first == last else f"du {_format_date(first)} au {_format_date(last)}"
 
 
 def _planbot_status(planbot_result: dict[str, Any] | None) -> str:

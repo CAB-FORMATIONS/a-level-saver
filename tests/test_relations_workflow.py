@@ -1865,6 +1865,33 @@ def test_same_date_required_lots_are_all_rendered():
     assert 'Lot requis de 3 candidats' in response
 
 
+def test_non_consecutive_planbot_sequence_lists_exact_dates():
+    triage = safe_triage(
+        intent='DEMANDE_DISPONIBILITE_SESSION',
+        request_mode='follow_up',
+        extracted={'formation_type': 'CACES R486'},
+        missing_fields=[],
+    )
+    planbot_result = {
+        'status': 'ok',
+        'formation': 'CACES R486',
+        'semaines': [{
+            'dispo_reelle': True,
+            'sequence_valide': True,
+            'options': [{
+                'start': '2026-07-27',
+                'end': '2026-07-31',
+                'dates': ['2026-07-27', '2026-07-28', '2026-07-31'],
+            }],
+        }],
+    }
+
+    response = build_relations_response(triage, {}, planbot_result)
+
+    assert 'les 27/07/2026, 28/07/2026 et 31/07/2026' in response
+    assert 'du 27/07/2026 au 31/07/2026' not in response
+
+
 def test_cross_year_range_is_parsed_without_merging_separate_alternatives():
     agent = object.__new__(RelationsTriageAgent)
 
