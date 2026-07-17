@@ -2151,5 +2151,6 @@ def test_multi_training_workflow_uses_safe_deterministic_clarification():
     assert '<b>3. CACES R482 F - Option Treuil</b>' in result['draft_content']
     assert 'S42/2026 ou S43/2026' in result['draft_content']
     assert 'montage/demontage' in result['draft_content']
-    assert 'ajout de categorie' in result['draft_content']
+    assert "possede-t-il deja un CACES en cours de validite" in result['draft_content']
+    assert "ajouter l'option Treuil" in result['draft_content']
     assert result['validation']['valid'] is True

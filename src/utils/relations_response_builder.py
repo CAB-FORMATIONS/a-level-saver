@@ -170,8 +170,8 @@ def _build_multi_training_response(training_requests: list[dict[str, Any]]) -> s
         )
     if needs_r482_confirmation:
         lines.append(
-            "- pour le R482 F, qu'il s'agit bien de l'option Treuil et d'un ajout de categorie "
-            "ou passage pratique seul, ainsi que le statut initial ou recyclage.<br>"
+            "- pour le R482 F, le participant possede-t-il deja un CACES en cours de validite "
+            "et souhaite-t-il uniquement ajouter l'option Treuil, ou faut-il prevoir une formation complete ?<br>"
         )
     lines.extend([
         "<br>Ces precisions sont necessaires avant de pouvoir verifier les disponibilites.<br><br>",
