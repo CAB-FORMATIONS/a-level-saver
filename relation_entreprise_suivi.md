@@ -226,6 +226,10 @@ Pour une demande de prochaines disponibilites sans periode :
 
 Regle metier mise a jour : en l'absence de precision, le workflow utilise temporairement `1 candidat` et `initial` pour interroger PlanBot. Ces valeurs sont tracees comme hypotheses et le dernier paragraphe du brouillon demande obligatoirement leur confirmation. Une valeur explicitement donnee par le client n'est pas marquee comme hypothese.
 
+### Demandes Multi-Formations
+
+Le triage conserve chaque besoin dans un lot independant avec produit, participants, centre et semaines ISO. Il ne melange jamais les quantites ou periodes de deux formations. Lorsque PlanBot ne peut pas distinguer le sous-type de planning (par exemple echafaudage fixe/roulant) ou qu'une option CACES reste ambigue, le brouillon demande uniquement les precisions bloquantes avant toute proposition de dates.
+
 ## Prochaines Etapes
 
 1. Configurer les variables PlanBot API en environnement permanent.

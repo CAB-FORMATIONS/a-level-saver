@@ -47,6 +47,10 @@ def build_relations_response(
     attachments: dict[str, Any] | None = None,
 ) -> str:
     """Build a safe HTML draft for Relations entreprises."""
+    training_requests = triage.get("training_requests") or []
+    if len(training_requests) >= 2:
+        return _build_multi_training_response(training_requests)
+
     intent = triage.get("intent") or "AUTRE_A_QUALIFIER"
     request_mode = triage.get("request_mode") or "new_request"
     extracted = triage.get("extracted") or {}
@@ -127,6 +131,53 @@ def build_relations_response(
     lines.append("<br>")
     lines.append("Cordialement,<br>")
     lines.append("L'equipe Relations entreprises CAB Formations")
+    return "".join(lines)
+
+
+def _build_multi_training_response(training_requests: list[dict[str, Any]]) -> str:
+    lines = [
+        "Bonjour,<br><br>",
+        "Merci pour votre demande. Nous avons distingue les besoins suivants :<br><br>",
+    ]
+    needs_scaffolding_module = False
+    needs_r482_confirmation = False
+    for index, request in enumerate(training_requests, 1):
+        label = escape(str(request.get("label") or f"Besoin {index}"))
+        lines.append(f"<b>{index}. {label}</b><br>")
+        centre = request.get("centre_requested") or request.get("centre")
+        if centre:
+            lines.append(f"- Centre : {escape(str(centre))}<br>")
+        if request.get("nb_candidates"):
+            count = int(request["nb_candidates"])
+            lines.append(f"- Participants : {count}<br>")
+        windows = request.get("week_windows") or []
+        if windows:
+            week_labels = [
+                f"S{window.get('iso_week')}/{window.get('iso_year')}"
+                for window in windows
+            ]
+            lines.append(f"- Semaines souhaitees : {escape(' ou '.join(week_labels))}<br>")
+        lines.append("<br>")
+        missing = set(request.get("missing_fields") or [])
+        needs_scaffolding_module = needs_scaffolding_module or "module_echafaudage" in missing
+        needs_r482_confirmation = needs_r482_confirmation or "confirmation_option_r482" in missing
+
+    lines.append("Pour verifier des creneaux fiables, merci de nous confirmer :<br>")
+    if needs_scaffolding_module:
+        lines.append(
+            "- pour les echafaudages fixe et roulant, le module attendu : montage/demontage, "
+            "utilisation/verification ou reception ;<br>"
+        )
+    if needs_r482_confirmation:
+        lines.append(
+            "- pour le R482 F, qu'il s'agit bien de l'option Treuil et d'un ajout de categorie "
+            "ou passage pratique seul, ainsi que le statut initial ou recyclage.<br>"
+        )
+    lines.extend([
+        "<br>Ces precisions sont necessaires avant de pouvoir verifier les disponibilites.<br><br>",
+        "Cordialement,<br>",
+        "L'equipe Relations entreprises CAB Formations",
+    ])
     return "".join(lines)
 
 

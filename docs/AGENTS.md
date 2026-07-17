@@ -247,6 +247,8 @@ result = agent.process({
 ### Extraction
 `formation_type`, `centre`, `start_date`/`end_date`, `nb_candidates`, `categories` (CACES), `type_ir`, `financement`, `missing_fields`, etc.
 
+Les emails contenant plusieurs besoins independants peuvent produire `request_structure="independent_list"` et `training_requests[]`. Chaque lot conserve son produit, son nombre de participants, son centre, ses semaines ISO et ses propres champs bloquants ; les valeurs ne sont jamais fusionnees entre les lots.
+
 **Modèle :** `MODEL_EXTRACTION` (claude-haiku-4-5)
 
 ---

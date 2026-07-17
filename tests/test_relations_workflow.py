@@ -1,4 +1,5 @@
 import sys
+from datetime import date
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -2070,3 +2071,85 @@ def test_cross_year_range_is_parsed_without_merging_separate_alternatives():
     assert agent._extract_date_range(
         'Deux options: le 21/09/2026 ou le 28/09/2026.'
     ) == (None, None)
+
+
+MULTI_TRAINING_MESSAGE = """Bonjour,
+
+Pouvez vous me proposer des dates pour :
+Echafaudage fixe en S42 ou S43 (sur Lyon 5 participants)
+Echafaudage roulant en S38 ou S39pour (sur Lyon 1 participant)Option tourelle treuil sur le R482F car il n'a que le manuscopique pour 1 participant en S41, S42 ou S43 (Lyon)
+
+Cordialement"""
+
+
+def test_multi_training_triage_preserves_request_associations_and_iso_weeks():
+    agent = object.__new__(RelationsTriageAgent)
+
+    requests = agent._extract_multi_training_requests(
+        MULTI_TRAINING_MESSAGE,
+        reference_date=date(2026, 7, 17),
+    )
+
+    assert len(requests) == 3
+    assert [request['formation_type'] for request in requests] == ['R408', 'R457', 'CACES R482']
+    assert [request['nb_candidates'] for request in requests] == [5, 1, 1]
+    assert [request['iso_weeks'] for request in requests] == [[42, 43], [38, 39], [41, 42, 43]]
+    assert all(request['centre'] == 'Venissieux' for request in requests)
+    assert requests[0]['week_windows'][0] == {
+        'iso_year': 2026,
+        'iso_week': 42,
+        'start_date': '2026-10-12',
+        'end_date': '2026-10-16',
+    }
+    assert requests[2]['categories'] == ['F - Option Treuil']
+    assert 'confirmation_option_r482' in requests[2]['missing_fields']
+    assert all(request['planbot_eligible'] is False for request in requests)
+
+
+def test_multi_training_overrides_scalar_llm_classification_and_fallback():
+    agent = object.__new__(RelationsTriageAgent)
+
+    normalized = agent._normalize(
+        {'action': 'DRAFT', 'intent': 'AUTRE_A_QUALIFIER', 'extracted': {}},
+        'DATE',
+        MULTI_TRAINING_MESSAGE,
+        EXTERNAL_EMAIL,
+    )
+    fallback = agent._fallback('DATE', MULTI_TRAINING_MESSAGE, EXTERNAL_EMAIL)
+
+    for result in (normalized, fallback):
+        assert result['intent'] == 'DEMANDE_DISPONIBILITE_SESSION'
+        assert result['request_structure'] == 'independent_list'
+        assert len(result['training_requests']) == 3
+        assert result['missing_fields'] == []
+        assert result['extracted']['formation_type'] == ''
+
+
+def test_multi_training_workflow_uses_safe_deterministic_clarification():
+    workflow = workflow_without_clients()
+    threads = [inbound_thread(plainText=MULTI_TRAINING_MESSAGE, attachmentCount='0')]
+    configure_process(workflow, threads)
+    agent = object.__new__(RelationsTriageAgent)
+    workflow.triage_agent.process.return_value = agent._normalize(
+        {'action': 'DRAFT', 'intent': 'AUTRE_A_QUALIFIER', 'extracted': {}},
+        'DATE',
+        MULTI_TRAINING_MESSAGE,
+        EXTERNAL_EMAIL,
+    )
+
+    result = workflow.process_ticket('ticket-1', ignore_existing_draft=True)
+
+    assert result['workflow_stage'] == 'DRAFT_DELIVERY'
+    assert result['triage_result']['session_operation'] == 'multi_training_request'
+    assert result['planbot_action'] == ''
+    workflow.planbot_client.check_availability.assert_not_called()
+    workflow.response_agent.process.assert_not_called()
+    assert result['response_generation']['used_ai'] is False
+    assert result['response_generation']['fallback_reason'] == 'multi_training_request_requires_clarification'
+    assert '<b>1. Echafaudage fixe</b>' in result['draft_content']
+    assert '<b>2. Echafaudage roulant</b>' in result['draft_content']
+    assert '<b>3. CACES R482 F - Option Treuil</b>' in result['draft_content']
+    assert 'S42/2026 ou S43/2026' in result['draft_content']
+    assert 'montage/demontage' in result['draft_content']
+    assert 'ajout de categorie' in result['draft_content']
+    assert result['validation']['valid'] is True

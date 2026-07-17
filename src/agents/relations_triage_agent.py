@@ -6,8 +6,9 @@ import json
 import logging
 import re
 import unicodedata
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import anthropic
 
@@ -222,7 +223,7 @@ class RelationsTriageAgent:
         if deterministic_mode:
             request_mode = deterministic_mode
 
-        return {
+        normalized_result = {
             "action": action,
             "intent": intent,
             "confidence": float(result.get("confidence") or 0.6),
@@ -233,6 +234,7 @@ class RelationsTriageAgent:
             "subject": subject,
             "email": email,
         }
+        return self._apply_multi_training_requests(normalized_result, message)
 
     def _normalize_missing_field(self, value: Any) -> str | None:
         normalized = self._norm(str(value or "")).replace(" ", "_")
@@ -257,6 +259,144 @@ class RelationsTriageAgent:
         if "initial" in normalized or "recycl" in normalized:
             return "type_ir"
         return None
+
+    def _apply_multi_training_requests(
+        self,
+        result: dict[str, Any],
+        message: str,
+    ) -> dict[str, Any]:
+        requests = self._extract_multi_training_requests(message)
+        if len(requests) < 2:
+            return result
+        result.update({
+            "action": "DRAFT",
+            "intent": "DEMANDE_DISPONIBILITE_SESSION",
+            "request_mode": "new_request",
+            "request_structure": "independent_list",
+            "training_requests": requests,
+            "extracted": {
+                "formation_type": "",
+                "centre": "",
+                "start_date": None,
+                "end_date": None,
+                "nb_candidates": None,
+                "categories": [],
+                "nb_categories": None,
+                "type_ir": "",
+                "financement": "B2B",
+                "nombre_jours_souhaites": None,
+            },
+            "missing_fields": [],
+            "reason": f"Demande multi-formations structuree en {len(requests)} lots independants",
+        })
+        return result
+
+    @classmethod
+    def _extract_multi_training_requests(
+        cls,
+        message: str,
+        reference_date: date | None = None,
+    ) -> list[dict[str, Any]]:
+        product_pattern = re.compile(
+            r"[eé]chafaudage\s+fixe|[eé]chafaudage\s+roulant|option[^\n.]{0,100}?r\s*482\s*f",
+            flags=re.IGNORECASE,
+        )
+        matches = list(product_pattern.finditer(message or ""))
+        if len(matches) < 2 or len(matches) > 8:
+            return []
+
+        reference = reference_date or datetime.now(ZoneInfo("Europe/Paris")).date()
+        requests = []
+        for index, match in enumerate(matches):
+            end = matches[index + 1].start() if index + 1 < len(matches) else len(message)
+            raw_excerpt = message[match.start():end]
+            raw_excerpt = re.split(
+                r"n['’]?hesitez pas|cordialement|service inscriptions",
+                raw_excerpt,
+                maxsplit=1,
+                flags=re.IGNORECASE,
+            )[0]
+            excerpt = re.sub(r"\s+", " ", raw_excerpt).strip(" ,;\n\r")
+            normalized = cls._norm(excerpt)
+            weeks = []
+            for value in re.findall(r"(?<![a-z0-9])s\s*(\d{1,2})(?!\d)", normalized):
+                week = int(value)
+                if 1 <= week <= 53 and week not in weeks:
+                    weeks.append(week)
+
+            count_match = re.search(
+                r"\b(\d{1,3})\s*(?:participant|participants|candidat|candidats|stagiaire|stagiaires)\b",
+                normalized,
+            )
+            nb_candidates = int(count_match.group(1)) if count_match else None
+            centre = "Venissieux" if re.search(r"\b(?:lyon|venissieux)\b", normalized) else ""
+
+            if normalized.startswith("echafaudage fixe"):
+                label = "Echafaudage fixe"
+                formation_type = "R408"
+                variant = "fixe"
+                categories = []
+                missing = ["module_echafaudage"]
+            elif normalized.startswith("echafaudage roulant"):
+                label = "Echafaudage roulant"
+                formation_type = "R457"
+                variant = "roulant"
+                categories = []
+                missing = ["module_echafaudage"]
+            else:
+                label = "CACES R482 F - Option Treuil"
+                formation_type = "CACES R482"
+                variant = "r482_f_option"
+                categories = ["F - Option Treuil"] if "treuil" in normalized else []
+                missing = ["confirmation_option_r482", "type_passage", "type_ir"]
+                if not categories:
+                    missing.append("categories")
+
+            if not centre:
+                missing.append("centre")
+            if not nb_candidates:
+                missing.append("nb_candidates")
+            if not weeks:
+                missing.append("iso_weeks")
+
+            windows = []
+            for week in weeks:
+                year = reference.year
+                try:
+                    week_end = date.fromisocalendar(year, week, 5)
+                    if week_end < reference:
+                        year += 1
+                    start_date = date.fromisocalendar(year, week, 1)
+                    end_date = date.fromisocalendar(year, week, 5)
+                except ValueError:
+                    if "iso_weeks" not in missing:
+                        missing.append("iso_weeks")
+                    continue
+                windows.append({
+                    "iso_year": year,
+                    "iso_week": week,
+                    "start_date": start_date.isoformat(),
+                    "end_date": end_date.isoformat(),
+                })
+
+            requests.append({
+                "request_id": f"req-{index + 1}",
+                "label": label,
+                "source_excerpt": excerpt[:500],
+                "formation_type": formation_type,
+                "formation_variant": variant,
+                "centre": centre,
+                "centre_requested": "Lyon" if centre else "",
+                "nb_candidates": nb_candidates,
+                "categories": categories,
+                "type_ir": "",
+                "type_passage": "",
+                "iso_weeks": weeks,
+                "week_windows": windows,
+                "missing_fields": list(dict.fromkeys(missing)),
+                "planbot_eligible": False,
+            })
+        return requests
 
     def _detect_business_intent(self, subject: str, message: str) -> str | None:
         subject_text = self._norm(subject)
@@ -646,7 +786,7 @@ class RelationsTriageAgent:
                 if not extracted.get("nombre_jours_souhaites"):
                     missing_fields.append("nombre_jours_souhaites")
 
-        return {
+        result = {
             "action": action,
             "intent": intent,
             "confidence": 0.35,
@@ -657,3 +797,4 @@ class RelationsTriageAgent:
             "subject": subject,
             "email": email,
         }
+        return self._apply_multi_training_requests(result, message)

@@ -321,25 +321,44 @@ class RelationsTicketWorkflow:
                 "conversation": conversation,
                 "attachments": attachments,
             })
-            session_context = reconstruct_session_context(
-                conversation_entries,
-                str(customer_thread.get("id") or ""),
-                KNOWN_PLANBOT_CENTRES,
-            )
-            result["session_context"] = session_context
-            self._apply_session_context(triage, session_context)
-            validation_source = self._build_validation_source(message, conversation, session_context)
-            if not triage.get("history_context_applied"):
-                self._prepare_planbot_search_context(triage, crm_context, message, conversation)
-            self._apply_training_defaults(triage)
             history_source = "\n".join(str(entry.get("text") or "") for entry in conversation_entries)
             planbot_source = "\n".join(filter(None, [message, history_source, crm_context.get("account_name") or ""]))
-            self._sanitize_extracted_facts(
-                triage,
-                planbot_source,
-                date_source_text=validation_source,
-            )
-            self._enforce_planbot_missing_fields(triage, has_previous_cab="[CAB]" in conversation)
+            validation_source = message
+            training_requests = triage.get("training_requests") or []
+            if len(training_requests) >= 2:
+                session_context = {
+                    "operation": "multi_training_request",
+                    "status": "not_applicable",
+                    "reason": "Plusieurs besoins de formation independants",
+                    "facts": {},
+                    "missing_fields": [],
+                    "verified_fields": [],
+                    "source_thread_ids": [str(customer_thread.get("id") or "")],
+                    "candidate_count": 0,
+                    "should_check_availability": False,
+                }
+                triage.update({
+                    "session_operation": "multi_training_request",
+                    "session_context_status": "not_applicable",
+                })
+            else:
+                session_context = reconstruct_session_context(
+                    conversation_entries,
+                    str(customer_thread.get("id") or ""),
+                    KNOWN_PLANBOT_CENTRES,
+                )
+                self._apply_session_context(triage, session_context)
+                validation_source = self._build_validation_source(message, conversation, session_context)
+                if not triage.get("history_context_applied"):
+                    self._prepare_planbot_search_context(triage, crm_context, message, conversation)
+                self._apply_training_defaults(triage)
+                self._sanitize_extracted_facts(
+                    triage,
+                    planbot_source,
+                    date_source_text=validation_source,
+                )
+                self._enforce_planbot_missing_fields(triage, has_previous_cab="[CAB]" in conversation)
+            result["session_context"] = session_context
             result["triage_result"] = triage
 
             if triage.get("action") in {"IGNORE_NOISE", "ROUTE_HUMAN", "ROUTE_COMPTA"}:
@@ -447,7 +466,19 @@ class RelationsTicketWorkflow:
                 "session_context": session_context,
                 "fallback_response": fallback_response,
             }
-            response_generation = self.response_agent.process(response_request)
+            if len(training_requests) >= 2:
+                response_generation = {
+                    "response_html": fallback_response,
+                    "used_ai": False,
+                    "model": None,
+                    "requires_human_action": True,
+                    "human_action_reason": (
+                        "Demande multi-formations structuree; precisions produit requises avant consultation PlanBot."
+                    ),
+                    "fallback_reason": "multi_training_request_requires_clarification",
+                }
+            else:
+                response_generation = self.response_agent.process(response_request)
             response_html = response_generation.get("response_html") or fallback_response
             planbot_status = str((planbot_result or {}).get("status") or "").lower()
             exact_availability_unverified = (
