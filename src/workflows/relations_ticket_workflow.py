@@ -297,7 +297,17 @@ class RelationsTicketWorkflow:
                 planbot_result = self.planbot_client.check_availability(payload, action=planbot_action)
                 result["planbot_payload"] = payload
                 if (
-                    planbot_action == "check_availability"
+                    planbot_action == "prevision_planif"
+                    and str((planbot_result or {}).get("status") or "").lower() in {"error", "skipped"}
+                ):
+                    legacy_payload = self._build_planbot_payload(triage, action="check_availability")
+                    planbot_result = self.planbot_client.check_availability(
+                        legacy_payload,
+                        action="check_availability",
+                    )
+                    result["planbot_legacy_payload"] = legacy_payload
+                if (
+                    planbot_action in {"prevision_planif", "check_availability"}
                     and str((planbot_result or {}).get("status") or "").lower() == "ok"
                     and not has_verified_direct_availability(planbot_result)
                 ):
@@ -358,7 +368,7 @@ class RelationsTicketWorkflow:
             response_html = response_generation.get("response_html") or fallback_response
             planbot_status = str((planbot_result or {}).get("status") or "").lower()
             exact_availability_unverified = (
-                planbot_action == "check_availability"
+                planbot_action in {"prevision_planif", "check_availability"}
                 and not has_verified_direct_availability(planbot_result)
             )
             if exact_availability_unverified:
@@ -1444,7 +1454,7 @@ class RelationsTicketWorkflow:
         if operation in EXACT_AVAILABILITY_OPERATIONS:
             if triage.get("session_context_status") != "resolved":
                 return ""
-            return "check_availability" if self._should_call_planbot(triage, source_text) else ""
+            return "prevision_planif" if self._should_call_planbot(triage, source_text) else ""
         if triage.get("planbot_search_mode") == "next_sessions":
             return "search_alternative_dates" if self._should_search_next_sessions(triage) else ""
         return "full" if self._should_call_planbot(triage, source_text) else ""

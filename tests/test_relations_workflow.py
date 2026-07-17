@@ -1477,9 +1477,9 @@ def test_workflow_reconstructs_revert_history_and_rechecks_exact_session():
 
     assert result['session_context']['status'] == 'resolved'
     assert result['triage_result']['session_operation'] == 'revert_original'
-    assert result['planbot_action'] == 'check_availability'
+    assert result['planbot_action'] == 'prevision_planif'
     call = workflow.planbot_client.check_availability.call_args
-    assert call.kwargs['action'] == 'check_availability'
+    assert call.kwargs['action'] == 'prevision_planif'
     assert call.args[0] == {
         'centre': 'Villabe',
         'formation_type': 'CACES R486',
@@ -1560,7 +1560,7 @@ def test_workflow_reconstructs_revert_history_and_rechecks_exact_session():
     alternatives = workflow.process_ticket('ticket-1', ignore_existing_draft=True)
 
     assert workflow.planbot_client.check_availability.call_count == 2
-    assert workflow.planbot_client.check_availability.call_args_list[0].kwargs['action'] == 'check_availability'
+    assert workflow.planbot_client.check_availability.call_args_list[0].kwargs['action'] == 'prevision_planif'
     assert workflow.planbot_client.check_availability.call_args_list[1].kwargs['action'] == 'search_alternative_dates'
     alternative_payload = workflow.planbot_client.check_availability.call_args_list[1].args[0]
     assert alternative_payload['around_date'] == '2026-07-22'
