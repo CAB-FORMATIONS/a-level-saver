@@ -2154,3 +2154,146 @@ def test_multi_training_workflow_uses_safe_deterministic_clarification():
     assert "possede-t-il deja un CACES en cours de validite" in result['draft_content']
     assert "ajouter l'option Treuil" in result['draft_content']
     assert result['validation']['valid'] is True
+
+
+EXPIRING_HABILITATION_MESSAGE = (
+    "Un de nos agents dispose de l'habilitation electrique H1V-B1V-BR-BC-B2V, "
+    "qui prendra fin en octobre 2026. Auriez-vous une session permettant de renouveler "
+    "ces habilitations ? Et pouvez-vous nous fournir un devis ? "
+    "Domaine de Rentilly, Bussy Saint Martin - 77603 Marne la Vallee."
+)
+
+
+def test_expiry_request_uses_crm_centre_and_conservative_deadline():
+    workflow = workflow_without_clients()
+    triage = safe_triage(
+        intent='DEMANDE_DEVIS_FORMATION',
+        request_mode='new_request',
+        extracted={'formation_type': 'Habilitation electrique'},
+        missing_fields=['centre', 'dates'],
+    )
+    crm_context = {
+        'account_name': 'ENTREPRISE TEST',
+        'account': {'Centre': 'BAGNOLET (93)'},
+    }
+
+    workflow._prepare_planbot_search_context(
+        triage,
+        crm_context,
+        EXPIRING_HABILITATION_MESSAGE,
+        '',
+    )
+
+    extracted = triage['extracted']
+    assert extracted['centre'] == 'Bagnolet'
+    assert triage['centre_source'] == 'crm_account'
+    assert extracted['nb_candidates'] == 1
+    assert extracted['type_ir'] == 'recyclage'
+    assert extracted['end_date'] == '2026-09-30'
+    assert extracted['start_date'] <= extracted['end_date']
+    assert triage['habilitation_levels'] == ['H1V', 'B1V', 'BR', 'BC', 'B2V']
+    assert triage['required_session_marker_groups'] == [
+        ['pack 5', 'pack5'],
+        ['recyclage', 'renouvellement', 'elec3r', 'nelecr'],
+    ]
+    assert {'centre', 'nb_candidates', 'type_ir', 'start_date', 'end_date'}.issubset(
+        triage['history_verified_fields']
+    )
+
+
+def test_habilitation_session_filter_rejects_wrong_pack_and_prioritizes_loaded_session():
+    workflow = workflow_without_clients()
+    triage = {
+        'required_session_marker_groups': [
+            ['pack 5', 'pack5'],
+            ['recyclage', 'renouvellement'],
+        ],
+    }
+    result = {
+        'status': 'ok',
+        'formation': 'Habilitation electrique',
+        'coverage_complete': True,
+        'jours': [
+            {
+                'date': '2026-07-27',
+                'jour': 'lundi',
+                'formation_pratique': [{
+                    'session_label': 'HE PACK 2 - initial',
+                    'existing_candidates': 4,
+                    'places_restantes': 8,
+                }],
+            },
+            {
+                'date': '2026-09-14',
+                'jour': 'lundi',
+                'formation_pratique': [{
+                    'session_label': 'HE PACK 5 - recyclage',
+                    'existing_candidates': 5,
+                    'places_restantes': 7,
+                }],
+            },
+        ],
+    }
+
+    filtered = workflow._filter_planbot_session_compatibility(triage, result)
+
+    assert filtered['coverage_complete'] is True
+    assert [day['date'] for day in filtered['jours']] == ['2026-09-14']
+    assert filtered['jours'][0]['formation_pratique'][0]['existing_candidates'] == 5
+
+
+def test_expiring_habilitation_workflow_proposes_loaded_compatible_session():
+    workflow = workflow_without_clients()
+    threads = [inbound_thread(plainText=EXPIRING_HABILITATION_MESSAGE, attachmentCount='0')]
+    configure_process(workflow, threads)
+    workflow.crm_lookup.lookup_sender.return_value['account']['Centre'] = 'BAGNOLET (93)'
+    workflow.triage_agent.process.return_value = safe_triage(
+        intent='DEMANDE_DEVIS_FORMATION',
+        request_mode='new_request',
+        extracted={'formation_type': 'Habilitation electrique'},
+        missing_fields=['centre', 'dates'],
+    )
+    workflow.planbot_client.check_availability.return_value = {
+        'mode': 'full_availability',
+        'direct': {
+            'status': 'ok',
+            'formation': 'Habilitation electrique',
+            'coverage_complete': True,
+            'jours': [
+                {
+                    'date': '2026-08-03',
+                    'jour': 'lundi',
+                    'formation_pratique': [{
+                        'session_label': 'HE PACK 2 - initial',
+                        'existing_candidates': 6,
+                        'places_restantes': 6,
+                    }],
+                },
+                {
+                    'date': '2026-09-14',
+                    'jour': 'lundi',
+                    'formation_pratique': [{
+                        'session_label': 'HE PACK 5 - recyclage',
+                        'existing_candidates': 4,
+                        'places_restantes': 8,
+                    }],
+                },
+            ],
+        },
+    }
+
+    result = workflow.process_ticket('ticket-1', ignore_existing_draft=True)
+
+    assert result['planbot_action'] == 'full'
+    payload = workflow.planbot_client.check_availability.call_args.args[0]
+    assert payload['centre'] == 'Bagnolet'
+    assert payload['nb_candidates'] == 1
+    assert payload['end_date'] == '2026-09-30'
+    assert result['response_generation']['used_ai'] is False
+    assert result['response_generation']['fallback_reason'] == 'planbot_expiry_options'
+    assert 'centre de Bagnolet' in result['draft_content']
+    assert 'avant octobre 2026' in result['draft_content']
+    assert 'Session a completer : lundi 14/09/2026' in result['draft_content']
+    assert '4 participants deja inscrits' in result['draft_content']
+    assert 'PACK 2' not in result['draft_content']
+    assert result['validation']['valid'] is True

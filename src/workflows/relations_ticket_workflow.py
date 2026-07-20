@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import re
 import unicodedata
+from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -102,6 +103,9 @@ KNOWN_PLANBOT_CENTRES = (
     "Bois d'Arcy",
     "Seclin",
     "Roissy",
+    "Bagnolet",
+    "Moussy",
+    "Vaulx-le-Penil",
     "Montreuil",
 )
 
@@ -397,6 +401,7 @@ class RelationsTicketWorkflow:
             if planbot_action:
                 payload = self._build_planbot_payload(triage, action=planbot_action)
                 planbot_result = self.planbot_client.check_availability(payload, action=planbot_action)
+                planbot_result = self._filter_planbot_session_compatibility(triage, planbot_result)
                 result["planbot_payload"] = payload
                 if (
                     planbot_action == "prevision_planif"
@@ -407,7 +412,41 @@ class RelationsTicketWorkflow:
                         legacy_payload,
                         action="check_availability",
                     )
+                    planbot_result = self._filter_planbot_session_compatibility(triage, planbot_result)
                     result["planbot_legacy_payload"] = legacy_payload
+                if (
+                    planbot_action == "full"
+                    and triage.get("expiry_context")
+                    and not has_verified_availability(planbot_result)
+                ):
+                    direct_result = (
+                        planbot_result.get("direct")
+                        if isinstance(planbot_result, dict) and isinstance(planbot_result.get("direct"), dict)
+                        else planbot_result
+                    )
+                    alternatives_result = (
+                        planbot_result.get("alternative_dates")
+                        if isinstance(planbot_result, dict) else None
+                    )
+                    centres_result = (
+                        planbot_result.get("alternative_centres")
+                        if isinstance(planbot_result, dict) else None
+                    )
+                    if not self._planbot_has_available_options(centres_result):
+                        centres_payload = self._build_exact_alternative_centres_payload(triage)
+                        centres_result = self.planbot_client.check_availability(
+                            centres_payload,
+                            action="search_alternative_centres",
+                        )
+                        centres_result = self._filter_planbot_session_compatibility(triage, centres_result)
+                        result["planbot_alternative_centres_payload"] = centres_payload
+                    planbot_result = {
+                        "status": "ok",
+                        "mode": "expiry_with_nearby_centres",
+                        "direct": direct_result,
+                        "alternative_dates": alternatives_result,
+                        "alternative_centres": centres_result,
+                    }
                 if (
                     planbot_action in {"prevision_planif", "check_availability"}
                     and str((planbot_result or {}).get("status") or "").lower() == "ok"
@@ -419,6 +458,10 @@ class RelationsTicketWorkflow:
                         alternatives_payload,
                         action="search_alternative_dates",
                     )
+                    alternatives_result = self._filter_planbot_session_compatibility(
+                        triage,
+                        alternatives_result,
+                    )
                     result["planbot_alternative_dates_payload"] = alternatives_payload
                     centres_result = None
                     if not self._planbot_has_available_options(alternatives_result):
@@ -427,6 +470,7 @@ class RelationsTicketWorkflow:
                             centres_payload,
                             action="search_alternative_centres",
                         )
+                        centres_result = self._filter_planbot_session_compatibility(triage, centres_result)
                         result["planbot_alternative_centres_payload"] = centres_payload
                     planbot_result = {
                         "status": "ok",
@@ -445,6 +489,7 @@ class RelationsTicketWorkflow:
                         centres_payload,
                         action="search_alternative_centres",
                     )
+                    centres_result = self._filter_planbot_session_compatibility(triage, centres_result)
                     result["planbot_alternative_centres_payload"] = centres_payload
                     planbot_result = {
                         "status": "ok",
@@ -485,7 +530,25 @@ class RelationsTicketWorkflow:
                 planbot_action in {"prevision_planif", "check_availability"}
                 and not has_verified_direct_availability(planbot_result)
             )
-            if exact_availability_unverified:
+            if triage.get("expiry_context"):
+                availability_found = has_verified_availability(planbot_result)
+                response_generation = {
+                    **response_generation,
+                    "response_html": fallback_response,
+                    "used_ai": False,
+                    "requires_human_action": True,
+                    "human_action_reason": (
+                        "Sessions compatibles proposees avant echeance; devis et choix client a finaliser."
+                        if availability_found
+                        else "Aucune session compatible identifiee avant echeance; verification planning requise."
+                    ),
+                    "fallback_reason": (
+                        "planbot_expiry_options"
+                        if availability_found else "planbot_no_compatible_expiry_session"
+                    ),
+                }
+                response_html = fallback_response
+            elif exact_availability_unverified:
                 if has_verified_availability(planbot_result):
                     fallback_reason = "planbot_alternatives_only"
                     human_reason = (
@@ -1162,6 +1225,8 @@ class RelationsTicketWorkflow:
             extracted["nb_categories"] = None
 
         account_name = crm_context.get("account_name") or ""
+        account = crm_context.get("account") if isinstance(crm_context.get("account"), dict) else {}
+        account_centre_value = str(account.get("Centre") or "")
         excluded_centres = self._excluded_planbot_centres(message)
         existing_centre = str(extracted.get("centre") or "")
         centre_evidence = self._normalize_location(f"{message}\n{account_name}")
@@ -1175,9 +1240,14 @@ class RelationsTicketWorkflow:
                 extracted["centre"] = ""
         message_centres = self._known_planbot_centres(message, excluded_centres)
         message_centre = message_centres[0] if len(message_centres) == 1 else ""
-        account_centre = self._infer_known_planbot_centre(account_name, excluded_centres)
+        account_centre = (
+            self._infer_known_planbot_centre(account_centre_value, excluded_centres)
+            or self._infer_known_planbot_centre(account_name, excluded_centres)
+        )
+        signature_centre = self._infer_signature_centre(message, excluded_centres)
         if message_centre:
             extracted["centre"] = message_centre
+            triage["centre_source"] = "current_message"
         elif len(message_centres) > 1:
             extracted["centre"] = ""
             triage["ambiguous_fields"] = list(dict.fromkeys([
@@ -1186,8 +1256,18 @@ class RelationsTicketWorkflow:
             ]))
         elif not extracted.get("centre") and account_centre:
             extracted["centre"] = account_centre
+            triage["centre_source"] = "crm_account"
+            triage["centre_source_value"] = account_centre_value
+            self._mark_verified_fields(triage, "centre")
+        elif not extracted.get("centre") and signature_centre:
+            extracted["centre"] = signature_centre
+            triage["centre_source"] = "signature_address"
+            self._mark_verified_fields(triage, "centre")
 
-        current_candidate_count = current_training_facts.get("nb_candidates")
+        current_candidate_count = (
+            current_training_facts.get("nb_candidates")
+            or self._extract_candidate_count(message)
+        )
         if (
             not current_candidate_count
             and not current_formation
@@ -1196,6 +1276,7 @@ class RelationsTicketWorkflow:
             current_candidate_count = self._extract_candidate_count(conversation)
         if current_candidate_count:
             extracted["nb_candidates"] = current_candidate_count
+            self._mark_verified_fields(triage, "nb_candidates")
 
         current_type_ir = str(current_training_facts.get("type_ir") or "")
         if current_type_ir:
@@ -1210,6 +1291,34 @@ class RelationsTicketWorkflow:
                 extracted["type_ir"] = historical_type
         elif current_formation and triage.get("request_mode") == "new_request":
             extracted["type_ir"] = ""
+
+        if (
+            "habilitation" in self._normalize_search_text(extracted.get("formation_type") or "")
+            and re.search(r"\b(?:renouvel|expire|expiration|echeance|prendra fin)\w*\b", normalized_message)
+        ):
+            extracted["type_ir"] = "recyclage"
+            self._mark_verified_fields(triage, "type_ir")
+            levels = list(dict.fromkeys(
+                value.upper()
+                for value in re.findall(
+                    r"\b(?:H[012]V?|B[012]V?|BR|BC|BS|BE(?:\s+MANOEUVRE)?)\b",
+                    message,
+                    flags=re.IGNORECASE,
+                )
+            ))
+            if levels:
+                triage["habilitation_levels"] = levels
+            if set(levels) & {"H1V", "H2V", "B1V", "B2V", "BR", "BC"}:
+                triage["required_session_marker_groups"] = [
+                    ["pack 5", "pack5"],
+                    ["recyclage", "renouvellement", "elec3r", "nelecr"],
+                ]
+            expiry_context = self._extract_expiry_search_window(message)
+            if expiry_context:
+                extracted["start_date"] = expiry_context["start_date"]
+                extracted["end_date"] = expiry_context["end_date"]
+                triage["expiry_context"] = expiry_context
+                self._mark_verified_fields(triage, "start_date", "end_date")
 
         explicit_dates, _ = extract_dates(message)
         if "disponibil" not in normalized_message:
@@ -1258,8 +1367,56 @@ class RelationsTicketWorkflow:
             )
         ]
 
+    def _infer_signature_centre(self, value: str, excluded: set[str] | None = None) -> str:
+        normalized = self._normalize_search_text(value)
+        excluded = excluded or set()
+        signature_mappings = (
+            ("Bagnolet", ("bussy saint martin", "marne la vallee", "lagny sur marne", "77603", "77400")),
+            ("Venissieux", ("lyon", "venissieux")),
+        )
+        for centre, markers in signature_mappings:
+            if centre not in excluded and any(marker in normalized for marker in markers):
+                return centre
+        return ""
+
+    @staticmethod
+    def _mark_verified_fields(triage: dict[str, Any], *fields: str) -> None:
+        triage["history_verified_fields"] = list(dict.fromkeys([
+            *(triage.get("history_verified_fields") or []),
+            *fields,
+        ]))
+
+    def _extract_expiry_search_window(self, value: str) -> dict[str, Any] | None:
+        normalized = self._normalize_search_text(value)
+        month_names = "|".join(FRENCH_MONTHS)
+        match = re.search(
+            rf"\b(?:expire\w*|expiration|echeance|prendra fin|fin)\b.{{0,40}}"
+            rf"\b(?:en\s+)?({month_names})\s+(20\d{{2}})\b",
+            normalized,
+        )
+        if not match:
+            return None
+        expiry_month = FRENCH_MONTHS[match.group(1)]
+        expiry_year = int(match.group(2))
+        first_expiry_day = datetime(expiry_year, expiry_month, 1).date()
+        end_date = first_expiry_day - timedelta(days=1)
+        today = datetime.now(ZoneInfo("Europe/Paris")).date()
+        days_until_monday = (7 - today.weekday()) % 7
+        start_date = today + timedelta(days=days_until_monday)
+        if start_date > end_date:
+            return None
+        return {
+            "expiry_month": expiry_month,
+            "expiry_year": expiry_year,
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "deadline_policy": "before_expiry_month",
+        }
+
     def _extract_candidate_count(self, value: str) -> int | None:
         normalized = self._normalize_search_text(value)
+        if re.search(r"\b(?:un|une|1)\s+(?:de\s+(?:nos|vos|leurs)\s+)?agents?\b", normalized):
+            return 1
         word_to_number = {
             word: number
             for number, words in NUMBER_WORDS.items()
@@ -1269,7 +1426,8 @@ class RelationsTicketWorkflow:
         match = re.search(
             rf"\b(?P<number>\d{{1,3}}|{number_pattern})\s+"
             r"(?:candidat|candidats|stagiaire|stagiaires|participant|participants|"
-            r"personne|personnes|interimaire|interimaires|salarie|salaries|collaborateur|collaborateurs)\b",
+            r"personne|personnes|interimaire|interimaires|salarie|salaries|collaborateur|collaborateurs|"
+            r"agent|agents)\b",
             normalized,
         )
         if not match:
@@ -1762,6 +1920,58 @@ class RelationsTicketWorkflow:
             "financement": extracted.get("financement") or "B2B",
         }
         return {key: value for key, value in payload.items() if value not in (None, "", [])}
+
+    def _filter_planbot_session_compatibility(
+        self,
+        triage: dict[str, Any],
+        result: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        marker_groups = triage.get("required_session_marker_groups") or []
+        if not marker_groups or not isinstance(result, dict):
+            return result
+        filtered = deepcopy(result)
+
+        def slot_matches(slot: dict[str, Any]) -> bool:
+            label = self._normalize_search_text(str(slot.get("session_label") or ""))
+            return bool(label) and all(
+                any(self._normalize_search_text(marker) in label for marker in group)
+                for group in marker_groups
+            )
+
+        def filter_node(node: dict[str, Any]) -> None:
+            if isinstance(node.get("jours"), list):
+                compatible_days = []
+                for day in node.get("jours") or []:
+                    if not isinstance(day, dict):
+                        continue
+                    safe_day = dict(day)
+                    for key in ("formation_theorie", "formation_pratique", "test_theorie", "test_pratique"):
+                        safe_day[key] = [
+                            slot for slot in day.get(key) or []
+                            if isinstance(slot, dict) and slot_matches(slot)
+                        ]
+                    if any(safe_day.get(key) for key in ("formation_theorie", "formation_pratique", "test_theorie", "test_pratique")):
+                        safe_day["verdict"] = "dispo"
+                        compatible_days.append(safe_day)
+                node["jours"] = compatible_days
+                node["coverage_complete"] = bool(compatible_days)
+                node["verdict"] = "dispo_compatible" if compatible_days else "aucune_session_compatible"
+
+            for key in ("semaines", "centres"):
+                for item in node.get(key) or []:
+                    if not isinstance(item, dict):
+                        continue
+                    filter_node(item)
+                    item["dispo_reelle"] = bool(item.get("jours") or item.get("options"))
+
+            for key in ("direct", "alternative_dates", "alternative_centres", "same_centre"):
+                child = node.get(key)
+                if isinstance(child, dict):
+                    filter_node(child)
+
+        filter_node(filtered)
+        filtered["session_filter_applied"] = True
+        return filtered
 
     @staticmethod
     def _planbot_has_available_options(result: dict[str, Any] | None) -> bool:

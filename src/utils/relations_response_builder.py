@@ -77,6 +77,8 @@ def build_relations_response(
             missing_fields,
             planbot_result,
             str(triage.get("session_operation") or ""),
+            str(triage.get("centre_source") or ""),
+            triage.get("expiry_context") or {},
         ))
     elif intent == "ANNULATION_REPORT_ABSENCE":
         lines.extend(_paragraph(
@@ -228,6 +230,8 @@ def _build_training_request_section(
     missing_fields: list[str],
     planbot_result: dict[str, Any] | None,
     session_operation: str = "",
+    centre_source: str = "",
+    expiry_context: dict[str, Any] | None = None,
 ) -> list[str]:
     lines = []
     recap = _request_recap(extracted)
@@ -236,6 +240,27 @@ def _build_training_request_section(
         for item in recap:
             lines.append(f"- {escape(item)}<br>")
         lines.append("<br>")
+
+    if extracted.get("centre") and centre_source in {"crm_account", "signature_address"}:
+        if centre_source == "crm_account":
+            lines.extend(_paragraph(
+                f"Nous avons cible le centre de {extracted['centre']}, rattache a votre compte et a votre zone geographique."
+            ))
+        else:
+            lines.extend(_paragraph(
+                f"Nous avons cible le centre de {extracted['centre']}, le plus proche de l'adresse communiquee."
+            ))
+    if expiry_context:
+        month = int(expiry_context.get("expiry_month") or 0)
+        year = expiry_context.get("expiry_year")
+        month_label = next((name for name, number in {
+            "janvier": 1, "fevrier": 2, "mars": 3, "avril": 4, "mai": 5, "juin": 6,
+            "juillet": 7, "aout": 8, "septembre": 9, "octobre": 10, "novembre": 11, "decembre": 12,
+        }.items() if number == month), "")
+        if month_label and year:
+            lines.extend(_paragraph(
+                f"La recherche est limitee aux sessions se terminant avant {month_label} {year}, afin d'anticiper l'echeance de l'habilitation."
+            ))
 
     if missing_fields:
         lead_by_intent = {
@@ -308,6 +333,11 @@ def _build_training_request_section(
                     "La disponibilite de la session n'a pas pu etre confirmee automatiquement. "
                     "Une verification humaine reste necessaire avant toute modification.<br><br>"
                 )
+        elif expiry_context:
+            lines.append(
+                "Aucune session compatible avec les habilitations demandees n'a pu etre identifiee "
+                "automatiquement avant l'echeance. Une verification du planning reste necessaire.<br><br>"
+            )
         elif intent == "DEMANDE_DEVIS_FORMATION":
             if recap:
                 lines.append("Votre demande de devis a bien ete recue. Aucun montant n'est confirme a ce stade.<br><br>")
@@ -508,7 +538,28 @@ def _format_sequence_options(options: list[dict[str, Any]]) -> list[str]:
 
 def _format_days(days: list[dict[str, Any]], prefix: str) -> list[str]:
     lines = []
-    for day in days[:6]:
+    ranked_days = []
+    for day in days:
+        if not isinstance(day, dict):
+            continue
+        slots = [
+            slot
+            for key in ("formation_theorie", "formation_pratique", "test_theorie", "test_pratique")
+            for slot in (day.get(key) or [])
+            if isinstance(slot, dict)
+        ]
+        existing_candidates = max(
+            (int(slot.get("existing_candidates") or 0) for slot in slots),
+            default=0,
+        )
+        places_remaining = max(
+            (int(slot.get("places_restantes") or 0) for slot in slots),
+            default=0,
+        )
+        ranked_days.append((existing_candidates, places_remaining, day))
+    ranked_days.sort(key=lambda item: (-int(item[0] > 0), -item[0], str(item[2].get("date") or "")))
+
+    for existing_candidates, places_remaining, day in ranked_days[:6]:
         if not isinstance(day, dict):
             continue
         date = _format_date(day.get("date") or "")
@@ -523,7 +574,21 @@ def _format_days(days: list[dict[str, Any]], prefix: str) -> list[str]:
             if day.get(key):
                 available_parts.append(label)
         if date and available_parts:
-            lines.append(f"- {escape(prefix)} : {escape(str(jour))} {escape(date)} ({escape(', '.join(available_parts))})<br>")
+            if existing_candidates > 0:
+                details = (
+                    f"{existing_candidates} participant{'s' if existing_candidates > 1 else ''} deja inscrit"
+                    f"{'s' if existing_candidates > 1 else ''}"
+                )
+                if places_remaining:
+                    details += f", {places_remaining} place{'s' if places_remaining > 1 else ''} restante{'s' if places_remaining > 1 else ''}"
+                lines.append(
+                    f"- Session a completer : {escape(str(jour))} {escape(date)} ({escape(details)})<br>"
+                )
+            else:
+                lines.append(
+                    f"- {escape(prefix)} : {escape(str(jour))} {escape(date)} "
+                    f"({escape(', '.join(available_parts))})<br>"
+                )
     return lines
 
 
