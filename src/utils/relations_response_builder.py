@@ -258,8 +258,13 @@ def _build_training_request_section(
             "juillet": 7, "aout": 8, "septembre": 9, "octobre": 10, "novembre": 11, "decembre": 12,
         }.items() if number == month), "")
         if month_label and year:
+            deadline_text = (
+                f"avant fin {month_label} {year}"
+                if expiry_context.get("deadline_policy") == "within_expiry_month"
+                else f"avant {month_label} {year}"
+            )
             lines.extend(_paragraph(
-                f"La recherche est limitee aux sessions se terminant avant {month_label} {year}, afin d'anticiper l'echeance de l'habilitation."
+                f"La recherche est limitee aux sessions se terminant {deadline_text}, afin d'anticiper l'echeance de l'habilitation."
             ))
 
     if missing_fields:
@@ -321,7 +326,12 @@ def _build_training_request_section(
             lines.append("Merci de nous confirmer la session que vous souhaitez retenir afin que nous puissions finaliser le dossier.<br>")
         lines.append("<br>")
     else:
-        if session_operation in {"availability_check", "reschedule", "revert_original", "select_session"}:
+        if expiry_context:
+            lines.append(
+                "Aucune session compatible avec les habilitations demandees n'a pu etre identifiee "
+                "automatiquement avant l'echeance. Une verification du planning reste necessaire.<br><br>"
+            )
+        elif session_operation in {"availability_check", "reschedule", "revert_original", "select_session"}:
             status = str((planbot_result or {}).get("status") or "").lower()
             if planbot_result and status == "ok":
                 lines.append(
@@ -333,11 +343,6 @@ def _build_training_request_section(
                     "La disponibilite de la session n'a pas pu etre confirmee automatiquement. "
                     "Une verification humaine reste necessaire avant toute modification.<br><br>"
                 )
-        elif expiry_context:
-            lines.append(
-                "Aucune session compatible avec les habilitations demandees n'a pu etre identifiee "
-                "automatiquement avant l'echeance. Une verification du planning reste necessaire.<br><br>"
-            )
         elif intent == "DEMANDE_DEVIS_FORMATION":
             if recap:
                 lines.append("Votre demande de devis a bien ete recue. Aucun montant n'est confirme a ce stade.<br><br>")

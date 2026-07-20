@@ -126,7 +126,8 @@ def detect_session_operation(message: str) -> str:
 
     selection_signal = re.search(
         r"\b(?:c est|ce sera|ok|d accord|je confirme|nous confirmons|je retiens|nous retenons|"
-        r"je choisis|nous choisissons|on part|partons|maintenir|gard(?:er|ons))\b",
+        r"je choisis|nous choisissons|on part|partons|maintenir|gard(?:er|ons)|"
+        r"bloquer(?:\s+une\s+place)?|reserver(?:\s+une\s+place)?)\b",
         text,
     )
     date_or_option = bool(
@@ -509,7 +510,7 @@ def _extract_date_mentions(text: str, reference: date) -> list[dict[str, Any]]:
         (
             re.compile(
                 r"\b(?P<d1>\d{1,2})[/-](?P<m1>\d{1,2})(?:[/-](?P<y1>\d{2,4}))?\s*"
-                r"(?:au|a|jusqu au|-)\s*(?P<d2>\d{1,2})[/-](?P<m2>\d{1,2})(?:[/-](?P<y2>\d{2,4}))?\b"
+                r"(?:au|a|et|jusqu au|-)\s*(?P<d2>\d{1,2})[/-](?P<m2>\d{1,2})(?:[/-](?P<y2>\d{2,4}))?\b"
             ),
             "numeric_range",
         ),
@@ -1099,10 +1100,12 @@ def _message_selects_session(text: str, role: str) -> bool:
 
 def _extract_ordinal(text: str) -> int | None:
     normalized = _normalize(text)
+    if not re.search(r"\b(?:option|proposition|creneau|session)\b", normalized):
+        return None
     for value, words in enumerate((
-        ("premiere", "premier", "1ere", "1er"),
-        ("deuxieme", "seconde", "second", "2eme"),
-        ("troisieme", "3eme"),
+        ("premiere", "premier"),
+        ("deuxieme", "seconde", "second"),
+        ("troisieme",),
     )):
         if any(re.search(rf"\b{re.escape(word)}\b", normalized) for word in words):
             return value

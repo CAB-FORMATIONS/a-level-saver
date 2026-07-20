@@ -2208,6 +2208,7 @@ def test_habilitation_session_filter_rejects_wrong_pack_and_prioritizes_loaded_s
             ['pack 5', 'pack5'],
             ['recyclage', 'renouvellement'],
         ],
+        'expiry_context': {'end_date': '2026-10-31'},
     }
     result = {
         'status': 'ok',
@@ -2230,6 +2231,15 @@ def test_habilitation_session_filter_rejects_wrong_pack_and_prioritizes_loaded_s
                     'session_label': 'HE PACK 5 - recyclage',
                     'existing_candidates': 5,
                     'places_restantes': 7,
+                }],
+            },
+            {
+                'date': '2026-11-02',
+                'jour': 'lundi',
+                'formation_pratique': [{
+                    'session_label': 'HE PACK 5 - recyclage',
+                    'existing_candidates': 8,
+                    'places_restantes': 4,
                 }],
             },
         ],
@@ -2296,4 +2306,76 @@ def test_expiring_habilitation_workflow_proposes_loaded_compatible_session():
     assert 'Session a completer : lundi 14/09/2026' in result['draft_content']
     assert '4 participants deja inscrits' in result['draft_content']
     assert 'PACK 2' not in result['draft_content']
+    assert result['validation']['valid'] is True
+
+
+def test_habilitation_followup_checks_selected_october_session():
+    workflow = workflow_without_clients()
+    threads = [
+        inbound_thread(
+            id='initial-request',
+            createdTime='2026-07-17T09:58:33.000Z',
+            plainText=EXPIRING_HABILITATION_MESSAGE,
+            attachmentCount='0',
+        ),
+        {
+            'id': 'cab-reply',
+            'direction': 'out',
+            'status': 'SUCCESS',
+            'createdTime': '2026-07-17T12:19:29.000Z',
+            'to': EXTERNAL_EMAIL,
+            'plainText': 'Voici le devis pour le recyclage de votre habilitation electrique.',
+        },
+        inbound_thread(
+            id='selected-session',
+            createdTime='2026-07-20T07:07:53.000Z',
+            plainText=(
+                'Pouvez-vous bloquer une place le 01/10 et 02/10/2026 pour M. ALPHA TESTEUR ? '
+                'Je fais signer le devis et etablis le bon de commande.'
+            ),
+            attachmentCount='1',
+        ),
+    ]
+    configure_process(workflow, threads)
+    workflow.crm_lookup.lookup_sender.return_value['account']['Centre'] = 'BAGNOLET (93)'
+    workflow.triage_agent.process.return_value = safe_triage(
+        intent='BON_DE_COMMANDE',
+        request_mode='follow_up',
+        extracted={'formation_type': 'Habilitation electrique'},
+        missing_fields=['centre'],
+    )
+    workflow.planbot_client.check_availability.side_effect = [
+        {'status': 'error', 'error': 'prevision_non_caces'},
+        {
+            'status': 'ok',
+            'formation': 'Habilitation electrique',
+            'coverage_complete': True,
+            'jours': [{
+                'date': '2026-10-01',
+                'jour': 'jeudi',
+                'formation_pratique': [{
+                    'session_label': 'HE PACK 5 - recyclage',
+                    'existing_candidates': 5,
+                    'places_restantes': 7,
+                }],
+            }],
+        },
+    ]
+
+    result = workflow.process_ticket('ticket-1', ignore_existing_draft=True)
+
+    assert result['session_context']['operation'] == 'select_session'
+    assert result['triage_result']['intent'] == 'DEMANDE_DISPONIBILITE_SESSION'
+    assert result['triage_result']['expiry_context']['deadline_policy'] == 'within_expiry_month'
+    assert result['planbot_action'] == 'prevision_planif'
+    assert workflow.planbot_client.check_availability.call_count == 2
+    direct_payload = workflow.planbot_client.check_availability.call_args_list[1].args[0]
+    assert direct_payload['centre'] == 'Bagnolet'
+    assert direct_payload['start_date'] == '2026-10-01'
+    assert direct_payload['end_date'] == '2026-10-02'
+    assert result['response_generation']['used_ai'] is False
+    assert result['response_generation']['fallback_reason'] == 'planbot_expiry_options'
+    assert 'Session a completer : jeudi 01/10/2026' in result['draft_content']
+    assert '5 participants deja inscrits' in result['draft_content']
+    assert 'avant fin octobre 2026' in result['draft_content']
     assert result['validation']['valid'] is True

@@ -353,7 +353,10 @@ class RelationsTicketWorkflow:
                 )
                 self._apply_session_context(triage, session_context)
                 validation_source = self._build_validation_source(message, conversation, session_context)
-                if not triage.get("history_context_applied"):
+                if (
+                    not triage.get("history_context_applied")
+                    or session_context.get("status") == "incomplete"
+                ):
                     self._prepare_planbot_search_context(triage, crm_context, message, conversation)
                 self._apply_training_defaults(triage)
                 self._sanitize_extracted_facts(
@@ -362,6 +365,30 @@ class RelationsTicketWorkflow:
                     date_source_text=validation_source,
                 )
                 self._enforce_planbot_missing_fields(triage, has_previous_cab="[CAB]" in conversation)
+                if (
+                    triage.get("history_context_applied")
+                    and session_context.get("status") == "incomplete"
+                    and not triage.get("missing_fields")
+                ):
+                    resolved_facts = {
+                        key: value
+                        for key, value in (triage.get("extracted") or {}).items()
+                        if value not in (None, "", [])
+                    }
+                    session_context.update({
+                        "status": "resolved",
+                        "reason": "Contexte de session complete par les donnees CRM et le message courant",
+                        "facts": resolved_facts,
+                        "missing_fields": [],
+                        "verified_fields": list(resolved_facts),
+                        "should_check_availability": True,
+                    })
+                    triage["session_context_status"] = "resolved"
+                    triage["session_context"] = {
+                        "status": "resolved",
+                        "reason": session_context["reason"],
+                        "facts": resolved_facts,
+                    }
             result["session_context"] = session_context
             result["triage_result"] = triage
 
@@ -1294,15 +1321,19 @@ class RelationsTicketWorkflow:
 
         if (
             "habilitation" in self._normalize_search_text(extracted.get("formation_type") or "")
-            and re.search(r"\b(?:renouvel|expire|expiration|echeance|prendra fin)\w*\b", normalized_message)
+            and re.search(
+                r"\b(?:renouvel|expire|expiration|echeance|prendra fin|recyclage)\w*\b",
+                self._normalize_search_text(f"{message}\n{conversation}"),
+            )
         ):
             extracted["type_ir"] = "recyclage"
             self._mark_verified_fields(triage, "type_ir")
+            habilitation_source = f"{message}\n{conversation}"
             levels = list(dict.fromkeys(
                 value.upper()
                 for value in re.findall(
                     r"\b(?:H[012]V?|B[012]V?|BR|BC|BS|BE(?:\s+MANOEUVRE)?)\b",
-                    message,
+                    habilitation_source,
                     flags=re.IGNORECASE,
                 )
             ))
@@ -1313,10 +1344,18 @@ class RelationsTicketWorkflow:
                     ["pack 5", "pack5"],
                     ["recyclage", "renouvellement", "elec3r", "nelecr"],
                 ]
-            expiry_context = self._extract_expiry_search_window(message)
+            expiry_context = self._extract_expiry_search_window(habilitation_source)
             if expiry_context:
-                extracted["start_date"] = expiry_context["start_date"]
-                extracted["end_date"] = expiry_context["end_date"]
+                current_start = self._parse_iso_date(extracted.get("start_date"))
+                if current_start and current_start.month == expiry_context["expiry_month"]:
+                    month = expiry_context["expiry_month"]
+                    year = expiry_context["expiry_year"]
+                    next_month = datetime(year + int(month == 12), 1 if month == 12 else month + 1, 1).date()
+                    expiry_context["end_date"] = (next_month - timedelta(days=1)).isoformat()
+                    expiry_context["deadline_policy"] = "within_expiry_month"
+                elif not extracted.get("start_date") or not extracted.get("end_date"):
+                    extracted["start_date"] = expiry_context["start_date"]
+                    extracted["end_date"] = expiry_context["end_date"]
                 triage["expiry_context"] = expiry_context
                 self._mark_verified_fields(triage, "start_date", "end_date")
 
@@ -1415,6 +1454,8 @@ class RelationsTicketWorkflow:
 
     def _extract_candidate_count(self, value: str) -> int | None:
         normalized = self._normalize_search_text(value)
+        if re.search(r"\b(?:bloquer|reserver)\s+une\s+place\b", normalized):
+            return 1
         if re.search(r"\b(?:un|une|1)\s+(?:de\s+(?:nos|vos|leurs)\s+)?agents?\b", normalized):
             return 1
         word_to_number = {
@@ -1435,6 +1476,13 @@ class RelationsTicketWorkflow:
         raw = match.group("number")
         count = int(raw) if raw.isdigit() else word_to_number.get(raw, 0)
         return count if 0 < count <= 500 else None
+
+    @staticmethod
+    def _parse_iso_date(value: Any):
+        try:
+            return datetime.strptime(str(value or "")[:10], "%Y-%m-%d").date()
+        except ValueError:
+            return None
 
     def _excluded_planbot_centres(self, value: str) -> set[str]:
         normalized = self._normalize_location(value)
@@ -1930,6 +1978,8 @@ class RelationsTicketWorkflow:
         if not marker_groups or not isinstance(result, dict):
             return result
         filtered = deepcopy(result)
+        expiry_context = triage.get("expiry_context") or {}
+        max_end_date = self._parse_iso_date(expiry_context.get("end_date"))
 
         def slot_matches(slot: dict[str, Any]) -> bool:
             label = self._normalize_search_text(str(slot.get("session_label") or ""))
@@ -1943,6 +1993,9 @@ class RelationsTicketWorkflow:
                 compatible_days = []
                 for day in node.get("jours") or []:
                     if not isinstance(day, dict):
+                        continue
+                    day_date = self._parse_iso_date(day.get("date"))
+                    if max_end_date and day_date and day_date > max_end_date:
                         continue
                     safe_day = dict(day)
                     for key in ("formation_theorie", "formation_pratique", "test_theorie", "test_pratique"):
@@ -1962,6 +2015,12 @@ class RelationsTicketWorkflow:
                     if not isinstance(item, dict):
                         continue
                     filter_node(item)
+                    if max_end_date and isinstance(item.get("options"), list):
+                        item["options"] = [
+                            option for option in item.get("options") or []
+                            if not self._parse_iso_date(option.get("end"))
+                            or self._parse_iso_date(option.get("end")) <= max_end_date
+                        ]
                     item["dispo_reelle"] = bool(item.get("jours") or item.get("options"))
 
             for key in ("direct", "alternative_dates", "alternative_centres", "same_centre"):

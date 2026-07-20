@@ -440,3 +440,31 @@ def test_revert_does_not_inherit_facts_from_later_formation_epoch():
     assert result["facts"].get("categories") in (None, [])
     assert "categories" in result["missing_fields"]
     assert result["should_check_availability"] is False
+
+
+def test_block_place_with_two_dates_is_an_exact_session_selection():
+    history = [
+        entry(
+            "initial",
+            1,
+            "CLIENT",
+            "Un agent doit renouveler son habilitation electrique en octobre 2026.",
+        ),
+        entry(
+            "current",
+            2,
+            "CLIENT",
+            "Pouvez-vous bloquer une place le 01/10 et 02/10/2026 pour M. ALPHA TESTEUR ? "
+            "Vous trouverez sa derniere habilitation en piece jointe.",
+            "2026-07-20T07:07:53+02:00",
+        ),
+    ]
+
+    result = reconstruct_session_context(history, "current", CENTRES)
+
+    assert result["operation"] == "select_session"
+    assert result["facts"]["formation_type"] == "Habilitation electrique"
+    assert result["facts"]["start_date"] == "2026-10-01"
+    assert result["facts"]["end_date"] == "2026-10-02"
+    assert result["status"] == "incomplete"
+    assert "centre" in result["missing_fields"]
